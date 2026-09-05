@@ -7,6 +7,37 @@
 
 ## 2026-09-05
 
+### 光栅化器缺陷修复（TASK-002，已完成）
+
+commit `73122d3`，`--no-ff` 合入 `develop`。
+
+| 变更 | 影响范围 |
+|---|---|
+| **修复** `rasterizer_fast.h` 深度插值的重心权重错位（同序映射 → 错位映射），标量版 + SSE2 版共 6 处 | `src/raster/rasterizer_fast.h` |
+| **修复** `setupEdges` 不做符号归一化导致顺时针三角形被静默丢弃 | `src/raster/rasterizer_fast.h` |
+| 改写文件头注释，标注本模块为**实验性**（未接入 `Renderer` 主链路）及两个原因 | `src/raster/rasterizer_fast.h` |
+| **新增 3 个回归测试**，单元测试 94 → 97 | `tests/test_core.cpp` |
+| 校正 `docs/engineering/54` 全部五节数据漂移，新增「实验性能力」分区 | 文档 |
+
+**修复前实测误差**：
+
+| 采样点 | 期望深度 | 实际深度 | 误差 |
+|---|---|---|---|
+| 靠近 v0（w0=0.865） | 0.17917 | 0.50417 | **0.325** |
+| 靠近 v1 | 0.49583 | 0.82083 | **0.325** |
+| 靠近 v2 | 0.82083 | 0.19583 | **0.625** |
+| 顺时针绕序 | 与逆时针一致 | `fb` 全黑、`zb` 恒为 `1e9` | **三角形完全丢弃** |
+
+**为何长期未被发现**：原有两个 `RasterizerFast` 用例传入的深度全为
+`0.5f / 0.5f / 0.5f`。顶点深度全相等时任何权重排列都算出同一个值，
+缺陷被 100% 掩盖。已据此在 `engineering_rules.md` 新增红线：
+「禁止用三个顶点取值全相同的数据写插值类测试」。
+
+**公共接口影响**：无。`fillTriangleFast` / `fillTriangleIncremental` / `fillTriangleSSE2`
+签名未变，仅修正内部计算与新增绕序容错。
+
+---
+
 ### 工程基线建设（TASK-001）
 
 | 变更 | 影响范围 |
@@ -51,7 +82,7 @@
 
 | 欠债 | 说明 | 跟进 |
 |---|---|---|
-| 全局命名空间污染 | 约 30 个头文件的核心类型位于全局命名空间，`Position`/`Light`/`Texture` 等名字对下游集成方构成冲突风险 | TASK-007 |
+| 全局命名空间污染 | **60 个**顶层类型位于全局命名空间（分布在 30 个头文件），`Position`/`Light`/`Texture` 等名字对下游集成方构成冲突风险 | TASK-007 |
 | `docs/api.md` / `docs/class_reference.md` 缺失 | 公共接口目前只能从 `docs/modules.md` 与各头文件注释获取 | TASK-001 后续 |
 | 第三方版本未完全锁定 | googletest 为 main 分支快照；tinygltf / tinyobjloader 未锁定修订号 | `third/README.md`「已知版本锁定缺口」 |
 | 无覆盖率度量 | `testing_rules.md` 要求核心模块行覆盖率 ≥ 80%，当前无任何覆盖率配置 | TASK-006 |

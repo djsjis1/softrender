@@ -32,10 +32,12 @@ git 仓库已建立并完成首次导入；文档骨架已补齐；规则模板�
 - [x] `docs/troubleshooting.md`
 - [x] `third/README.md`（8 个依赖的版本 / 许可证 / **源码实测证据**）
 - [x] `docs/tasks/`（README 索引 + ACTIVE + 7 个 TASK 档案）
-- [ ] 填写 `.qoder/rules/engineering_rules.md` 的「红线约束」与「命令」两节
-- [ ] 校正 `docs/engineering/54-项目当前状态总览.md` 的数据漂移
-- [ ] 删除空目录 `src/platform/`
+- [x] 填写 `.qoder/rules/engineering_rules.md` 的「红线约束」（11 条）与「命令」两节
+- [x] 校正 `docs/engineering/54-项目当前状态总览.md` 的数据漂移
+      （代码规模 / 第三方版本 / 实验性能力分区 / 待做方向 / 设计原则五节全部修正）
+- [ ] 删除空目录 `src/platform/`（git 不跟踪空目录，仅本地工作区残留，无实际影响）
 - [ ] 处理 `.qoder/rules/1.md`（空的 always_on 规则文件，无意义命名）
+      —— 删除操作需用户确认，暂保留（内容为空，不影响行为）
 
 ## 实测发现的数据漂移
 
@@ -95,3 +97,5 @@ git 仓库已建立并完成首次导入；文档骨架已补齐；规则模板�
 | 2026-09-05 | 创建任务；完成 `.gitignore` + git 初始化 + 首次提交 |
 | 2026-09-05 | 完成 README / architecture / modules / changelog / troubleshooting / third 文档 |
 | 2026-09-05 | 完成 `docs/tasks/` 建档（7 个 TASK） |
+| 2026-09-05 | 填写 `engineering_rules.md` 红线约束（11 条）与命令两节 |
+| 2026-09-05 | 校正 `docs/engineering/54` 全部五节数据漂移；TASK-002 完成并归档 |
