@@ -45,6 +45,12 @@ tests/
 
 测试文件命名：`<类名>_test.cpp`（如 `MotionController_test.cpp`）。
 
+> **SoftRenderer 现状**：单元测试仍集中在单个 `tests/test_core.cpp`
+> （1300+ 行 / 120 用例 / 33 套件），尚未按上述结构拆分；
+> `tests/integration/`（像素回归）与 `tests/golden/`（基准图）已建立。
+> 拆分计划见 `docs/tasks/TASK-006-测试目录重构与覆盖率.md`。
+> 拆分前后必须机械核对用例总数不变，不靠人工检查。
+
 依赖测试钩子的用例（验证 UI / 硬件 / 时序等不可自动化路径）与常规单测同目录、同命名；因其依赖钩子构建开关，必须在 `docs/test_hooks.md` 清单中登记对应关系（见下节）。
 
 ---
@@ -80,6 +86,43 @@ TEST(CommandQueueTest, undoBeyondDepth_keepsInitialState);
 命名必须表达「在什么输入下，期望什么行为」。
 
 禁止 `test1`、`testXxx` 等无意义命名。
+
+## SoftRenderer 项目例外：存量用例不批量重命名
+
+存量 120 个用例采用 `TEST(模块名, 场景描述)` 的 PascalCase 命名
+（如 `TEST(Vec, DotOrthogonal)`、`TEST(Shape2D, ClipRestrictsDrawing)`），
+不符合上述 `被测方法_场景_预期结果` 格式，但**不属于禁止的无意义命名**，
+可读性不低于规定格式。
+
+**决策：存量不批量重命名，新增用例强制用新格式。**
+
+理由：
+
+1. 批量重命名会改变 `gtest_discover_tests` 生成的 ctest 测试名，使 CI 历史
+   与像素回归基准失去可比性
+2. 属「低价值高扰动」改动，与 `engineering_rules.md`「最小变更：只做任务要求的
+   改动，禁止顺手修复、重构无关代码」相冲
+3. 新增用例已按新格式执行（如 `fillTriangleIncremental_slopeDepthMatchesBarycentric`、
+   `loadImage_missingFile_returnsFalse`、`compare_uniformSmallDrift_failsOnAvgDelta`），
+   新旧共存不会降低可读性
+
+依据：`.qoder/rules/README.md`「规则与现实冲突时，先修规则，再执行」。
+
+## SoftRenderer 项目例外：插值类测试的数据要求
+
+插值 / 混合 / 变换类用例的输入**必须让各顶点取值互不相等**。
+
+本项目已因此漏掉一个真实 bug：`rasterizer_fast.h` 的深度插值重心权重错位，
+被两个都传 `z0=z1=z2=0.5f` 的用例 100% 掩盖 —— 顶点取值全相等时，
+**任何权重排列都算出同一个值**，测试无法区分正确实现与错误实现。
+
+同理，采样点不得取对称盲点（如三角形几何重心，该处三个权重相等）。
+已录入 `engineering_rules.md` 红线约束。
+
+另：**一致性测试不能替代正确性测试**。`SSE2MatchesScalar` 在修复前就通过 ——
+因为标量版与 SSE2 版犯了同样的权重错位，两版彼此一致。正确性必须由
+**独立算出的期望值**验证（该用例用面积法另写了一份 `barycentricByArea`，
+刻意不复用被测代码的边函数）。
 
 ---
 
