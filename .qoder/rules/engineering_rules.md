@@ -59,13 +59,148 @@ AI 修改代码前必须先读目标文件的头注释，快速理解模块职�
 
 新增文件时必须编写头注释；修改已有文件时若头注释过时，必须同步更新。
 
-## 红线约束（目标项目在此填写）
+## 红线约束（SoftRenderer 项目级禁令）
 
-> 红线 = 具体的、不可触碰的项目级禁令。本节在目标项目中必须替换为真实红线，空白即视为未配置。示例格式见 README.md。
+> 每条针对一个**代价高昂且难以事后发现**的错误，而非抽象风格要求。
+> 触碰红线必须在代码注释中说明豁免理由，并在 `docs/changelog.md` 登记。
 
-## 命令（目标项目在此填写）
+### 平台隔离
 
-> 构建 / 测试 / 覆盖率 / 格式化 / 静态检查的具体命令由目标项目填写。命令缺失时先向用户确认，禁止猜测执行。示例格式见 README.md。
+* **禁止 `src/` 下任何文件 `#include <windows.h>`、`#include "platform/..."` 或引用 Win32 API**
+  平台隔离是本项目的核心卖点（`CMakeLists.txt` 第 72-79 行的分层注释已声明此意图）。
+  渲染器本体一旦沾上平台代码，「可作为纯头文件库跨平台集成」即告失效。
+  唯一例外：`src/raster/rasterizer_fast.h` 的 SSE2 intrinsics，已用
+  `#if defined(__SSE2__) || defined(_M_X64) || ...` 编译期探测并提供标量降级路径。
+  新增此类例外必须同样提供**非 x86 平台的降级实现**。
+
+### 坐标与数据契约
+
+* **禁止修改 `Framebuffer` 的坐标约定**（x 向右、y 向上、`(0,0)` 在左下角）
+  `framebuffer.h` 第 11-15 行注明「后面所有阶段都遵守」。`Renderer2D`、`tga` 写出、
+  `pixel_regression` 比对、全部 22 个示例都依赖此约定。改动会**静默翻转所有输出图像**——
+  不报错、不崩溃，只是图上下颠倒，极难定位。
+
+* **禁止修改 `Varyings`（`shader/shader.h`）已有字段的语义**
+  它是 `Renderer` 与全部 6 个内置着色器之间的公共契约。新增字段需同步修改
+  `interpolateVaryings`，否则该字段不会被透视校正插值（静默得到错误值）。
+
+* **禁止在多个 `.cpp` 中定义 `STB_IMAGE_IMPLEMENTATION` / `TINYGLTF_IMPLEMENTATION` 等
+  `*_IMPLEMENTATION` 宏**
+  本项目已把全部第三方实现收敛到单一静态库 `third_party_impl`
+  （`tiny_gltf_impl.cpp` + `tiny_obj_loader_impl.cpp` + `gltf_loader_impl.cpp`）。
+  重复定义会导致符号重定义链接错误，或在 ASAN 下报 `odr-violation`。
+
+### 光栅化热路径
+
+* **禁止在 `Renderer::rasterTriangle` 中放宽包围盒的 clamp**
+  内层循环用 `fb.row(y)` / `zbuf_.row(y)` **行指针直写**，绕过 `setPixel` /
+  `testAndSet` 的边界检查。安全性完全依赖包围盒预先 clamp 到
+  `[0, width-1] × [0, height-1]`（`renderer.h` 第 102-108 行）。
+  任何修改包围盒计算或行指针用法的改动，都必须重新确认 clamp 仍然生效，
+  否则会引入**越界写内存**。
+
+* **禁止 2D 图元绕过 `sr2d::plotBlend` 直接调用 `Framebuffer::setPixel`**
+  `plotBlend` 是 2D 子系统唯一的像素写入出口，统一处理边界裁剪、`BlendMode`
+  混合与 scissor。绕过它会让 scissor 裁剪与混合模式**静默失效**。
+
+### 命名空间
+
+* **禁止在全局命名空间新增顶层类型、枚举或自由函数**
+  本项目是 header-only 库，符号直接进入用户的编译单元。现存 60 个全局类型
+  已是待偿还的架构债（见 `docs/tasks/TASK-007`），`Position` / `Light` / `Texture` /
+  `Mesh` 这类通用名对下游集成方构成实际冲突风险。
+  新增符号必须放入 `namespace sr`（渲染核心）或 `namespace sr2d`（2D 子系统）。
+  历史教训：`sr2d` 命名空间的引入原因，正是 2D 图元名与 `examples/` 中的
+  全局同名符号发生了真实冲突。
+
+### 测试
+
+* **禁止新增自研测试框架**
+  统一使用 GoogleTest（`testing_rules.md` 明令「已有成熟开源方案，不得重复造轮子」）。
+  `src/test/test_framework.h` 是待删除的历史违例（见 `docs/tasks/TASK-004`）。
+
+* **禁止用「三个顶点取值全相同」的数据写插值类测试**
+  本项目已因此漏掉一个真实 bug：`rasterizer_fast.h` 的深度插值重心权重错位，
+  被两个都传 `z0=z1=z2=0.5f` 的测试用例 100% 掩盖（见 `docs/tasks/TASK-002`）。
+  插值 / 混合 / 变换类测试的输入**必须让各顶点取值互不相等**，否则无法区分
+  正确实现与权重排列错误的实现。
+
+### 版本控制
+
+* **禁止提交 `build/`、`output/` 下的任何产物**（`output/.gitkeep` 除外）
+  `build/` 实测 590 MB；`output/` 全部为示例运行产物，可重新生成。
+  唯一允许入库的图像是 `tests/golden/*.tga`（像素回归基准图）与
+  `tests/fixtures/`（测试输入资产）。
+
+* **禁止提交 `.env`、密钥、个人配置**
+
+## 命令（SoftRenderer）
+
+> 全部命令在**仓库根目录**执行。示例程序以相对路径 `output/xxx` 写文件，
+> 从其他目录运行会静默失败。
+
+**配置与构建**
+
+```powershell
+# 配置（首次或 CMakeLists.txt 变更后）
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+# 全量构建（MSVC 多配置生成器必须带 --config）
+cmake --build build --config Release --parallel
+
+# 只构建单个目标
+cmake --build build --config Release --target unit_tests
+```
+
+**测试**
+
+```powershell
+# 全量测试（并行；串行约 40 秒，并行约 2-3 秒）
+ctest --test-dir build --output-on-failure -j
+
+# 开发迭代时用这个：单进程跑完 94 个用例，约 30 毫秒
+.\build\bin\Release\unit_tests.exe
+
+# 只跑某个套件 / 用例
+.\build\bin\Release\unit_tests.exe --gtest_filter=RasterizerFast.*
+```
+
+> ⚠️ `ctest` 慢的原因：`gtest_discover_tests` 把每个用例注册为独立 ctest 项，
+> 94 用例 = 94 次进程启动，开销全在进程创建而非测试本身。
+> 详见 `docs/troubleshooting.md`。
+
+**运行示例**
+
+```powershell
+.\build\bin\Release\stage4_zbuffer.exe     # 离屏，写 output/*.tga
+.\build\bin\Release\demo_2d.exe            # 离屏，写 output/*.png + .tga
+.\build\bin\Release\stage8_realtime.exe    # 实时窗口，仅 Windows
+```
+
+**格式化与静态检查**
+
+```powershell
+# 需先安装 LLVM 工具链（当前环境未安装，见 docs/tasks/TASK-005）
+clang-format -i <files>          # 配置见根目录 .clang-format
+clang-tidy <files>               # 配置见根目录 .clang-tidy（待建立）
+```
+
+> `.clang-format` 已存在但**从未被执行过**：实测 19 个 `src/` 头文件的 namespace 体
+> 缩进 4 空格，违反配置第 92 行的 `NamespaceIndentation: None`。
+> 全仓格式化必须排在所有功能性修改之后、单独一个 commit 执行，
+> 并配合 `.git-blame-ignore-revs`。详见 `docs/tasks/TASK-005`。
+
+**覆盖率**
+
+当前**未配置**。`testing_rules.md` 要求核心模块行覆盖率 ≥ 80%、分支 ≥ 60%，
+接入方案见 `docs/tasks/TASK-006`。
+
+**DoD 最小验证集**（宣称完成前必须全部通过）
+
+```powershell
+cmake --build build --config Release --parallel   # 零错误
+.\build\bin\Release\unit_tests.exe                # 94 用例全绿
+```
 
 ---
 
