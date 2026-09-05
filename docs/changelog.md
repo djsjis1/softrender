@@ -7,6 +7,87 @@
 
 ## 2026-09-05
 
+### 构建系统现代化（TASK-005 第一、二节，已完成）
+
+#### target-based 改造
+
+消除 `cpp_project_rules.md`「构建系统规范」明令禁止的全局指令：
+
+| 变更 | 影响范围 |
+|---|---|
+| 删除 **6 处** `include_directories()` | `CMakeLists.txt` |
+| 删除 `link_libraries(softrenderer)` | 同上 |
+| 删除 `add_compile_options(/utf-8 /W4)` 与两处 `add_compile_definitions` | 同上 |
+| 新增 `sr_add_example()` / `sr_add_realtime_example()` 函数，22 个示例改为调用 | 同上 |
+| 新增 `sr_dev_flags` INTERFACE 库（项目内部开发标志，**不导出**） | 同上 |
+| 删除 3 处冗余的 `target_link_libraries(... third_party_impl)` | 同上 |
+
+**关键发现**：那 6 处 `include_directories()` 与 `softrenderer` 的 INTERFACE include、
+`third_party_impl` 的 PUBLIC include **完全重复** —— 所以是直接删除而非搬迁，
+语义零变化。改造后残留全局指令 **0 处**，`target_*` 调用 27 处。
+
+**「公共接口要求」与「开发偏好」的划分**：
+
+| 标志 | 位置 | 理由 |
+|---|---|---|
+| include 路径、`cxx_std_23`、`/utf-8`、`_CRT_SECURE_NO_WARNINGS` | `softrenderer` INTERFACE（导出） | 下游编译本项目头文件时真正必需 |
+| `/W4`、`-Wall -Wextra`、`NOMINMAX`、`WIN32_LEAN_AND_MEAN` | `sr_dev_flags`（**不导出**） | 本项目的开发偏好，不应强加给集成方 |
+
+> `/utf-8` 与 `_CRT_SECURE_NO_WARNINGS` 属接口要求而非偏好：前者因为 `src/`
+> 头文件含大量中文注释（不开报 C4819）；后者因为 `core/tga.h` 在**头文件内**
+> 直接调 `std::fopen`，该调用在使用方的编译单元展开，MSVC 会在**使用方**报 C4996。
+>
+> 后者是个妥协（会抑制下游自己的 C4996），根治办法是把 `tga.h` 的 I/O
+> 改成不依赖弃用函数，已记为待办。
+
+#### Sanitizer
+
+新增 `option(SR_ENABLE_SANITIZERS ... OFF)`，满足「Debug 必开 ASAN/UBSAN、
+Release 禁止开启」的要求。此前项目**没有任何 Sanitizer 配置**，而 TASK-003 修的
+整数溢出 UB 与越界读正是 ASAN/UBSAN 能自动抓到的类型。
+
+三个关键设计选择：
+
+1. **用 `$<$<CONFIG:Debug>:...>` 而非 `if(CMAKE_BUILD_TYPE STREQUAL "Debug")`**：
+   MSVC 是多配置生成器，`CMAKE_BUILD_TYPE` 为空，一次配置产出两套产物。
+   只有生成器表达式能把标志精确限定到 Debug。
+2. **用全局 `add_compile_options` 而非 per-target**：Sanitizer 是 **ABI 级**设置。
+   实测证据：只加到项目目标上时，googletest（`add_subdirectory` 引入）未开 ASAN，
+   链接报 **LNK2038** `annotate_string` / `annotate_vector` 不匹配 + LNK1319。
+3. **整个块移到所有 `add_subdirectory` 之前**：`add_compile_options` 改目录属性，
+   只对其后的目标与子目录生效；`third/log`（spdlog）在第 19 行就引入了。
+
+第 2、3 点是 `engineering_rules.md`「禁止全局指令」的**有意例外**，
+例外理由已写在 `CMakeLists.txt` 对应位置的注释里。
+
+**实测验证**：
+
+| 验证项 | 结果 |
+|---|---|
+| Debug 构建（ASAN） | 零错误（LNK2038 已消除） |
+| Debug 运行 | **118 passed / 2 skipped / 0 failed**，**无 AddressSanitizer 报错** |
+| 2 个 skipped | 正是两个越界测试（Debug 下 `assert` 生效→`GTEST_SKIP()`），与 TASK-003 设计一致 |
+| **Release 是否带 Sanitizer** | Debug exe 5,087,744 B / 导入 ASAN DLL = **True**；Release exe 847,360 B / = **False** |
+| 改造后 Release 全量构建 | 零错误零警告，**25 个 exe 与基线逐项一致** |
+| 改造后测试 | 121 项 ctest 全绿 / 12.48 秒；120 单元 + 3 回归全绿 |
+| 20 个离屏示例 | 全部正常退出 |
+
+最后两行是本节的关键验收：体积相差 6 倍且只有 Debug 导入 ASAN 运行时，
+机械化地证明了「Release 禁止开启 Sanitizer」而不是靠假设。
+
+**阻塞项**：第三节（`/WX` + `.clang-tidy`）与第四节（全仓 clang-format）需先安装
+LLVM 工具链（实测 `clang-format` / `clang-tidy` 均未安装），本次未做。
+
+#### 文档同步
+
+- `docs/troubleshooting.md`：新增两个 Sanitizer 坑——退出码 `0xC0000135`
+  （ASAN 运行时 DLL 不在 PATH）与 LNK2038（ABI 不一致）
+- `engineering_rules.md`「命令」节：更新为 120 用例 / `-LE fast` / `-L regression` /
+  `-L fast` 四种跑法，新增 Sanitizer 命令段，DoD 最小验证集补上 `render_regression`
+  与「CMakeLists 改动需比对 25 个 exe 基线」
+
+---
+
 ### CI 跨平台修复与像素回归接线（TASK-004，代码完成）
 
 单元测试 113 → **120**；新增集成回归目标 `render_regression`（3 个场景）；

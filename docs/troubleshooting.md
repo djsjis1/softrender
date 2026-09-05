@@ -95,6 +95,51 @@ ctest --test-dir build --output-on-failure -j
 
 ## Sanitizer
 
+### 现象：开启 Sanitizer 后 Debug 程序一启动就退出，退出码 `-1073741515`
+
+**原因**：`0xC0000135` = `STATUS_DLL_NOT_FOUND`。MSVC 的 ASAN 默认用**动态运行时**，
+可执行文件会导入 `clang_rt.asan_dbg_dynamic-x86_64.dll`（Debug）或
+`clang_rt.asan_dynamic-x86_64.dll`（Release）。该 DLL 在 VC Tools 目录下，
+只有从 **Developer Command Prompt** 启动时它才在 PATH 上；
+从普通 PowerShell / cmd 运行就找不到。
+
+**解决**：把 VC Tools 的 `bin\Hostx64\x64` 目录加进 PATH（版本号按本机实际调整）：
+
+```powershell
+$env:PATH = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64;" + $env:PATH
+$env:ASAN_OPTIONS = "detect_leaks=0"   # 可选：关掉泄漏检测，只留内存错误检测
+.\build\asan\bin\Debug\unit_tests.exe
+```
+
+或直接使用开始菜单里的「x64 Native Tools Command Prompt for VS 2022」。
+
+**如何确认 ASAN 真的链上了**：比对两个配置的体积与导入表——
+
+| 配置 | 实测体积 | 导入 ASAN DLL |
+|---|---|---|
+| Debug（`SR_ENABLE_SANITIZERS=ON`） | 5,087,744 B | ✅ True |
+| Release（同一配置目录） | 847,360 B | ❌ False |
+
+体积相差 6 倍、且只有 Debug 导入 ASAN 运行时，说明
+`$<$<CONFIG:Debug>:/fsanitize=address>` 生成器表达式生效，
+符合 `cpp_project_rules.md`「Release 禁止开启 Sanitizer」。
+
+### 现象：开 Sanitizer 后链接报 `LNK2038: 检测到 "annotate_string" 的不匹配项`
+
+**原因**：Sanitizer 是 **ABI 级**设置，同一次链接里的所有目标必须一致。
+MSVC ASAN 会给 STL 容器加注解（`annotate_string` / `annotate_vector`），
+一侧开了另一侧没开就会报 LNK2038 + LNK1319。
+
+典型触发方式：把 `/fsanitize=address` 只加到项目自己的目标上（例如只放在
+`sr_dev_flags` INTERFACE 库里），而 `add_subdirectory` 引入的 googletest / spdlog
+没拿到该标志。
+
+**解决**：本项目已用全局 `add_compile_options` 处理，并把这个块放在
+**所有 `add_subdirectory` 之前**（`add_compile_options` 改的是目录属性，
+只对其后创建的目标与添加的子目录生效；`third/log` 在第 19 行就引入了）。
+这是 `engineering_rules.md`「禁止全局指令」的一个**有意例外**，
+理由已写在 `CMakeLists.txt` 对应位置的注释里。
+
 ### 现象：Windows 上开不了 UBSAN
 
 **原因**：MSVC 的 `/fsanitize=address` 只支持 AddressSanitizer，**不支持
