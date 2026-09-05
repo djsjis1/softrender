@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <entt/entt.hpp>
+#include <filesystem>
 
 #include "core/arena.h"
 #include "core/benchmark.h"
@@ -15,7 +16,10 @@
 #include "core/depthbuffer.h"
 #include "core/framebuffer.h"
 #include "core/gbuffer.h"
+#include "core/image_write.h"
+#include "core/log.h"
 #include "core/resource_manager.h"
+#include "core/tga.h"
 #include "math/mat3.h"
 #include "math/mat4.h"
 #include "math/quat.h"
@@ -353,6 +357,53 @@ TEST(DepthBuffer, OutOfBounds)
     EXPECT_FALSE(db.testAndSet(0, 4, 0.5f));
 }
 
+// get 的越界兜底。旧实现 get() 连 assert 都没有，直接下标访问，
+// 是三个访问器（testAndSet / row / get）中唯一完全无保护的。
+TEST(DepthBuffer, depthBuffer_get_outOfBounds_returnsFar)
+{
+#ifndef NDEBUG
+    GTEST_SKIP() << "越界哨兵仅在 Release（NDEBUG）下可测：Debug 下 assert 会先中止进程";
+#endif
+    DepthBuffer db(4, 4);
+    // 四个方向都要测：只测一侧会漏掉「x 检查误用了 height_」这类笔误
+    EXPECT_FLOAT_EQ(db.get(-1, 0), DepthBuffer::kFar);
+    EXPECT_FLOAT_EQ(db.get(4, 0), DepthBuffer::kFar);
+    EXPECT_FLOAT_EQ(db.get(0, -1), DepthBuffer::kFar);
+    EXPECT_FLOAT_EQ(db.get(0, 4), DepthBuffer::kFar);
+    // 合法位置仍返回真实值：确认兜底没有把正常路径也短路掉
+    db.testAndSet(1, 1, 0.25f);
+    EXPECT_FLOAT_EQ(db.get(1, 1), 0.25f);
+}
+
+// ==================== 帧缓冲边界 ====================
+
+// setPixel 早就有运行时边界检查（越界静默忽略），而 getPixel 只有 assert。
+// Release 下 assert 被编译掉，越界读就是 UB —— 这个不对称是本用例要锁住的契约。
+TEST(Framebuffer, framebuffer_getPixel_outOfBounds_returnsSentinel)
+{
+#ifndef NDEBUG
+    GTEST_SKIP() << "越界哨兵仅在 Release（NDEBUG）下可测：Debug 下 assert 会先中止进程";
+#endif
+    // 用一个非黑的填充色，这样「读到 colors::black 哨兵」与「读到真实像素」可区分
+    Framebuffer fb(4, 4, Color(10, 20, 30, 255));
+
+    EXPECT_EQ(fb.getPixel(-1, 0).r, 0);
+    EXPECT_EQ(fb.getPixel(4, 0).r, 0);
+    EXPECT_EQ(fb.getPixel(0, -1).r, 0);
+    EXPECT_EQ(fb.getPixel(0, 4).r, 0);
+    // 哨兵是 colors::black，其 a 通道为默认值 255（而非 0）
+    EXPECT_EQ(fb.getPixel(-1, -1).a, 255);
+
+    // 合法位置不受影响
+    EXPECT_EQ(fb.getPixel(0, 0).r, 10);
+    EXPECT_EQ(fb.getPixel(3, 3).b, 30);
+
+    // setPixel 越界仍是静默忽略，不得抛异常也不得写内存
+    fb.setPixel(-1, -1, Color(255, 255, 255));
+    fb.setPixel(4, 4, Color(255, 255, 255));
+    EXPECT_EQ(fb.getPixel(0, 0).r, 10);
+}
+
 // ==================== 纹理 ====================
 
 TEST(Texture, MipmapGenerated)
@@ -551,6 +602,196 @@ TEST(Blend, AdditiveClamps)
     Color r = blendPixels(src, dst, BlendMode::Additive);
     EXPECT_EQ(r.r, 255);  // 应 clamp 到 255
 }
+
+// toUint8Round 必须四舍五入而非截断，并双向钳制。
+// 旧实现四处都是 uint8_t(float)，直接截断小数 → 每次混合系统性偏暗最多 1/255，
+// 粒子 / 透明排序 / 2D 抗锯齿多层叠加后会累积出可见偏差。
+TEST(Blend, toUint8Round_roundsAndClamps)
+{
+    EXPECT_EQ(toUint8Round(0.0f), 0);
+    EXPECT_EQ(toUint8Round(0.4f), 0);
+    EXPECT_EQ(toUint8Round(0.5f), 1);  // 截断会给 0，这是两者可区分的最小用例
+    EXPECT_EQ(toUint8Round(0.6f), 1);
+    EXPECT_EQ(toUint8Round(254.4f), 254);
+    EXPECT_EQ(toUint8Round(254.9f), 255);
+    EXPECT_EQ(toUint8Round(255.0f), 255);
+
+    // 钳制上界：float → uint8_t 在值超出 [0,255] 时是 UB，
+    // 旧实现靠调用方逐个写 std::min，现在收敛到函数内部。
+    EXPECT_EQ(toUint8Round(255.4f), 255);
+    EXPECT_EQ(toUint8Round(300.0f), 255);
+    EXPECT_EQ(toUint8Round(1.0e9f), 255);
+    // 钳制下界：负值转无符号整型同样是 UB
+    EXPECT_EQ(toUint8Round(-0.4f), 0);
+    EXPECT_EQ(toUint8Round(-10.0f), 0);
+}
+
+// 构造一个「截断与四舍五入结果不同」的真实混合用例。
+// src.r=1, src.a=128 → sa = 128/255 = 0.50196，dst.r=0
+// → 1*0.50196 + 0*0.49804 = 0.50196：截断得 0，四舍五入得 1。
+TEST(Blend, blendPixels_alphaBlendRoundsInsteadOfTruncating)
+{
+    Color src(1, 1, 1, 128);
+    Color dst(0, 0, 0, 255);
+    Color r = blendPixels(src, dst, BlendMode::AlphaBlend);
+    EXPECT_EQ(r.r, 1);  // 旧的截断实现会得到 0
+    EXPECT_EQ(r.g, 1);
+    EXPECT_EQ(r.b, 1);
+}
+
+// 四种混合模式均不得因钳制缺失而回绕（旧实现 Additive / Premultiplied 可达 510）。
+TEST(Blend, blendPixels_allModesNeverWrapAround)
+{
+    const BlendMode modes[] = {BlendMode::Opaque, BlendMode::AlphaBlend, BlendMode::Additive,
+                               BlendMode::Multiply, BlendMode::Premultiplied};
+    const Color extreme[] = {Color(255, 255, 255, 255), Color(255, 255, 255, 255)};
+    for (BlendMode m : modes)
+    {
+        Color r = blendPixels(extreme[0], extreme[1], m);
+        EXPECT_EQ(r.r, 255) << "mode=" << static_cast<int>(m);
+        EXPECT_EQ(r.g, 255) << "mode=" << static_cast<int>(m);
+        EXPECT_EQ(r.b, 255) << "mode=" << static_cast<int>(m);
+    }
+}
+
+// ==================== 图像加载（外部输入校验） ====================
+
+// 图像文件属不可信外部输入，testing_rules.md「异常测试」要求覆盖「文件缺失」。
+// imageloader::loadImage 全仓零调用方，但它是 header-only 库的公共 API，
+// 下游用户会直接调，因此失败路径必须有测试锁定。
+TEST(ImageLoader, loadImage_missingFile_returnsFalse)
+{
+    tga::Image img;
+    EXPECT_FALSE(imageloader::loadImage("sr_definitely_not_here_12345.png", img));
+    // 失败时不得留下半初始化的输出（否则调用方会拿 width/height 去算偏移）
+    EXPECT_FALSE(img.valid());
+    EXPECT_TRUE(img.pixels.empty());
+}
+
+TEST(ImageLoader, loadImage_emptyPath_returnsFalse)
+{
+    tga::Image img;
+    EXPECT_FALSE(imageloader::loadImage("", img));
+    EXPECT_FALSE(img.valid());
+}
+
+// 写→读往返：同时验证 imagewriter 与 imageloader，以及两者共用的 y 向上约定。
+//
+// 为什么用系统临时目录而不提交 fixture：testing_rules.md 要求测试不得往仓库落盘；
+// output/ 是示例产物目录，测试写进去会与示例输出混淆。
+// 往返测试比静态 fixture 更强：它同时验证了 writeImage 的翻转与
+// stbi_set_flip_vertically_on_load 的反翻转是否真的抵消。
+TEST(ImageLoader, loadImage_roundTripPreservesPixelsAndOrientation)
+{
+    namespace fs = std::filesystem;
+    const fs::path tmp = fs::temp_directory_path() / "sr_imageloader_roundtrip.png";
+
+    // 4x3 非正方形，且只在两个对角置色：若 y 翻转出错，两个角会互换
+    Framebuffer fb(4, 3, Color(0, 0, 0, 255));
+    fb.setPixel(0, 0, Color(255, 0, 0, 255));  // 左下角红
+    fb.setPixel(3, 2, Color(0, 255, 0, 255));  // 右上角绿
+
+    if (!imagewriter::writeImage(tmp.string(), fb))
+    {
+        GTEST_SKIP() << "无法向系统临时目录写出 PNG（权限或路径问题），非被测代码缺陷";
+    }
+
+    tga::Image img;
+    ASSERT_TRUE(imageloader::loadImage(tmp.string(), img));
+    EXPECT_EQ(img.width, 4);
+    EXPECT_EQ(img.height, 3);
+    ASSERT_EQ(img.pixels.size(), size_t(12));
+
+    // y 向上约定必须在往返中保持：左下角仍是红、右上角仍是绿
+    EXPECT_EQ(img.at(0, 0).r, 255);
+    EXPECT_EQ(img.at(0, 0).g, 0);
+    EXPECT_EQ(img.at(3, 2).g, 255);
+    EXPECT_EQ(img.at(3, 2).r, 0);
+    // 中间像素应为黑
+    EXPECT_EQ(img.at(1, 1).r, 0);
+    EXPECT_EQ(img.at(1, 1).g, 0);
+
+    std::error_code ec;
+    fs::remove(tmp, ec);  // 清理；删除失败不影响测试结论
+}
+
+// ==================== 内置日志格式化 ====================
+
+// sr::formatLog 只在内置（非 spdlog）模式下存在。
+// 它被从 Log::log 里拆出来就是为了能这样直接断言，而不用捕获 stderr。
+#ifndef SR_USE_SPDLOG
+
+TEST(Log, formatLog_noArgs_returnsFormatString)
+{
+    EXPECT_EQ(sr::formatLog("no placeholder"), "no placeholder");
+    EXPECT_EQ(sr::formatLog(""), "");
+}
+
+TEST(Log, formatLog_substitutesBracesInOrder)
+{
+    EXPECT_EQ(sr::formatLog("a {} b", 42), "a 42 b");
+    EXPECT_EQ(sr::formatLog("{} + {} = {}", 1, 2, 3), "1 + 2 = 3");
+    EXPECT_EQ(sr::formatLog("{}x{}", 3, 4), "3x4");
+}
+
+// 关键回归：std::string 必须能直接传。
+// 旧实现用 C 可变参，传 std::string 是 UB（MSVC 报 C4840）。
+TEST(Log, formatLog_acceptsNonPodTypes)
+{
+    EXPECT_EQ(sr::formatLog("path '{}'", std::string("x.png")), "path 'x.png'");
+    EXPECT_EQ(sr::formatLog("{} and {}", std::string("a"), 7), "a and 7");
+}
+
+// 旧实现把格式串交给 vfprintf，而约定写的是 {}，所以占位符从不被替换。
+// 本用例锁定「参数不得静默丢失」这个行为。
+TEST(Log, formatLog_extraArgsAreAppendedNotDropped)
+{
+    EXPECT_EQ(sr::formatLog("only {}", 1, 2), "only 1 2");
+    EXPECT_EQ(sr::formatLog("none", 5), "none 5");
+}
+
+// 占位符多于参数时降级为保留字面量 {}，而非像 fmt 那样抛异常或崩溃。
+TEST(Log, formatLog_extraBracesAreKeptLiteral)
+{
+    EXPECT_EQ(sr::formatLog("{} and {}", 1), "1 and {}");
+    // 未匹配的 {} 在串中间与串尾都应原样保留
+    EXPECT_EQ(sr::formatLog("a {} b {} c", 1), "a 1 b {} c");
+    EXPECT_EQ(sr::formatLog("{}{}", 1), "1{}");
+}
+
+// 旧实现把格式串直接交给 vfprintf，文本里的字面 '%' 会被当转换符解析 → UB。
+// 现在消息经单个 %s 输出，字面 '%' 安全。
+TEST(Log, formatLog_literalPercentIsSafe)
+{
+    EXPECT_EQ(sr::formatLog("100% done"), "100% done");
+    EXPECT_EQ(sr::formatLog("100% {} ok", 1), "100% 1 ok");
+    EXPECT_EQ(sr::formatLog("%s %d %f 不应被解析", 1), "%s %d %f 不应被解析 1");
+}
+
+// 等级名映射：旧实现用常量数组且**漏了 Off**，传 Off 会越界读。
+TEST(Log, levelName_coversAllEnumValues)
+{
+    EXPECT_STREQ(sr::levelName(sr::LogLevel::Trace), "TRACE");
+    EXPECT_STREQ(sr::levelName(sr::LogLevel::Debug), "DEBUG");
+    EXPECT_STREQ(sr::levelName(sr::LogLevel::Info), "INFO ");
+    EXPECT_STREQ(sr::levelName(sr::LogLevel::Warn), "WARN ");
+    EXPECT_STREQ(sr::levelName(sr::LogLevel::Error), "ERROR");
+    EXPECT_STREQ(sr::levelName(sr::LogLevel::Critical), "CRIT ");
+    EXPECT_STREQ(sr::levelName(sr::LogLevel::Off), "OFF  ");
+    // 越界的枚举值不得崩溃（旧实现会数组越界）
+    EXPECT_STREQ(sr::levelName(static_cast<sr::LogLevel>(99)), "?????");
+}
+
+TEST(Log, setLevel_roundTrips)
+{
+    const sr::LogLevel saved = sr::Log::level();
+    sr::Log::setLevel(sr::LogLevel::Error);
+    EXPECT_EQ(sr::Log::level(), sr::LogLevel::Error);
+    sr::Log::setLevel(saved);  // 测试必须独立，不得泄露全局状态
+    EXPECT_EQ(sr::Log::level(), saved);
+}
+
+#endif // !SR_USE_SPDLOG
 
 // ==================== 快速光栅化器 ====================
 

@@ -26,7 +26,7 @@
 | 路径 | 说明 |
 |---|---|
 | `log/Logger.h`、`log/Logger.cpp`、`log/CMakeLists.txt`、`log/example.cpp` | **本项目自研**的 spdlog 轻量封装库（CMake 目标名 `mylog`），设计为可独立 `add_subdirectory` 复用。放在 `third/` 是因为它以「可复用子库」形态存在，而非本项目 `src/` 的一部分。 |
-| `tiny_obj_loader_impl.cpp`、`tinygltf/tiny_gltf_impl.cpp` | **本项目自研**的实现单元（`#define XXX_IMPLEMENTATION` 的单一 .cpp），用于把 header-only 库的符号收敛到一个静态库，避免多重定义。 |
+| `tiny_obj_loader_impl.cpp`、`tinygltf/tiny_gltf_impl.cpp` | **本项目自研**的实现单元（`#define XXX_IMPLEMENTATION` 的单一 .cpp），用于把 header-only 库的符号收敛到静态库，避免多重定义。⚠ `tiny_gltf_impl.cpp` 的文件名有误导性，它**不含 tinygltf**，详见下表 |
 
 ## 集成方式
 
@@ -34,14 +34,29 @@
 
 | CMake 目标 | 类型 | 内容 |
 |---|---|---|
-| `third_party_impl` | STATIC | `tinygltf/tiny_gltf_impl.cpp` + `tiny_obj_loader_impl.cpp` + `src/scene/gltf_loader_impl.cpp`，同时提供 stb / tinygltf / tinyobjloader 的全部符号 |
+| `third_party_impl` | STATIC | 下面三个实现单元，合起来提供 stb / tinygltf / tinyobjloader 的全部符号 |
 | `entt` | INTERFACE | 头文件搜索路径指向 `entt/src` |
 | `mylog` | STATIC | 由 `add_subdirectory(third/log)` 引入，仅在 `SR_ENABLE_SPDLOG=ON` 时存在 |
 
-> **为什么一个 .cpp 能提供 stb + tinygltf 全部符号**：tinygltf 内部会
-> `#define STB_IMAGE_IMPLEMENTATION` 并 include `stb_image.h`，因此
-> `tiny_gltf_impl.cpp` 编译后同时产出 stb_image 的实现。根 `CMakeLists.txt`
-> 第 22-24 行对此有说明。
+### 三个实现单元的真实分工
+
+stb / tinygltf / tinyobjloader 都靠「在**恰好一个** .cpp 里 `#define XXX_IMPLEMENTATION`」
+来产出符号：多处定义会符号重定义，一处不定义则链接报未解析符号。
+
+| 实现单元 | `#define` | 提供的符号 |
+|---|---|---|
+| `tinygltf/tiny_gltf_impl.cpp` | `STB_IMAGE_IMPLEMENTATION`、`STB_IMAGE_WRITE_IMPLEMENTATION` | **stb_image + stb_image_write** |
+| `../src/scene/gltf_loader_impl.cpp` | `TINYGLTF_IMPLEMENTATION` | **tinygltf** |
+| `tiny_obj_loader_impl.cpp` | `TINYOBJLOADER_IMPLEMENTATION` | **tinyobjloader** |
+
+> ⚠️ **文件名陷阱**：`tinygltf/tiny_gltf_impl.cpp` 位于 `tinygltf/` 目录、
+> 名字也叫 `tiny_gltf_impl`，但它**完全不含 tinygltf 的实现**，只提供 stb。
+> tinygltf 的实现在 `src/scene/gltf_loader_impl.cpp`。
+>
+> 本表由直接阅读三个 `.cpp` 源文件得出。**不要依赖文件名或旧注释推断**：
+> 根 `CMakeLists.txt` 原本的注释就声称「tinygltf 内部会 define
+> STB_IMAGE_IMPLEMENTATION，所以一个 .cpp 同时提供 stb + tinygltf 的所有符号」，
+> 与实际不符（已修正）。
 
 ## 已知版本锁定缺口
 

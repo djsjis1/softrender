@@ -7,6 +7,75 @@
 
 ## 2026-09-05
 
+### 外部输入校验与边界安全（TASK-003，已完成）
+
+单元测试 97 → **113**，全量构建**零错误零警告**（修前有 2 个 C4840），
+20 个离屏示例全部正常。
+
+#### 计划内修复
+
+| 变更 | 影响范围 |
+|---|---|
+| **修复** `image_loader.h` 有符号整数溢出 UB：`for (int i = 0; i < w * h; ++i)` → `size_t` | `src/scene/image_loader.h` |
+| 新增尺寸校验与具名常量 `kMaxImageDimension = 16384`；变量声明即初始化 | 同上 |
+| 新增 **RAII 释放**（`unique_ptr` + 自定义删除器）——新增的校验分支提前 return 会泄露图像缓冲 | 同上 |
+| **修复** `Framebuffer::getPixel` 在 Release 下越界读 UB：越界返回 `colors::black` | `src/core/framebuffer.h` |
+| **修复** `DepthBuffer::get` 越界读 UB（旧版连 `assert` 都没有）：返回 `kFar` | `src/core/depthbuffer.h` |
+| **修复** `blend.h` alpha 混合截断而非四舍五入（每次混合系统性偏暗 ≤ 1/255）；新增 `toUint8Round` 统一钳制+取整 | `src/core/blend.h` |
+| `blend.h` 补 `#include <algorithm>`（原依赖传递包含） | 同上 |
+| 5 个枚举合规：`ClipPlane` 裸 enum → `enum class : uint8_t`；`BlendMode`/`AlphaMode`/`Path`/`Interpolation`/`Filter` 补底层类型 | `clip.h`、`blend.h`、`gltf_types.h`、`texture.h` |
+| `clip.h` 新增 `static_assert` 防止 `kClipPlaneCount` 与枚举项数漂移 | `src/raster/clip.h` |
+
+#### 实施中新发现并修复
+
+| 变更 | 发现方式 |
+|---|---|
+| **`core/log.h` 内置模式重写为变参模板**，消除 4 个缺陷：① 非 POD 类型经 C 可变参传递是 UB；② `{}` 占位符**从不被替换**（格式串按 printf 解析）；③ 日志文本里的字面 `%` 被 `vfprintf` 当转换符解析 → UB；④ `levelName` 的常量数组**漏了 `Off`**（枚举 7 值 / 数组 6 项）→ 越界读 | 给 `image_loader.h` 加日志时构建报出 2 个 **C4840** |
+| 新增可测试入口 `sr::formatLog`（从 `Log::log` 拆出），使格式化逻辑可直接断言而无需捕获 stderr | `engineering_rules.md`「代码必须保留可测试入口」 |
+| **`gltf_types.h` 的 `Channel::path` 补默认值**：`gltf_loader.h:327-332` 只在 `target_path` 为三个已知值时赋值，而 glTF 2.0 允许 `"weights"` 与扩展值 → 旧代码是不确定值，读取即 UB。另 4 个 int 字段做防御性初始化（统一 `-1` 哨兵） | 改枚举时通读同文件 |
+| **三处注释声称不存在的文件**：`image_loader.h:12`（`third/stb/stb_image_impl.cpp`）、`image_write.h:16`（`third/stb/stb_image_write_impl.cpp`）、`CMakeLists.txt:22-24`（「一个 .cpp 同时提供 stb + tinygltf」）均已修正 | 按「修改文件时若头注释过时须同步更新」核查 |
+
+#### 第三方实现单元归属的真相（与文件名直觉相反）
+
+| 实现单元 | `#define` | 提供的符号 |
+|---|---|---|
+| `third/tinygltf/tiny_gltf_impl.cpp` | `STB_IMAGE_IMPLEMENTATION`、`STB_IMAGE_WRITE_IMPLEMENTATION` | **stb_image + stb_image_write**（不含 tinygltf） |
+| `src/scene/gltf_loader_impl.cpp` | `TINYGLTF_IMPLEMENTATION` | **tinygltf** |
+| `third/tiny_obj_loader_impl.cpp` | `TINYOBJLOADER_IMPLEMENTATION` | **tinyobjloader** |
+
+> 教训：本次先轻信了 `CMakeLists.txt` 的旧注释并写进了 `third/README.md` 与
+> `docs/architecture.md`，读了 `.cpp` 后才发现错误，已全部修正。
+> **结论：涉及第三方实现归属时必须读源文件，不能依赖文件名或既有注释推断。**
+
+#### 新增测试（16 个）
+
+| 套件 | 用例 |
+|---|---|
+| `Framebuffer`（新） | `framebuffer_getPixel_outOfBounds_returnsSentinel` |
+| `DepthBuffer` | `depthBuffer_get_outOfBounds_returnsFar` |
+| `Blend` | `toUint8Round_roundsAndClamps`、`blendPixels_alphaBlendRoundsInsteadOfTruncating`、`blendPixels_allModesNeverWrapAround` |
+| `ImageLoader`（新） | `loadImage_missingFile_returnsFalse`、`loadImage_emptyPath_returnsFalse`、`loadImage_roundTripPreservesPixelsAndOrientation` |
+| `Log`（新） | `formatLog_noArgs_returnsFormatString`、`formatLog_substitutesBracesInOrder`、`formatLog_acceptsNonPodTypes`、`formatLog_extraArgsAreAppendedNotDropped`、`formatLog_extraBracesAreKeptLiteral`、`formatLog_literalPercentIsSafe`、`levelName_coversAllEnumValues`、`setLevel_roundTrips` |
+
+> `loadImage` 此前**全仓零调用方**，往返测试是它第一次被真正执行。
+> 往返测试写系统临时目录而非仓库，避开提交二进制 fixture。
+
+#### 公共接口影响
+
+| 变更 | 兼容性 |
+|---|---|
+| `enum ClipPlane` → `enum class ClipPlane : uint8_t` | **API Break**，但实测仅 `clip.h` 内部使用，无外部引用点 |
+| `kClipPlaneCount` 由枚举项改为 `static constexpr int` | 同上，仅内部使用 |
+| `BlendMode` / `AlphaMode` / `Path` / `Interpolation` / `Filter` 补底层类型 | 兼容（枚举值与用法不变） |
+| `sr::Log::log` 由 C 可变参改为变参模板 | 兼容（调用语法不变，且现在接受更多类型） |
+| `blendPixels` 结果可能 **+1** | **行为变更**：四舍五入代替截断。影响所有使用 alpha 混合的输出图像 |
+| `sr::formatLog`、`sr::levelName`、`toUint8Round` | 新增公共符号（均在全局或 `namespace sr`） |
+
+> ⚠️ `blendPixels` 的行为变更会使**未来的像素回归基准图**与修复前不同。
+> TASK-004 接线像素回归时必须以**修复后**的输出为基准。
+
+---
+
 ### 光栅化器缺陷修复（TASK-002，已完成）
 
 commit `73122d3`，`--no-ff` 合入 `develop`。
