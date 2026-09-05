@@ -9,8 +9,8 @@
 | TASK-002 | **已完成** | 光栅化器缺陷修复（深度插值权重错位 + 顺时针绕序） | raster、tests | 2026-09-05 |
 | TASK-003 | **已完成** | 外部输入校验与边界安全（image_loader UB / 越界读 / 混合精度 / 日志模板化） | scene、core、tests | 2026-09-05 |
 | TASK-004 | 代码完成 / 待远端验收 | CI 跨平台修复与测试基础设施 | CMake、.github、tests | 2026-09-05 |
-| TASK-005 | 待开始 | 构建系统现代化（target-based / Sanitizer / 静态检查 / 格式化） | CMake、全仓 | 2026-09-05 |
-| TASK-006 | 待开始 | 测试目录重构与覆盖率接入 | tests、CMake、.github | 2026-09-05 |
+| TASK-005 | 部分完成 / 部分阻塞 | 构建系统现代化（target-based ✓ / Sanitizer ✓ / clang-tidy ✗ / 格式化 ✗） | CMake、全仓 | 2026-09-05 |
+| TASK-006 | 部分完成 / 拆分推迟 | 覆盖率接入 ✓；测试目录拆分已推迟 | tests、CMake、.github | 2026-09-05 |
 | TASK-007 | 待开始 | 全局命名空间收敛（架构级，需 ADR） | 全部 src/、examples、tests | 2026-09-05 |
 
 ## 依赖关系
@@ -28,6 +28,22 @@ TASK-001 ──┬─→ TASK-004 ─→ TASK-005 ─→ TASK-006 ─┐
 - TASK-007 必须最后做：它触及每一个源文件，与任何并行任务都会冲突
 
 ## 已完成任务
+
+- **TASK-006**（部分）— 覆盖率接入 — 2026-09-05
+  `ci.yml` 新增独立 `coverage` job（ubuntu + gcov + lcov + genhtml），只统计 `src/`；
+  首次只报告不设阈值。`testing_rules.md` 新增两条项目例外条款。
+  **测试目录拆分已推迟**：环境阻止删除文件，拆分后无法删除原 `test_core.cpp`，
+  只能留惰性桩，反而比拆分前更乱。程序已写入档案。
+  档案：[`TASK-006-测试目录重构与覆盖率.md`](TASK-006-测试目录重构与覆盖率.md)
+
+- **TASK-005**（第一、二节）— 构建系统现代化 — 2026-09-05
+  消除 6 处 `include_directories` + `link_libraries` + `add_compile_*` 全局指令（残留 **0 处**），
+  并区分「公共接口要求」（`softrenderer` INTERFACE）与「开发偏好」（`sr_dev_flags`，不导出）。
+  新增 `SR_ENABLE_SANITIZERS`，用 `$<$<CONFIG:Debug>:...>` 精确限定仅 Debug 生效。
+  实测：25 个 exe 与基线逐项一致、121 项 ctest 全绿；Debug+ASAN 跑通且
+  Release exe 不导入 ASAN 运行时（847 KB vs 5.09 MB）。
+  **阻塞**：第三、四节（`/WX` + `.clang-tidy` + 全仓格式化）需 LLVM 工具链，实测未安装。
+  档案：[`TASK-005-构建系统现代化.md`](TASK-005-构建系统现代化.md)
 
 - **TASK-004** — CI 跨平台修复与测试基础设施 — 2026-09-05 **代码完成**
   修复 ubuntu/macos job 必然编译失败（三个 realtime 目标加 `if(WIN32)` 守卫）；

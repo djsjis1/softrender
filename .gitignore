@@ -15,6 +15,7 @@
 
 # ---------- 构建产物 ----------
 build/
+build-*/
 cmake-build-*/
 out/
 *.o
@@ -42,6 +43,7 @@ out/
 # ---------- 测试与覆盖率输出 ----------
 Testing/
 coverage/
+coverage*.info
 *.gcda
 *.gcno
 *.profraw

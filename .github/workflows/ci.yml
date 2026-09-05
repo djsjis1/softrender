@@ -112,3 +112,77 @@ jobs:
           name: output-${{ matrix.os }}
           path: output/
           if-no-files-found: ignore
+
+  # ============================================================
+  # 覆盖率（testing_rules.md：核心模块行覆盖率 ≥ 80%、分支 ≥ 60%，
+  # 且「覆盖率报告纳入 CI」）
+  #
+  # 为何单独一个 job 而不并入上面的矩阵：
+  #   1. 只需一个平台出数据（GCC 的 gcov 生态最成熟；OpenCppCoverage
+  #      在 Windows 上配置复杂）
+  #   2. --coverage 会显著拖慢编译，并入矩阵会让三个平台都变慢
+  #   3. 与构建 job 并行，不在关键路径上
+  #
+  # 门禁策略：**首次只报告不设阈值**。
+  # 在实测基线未知的情况下直接设 80% 门禁，极可能立即红灯，
+  # 违反「禁止带红灯合并」而使 CI 失去意义。先把基线量出来写进
+  # docs/changelog.md，下一轮再启用棘轮式门禁（不允许下降）。
+  # ============================================================
+  coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Install lcov
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lcov
+
+      - name: Configure with coverage instrumentation
+        # --coverage = -fprofile-arcs -ftest-coverage；-O0 保证行映射准确。
+        # 不开 SR_ENABLE_SANITIZERS：ASAN 与 gcov 同时开会相互干扰，
+        # 且两者目标不同（一个查内存错误，一个量覆盖度）。
+        run: >
+          cmake -S . -B build-cov
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS="--coverage -g -O0"
+
+      - name: Build test targets
+        # 只构建两个测试目标，不构建 22 个示例（示例不参与覆盖率统计）
+        run: cmake --build build-cov --parallel --target unit_tests render_regression
+
+      - name: Run tests
+        # 必须从仓库根目录运行：示例与回归测试的 output/ 依赖相对路径。
+        # render_regression 的基准图走编译期注入的绝对路径，不受工作目录影响。
+        run: |
+          mkdir -p output
+          ./build-cov/bin/unit_tests
+          ./build-cov/bin/render_regression
+
+      - name: Collect coverage
+        # --ignore-errors 必需：lcov 2.x 对未使用、空数据、版本不一致等
+        # 情形默认报错退出，而这些在 header-only 项目里很常见
+        # （大量 inline 函数在某些编译单元里未实例化）。
+        run: |
+          lcov --capture --directory build-cov --output-file coverage.info \
+               --ignore-errors mismatch,unused,empty,inconsistent,corrupt
+          # 只统计 src/：排除系统头、第三方库、测试代码本身、构建目录
+          lcov --extract coverage.info "*/src/*" \
+               --output-file coverage-src.info \
+               --ignore-errors mismatch,unused,empty,inconsistent
+          echo "===== 覆盖率基线（仅 src/）====="
+          lcov --summary coverage-src.info --ignore-errors mismatch,unused,empty
+          genhtml coverage-src.info --output-directory coverage-report \
+                  --ignore-errors mismatch,unused,empty,inconsistent,source
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage-report/
+          if-no-files-found: warn

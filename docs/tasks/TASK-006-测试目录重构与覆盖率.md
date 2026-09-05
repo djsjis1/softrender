@@ -3,10 +3,29 @@
 ## 基本信息
 
 - 创建日期：2026-09-05
-- 状态：待开始
+- 状态：**覆盖率已完成；目录拆分已推迟**（原因见下）
 - 涉及模块：`tests/`、`CMakeLists.txt`、`.github/workflows/ci.yml`、`.qoder/rules/testing_rules.md`
 - 变更级别：**L**（跨模块 + CI + 规则例外条款）
-- 前置依赖：TASK-002、TASK-003、TASK-004（先补完测试用例，再拆分文件，避免重复搬运）
+- 前置依赖：TASK-004（已完成）
+
+## 目录拆分的推迟决定
+
+**结论：本次不拆分，推迟到删除能力恢复后。**
+
+新发现的约束：**环境阻止删除文件**。`DeleteFile` 工具在 TASK-004 中连续两次
+报告成功而 `src/test/test_framework.h` 仍存在（已记录在该任务档案）。
+
+拆分的最后一步必然是删除原 `tests/test_core.cpp`。若现在拆分，该文件只能被
+清空成一个惰性桩（否则 120 个 `TEST()` 会与拆分后的文件**重复定义**，直接链接失败）。
+结果是仓库里同时存在「桩文件 + 30 个拆分文件」，**比拆分前更乱**，
+而我无法清理。
+
+权衡：拆分是纯机械操作，收益是目录合规 + include 面收敛（改一个头文件不再
+重编全部测试），**无功能价值且无时间敏感性**；而留下桩文件的代价是持续的
+可读性损害。因此推迟是更优选择，符合 `engineering_rules.md`「最小变更」。
+
+拆分程序已完整写在下面「一、测试目录结构不合规」节，执行时照做即可。
+**必须先确认能删除文件**，否则不要开始。
 
 ## 目标
 
@@ -102,15 +121,39 @@ tests/
 
 ## 进度清单
 
+### 已完成：覆盖率接入
+
+- [x] `ci.yml` 新增独立 `coverage` job（ubuntu-latest）
+- [x] `--coverage -g -O0` 编译，只构建 `unit_tests` + `render_regression` 两个测试目标
+      （不构建 22 个示例，示例不参与覆盖率统计）
+- [x] `lcov --extract "*/src/*"` 只统计 `src/`，排除系统头 / 第三方 / 测试代码本身
+- [x] `genhtml` 生成报告并上传为 artifact
+- [x] **首次只报告不设阈值**，基线写进 `docs/changelog.md` 后再启用棘轮式门禁
+- [x] `.gitignore` 补 `build-*/` 与 `coverage*.info`
+      （`build-cov/` 不被现有的 `build/` 规则覆盖）
+- [x] `testing_rules.md` 增加两条项目例外条款（存量命名不重命名、插值类测试数据要求）
+- [x] `testing_rules.md`「测试目录结构」节标注当前现状与拆分计划位置
+
+**为何覆盖率 job 不与 Sanitizer 共用一次构建**：ASAN 与 gcov 同时开会相互干扰，
+且两者目标不同（一个查内存错误、一个量覆盖度）。已在 `ci.yml` 注释说明。
+
+**未验收项**：覆盖率 job 需 Linux 环境，本地无法验证，**验收依赖远端 CI 首次运行**。
+已知风险：`lcov` 各版本的 `--ignore-errors` 可接受值不同（lcov 2.x 对 unused /
+empty / inconsistent 默认报错退出），已预防性地列全，但首次运行可能仍需微调。
+因为本 job **不设阈值、不阻塞合并**，即使需要微调也不会让 CI 失去意义。
+
+### 已推迟：测试目录拆分
+
+- [ ] **前置：确认环境允许删除文件**
 - [ ] 新建 `tests/unit/{core,math,raster,scene}/` 目录
-- [ ] 按 29 个套件把 `test_core.cpp` 拆分为 30 个 `<模块>_test.cpp`
+- [ ] 按 33 个套件把 `test_core.cpp` 拆分为约 30 个 `<模块>_test.cpp`
 - [ ] 每个新文件只保留实际用到的 `#include`
-- [ ] `CMakeLists.txt` 改用 GLOB 收集 + `foreach` 注册
-- [ ] 全量构建，确认用例总数仍为 **94**（拆分前后必须一致）
+- [ ] `CMakeLists.txt` 改用 `file(GLOB ... CONFIGURE_DEPENDS tests/unit/**/*_test.cpp)`
+      + `foreach` 注册（与已有的 `practice/` GLOB 模式一致）
+- [ ] **机械核对**：拆分前后用例总数必须精确等于 120
+      （`unit_tests.exe --gtest_list_tests` 计数，不靠人工检查）
 - [ ] 确认 `ctest` 全绿
-- [ ] 删除原 `tests/test_core.cpp`
-- [ ] 在 `.qoder/rules/testing_rules.md` 增加命名例外条款
-- [ ] `ci.yml` 新增覆盖率 job（ubuntu + gcov + lcov）
+- [ ] **删除**原 `tests/test_core.cpp`（此步不可省，否则 TEST 重复定义）
 - [ ] 记录实测覆盖率基线到 `docs/changelog.md`
 
 ## 风险
