@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -29,7 +30,8 @@ struct GltfMaterial
     Vec3f emissiveFactor{0, 0, 0};
 
     // Alpha 模式
-    enum class AlphaMode
+    // 底层类型 uint8_t：cpp_project_rules.md 要求枚举必须有明确的底层类型
+    enum class AlphaMode : uint8_t
     {
         Opaque,
         Mask,
@@ -98,20 +100,34 @@ struct GltfAnimation
     std::string name;
     struct Channel
     {
-        int samplerIndex;
-        int targetNode;
-        enum class Path
+        // 成员声明即初始化（cpp_project_rules.md「初始化规范」）。
+        //
+        // 【path 的默认值是修一个真实缺陷】gltf_loader.h 只在 target_path 等于
+        // "translation" / "rotation" / "scale" 三者之一时才赋值 path；而 glTF 2.0
+        // 还允许 "weights"（形变目标）与扩展自定义值。遇到这些值时三个分支
+        // 全部不命中，旧代码的 path 就是**不确定值**，读取它属 UB。
+        //
+        // 【下面四个 int 字段是防御性初始化】gltf_loader.h 当前对它们都做了
+        // 无条件赋值（先填满局部对象再 push_back），所以暂无活跃缺陷；
+        // 给默认值是为了保护未来的 loader 修改。
+        // 选 -1 而非 0：0 是合法的数组下标，用它做「未设置」会静默指向首元素；
+        // -1 能被下游校验识别，且与同文件 GltfTexture::imageIndex / samplerIndex
+        // 已有的 -1 约定一致。animation_player.h 已有
+        // `if (channel.samplerIndex < 0 || channel.samplerIndex >= size) return;` 的校验。
+        int samplerIndex = -1;
+        int targetNode = -1;
+        enum class Path : uint8_t
         {
             Translation,
             Rotation,
             Scale
-        } path;
+        } path = Path::Translation;
     };
     struct Sampler
     {
-        int input;   // accessor（时间戳）
-        int output;  // accessor（关键帧值）
-        enum class Interpolation
+        int input = -1;  // accessor（时间戳）；-1 = 未设置，理由同 Channel
+        int output = -1; // accessor（关键帧值）
+        enum class Interpolation : uint8_t
         {
             Linear,
             Step,

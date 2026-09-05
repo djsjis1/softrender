@@ -1,6 +1,7 @@
 #pragma once
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 #include "core/tga.h"
 #include "math/vec.h"
@@ -31,7 +32,9 @@
 class Texture
 {
 public:
-    enum class Filter
+    // 为什么指定底层类型：cpp_project_rules.md 要求「枚举值必须有明确的底层类型」。
+    // 三个采样模式用 uint8_t 足够，且作为 Texture 成员时占用可预测。
+    enum class Filter : uint8_t
     {
         Nearest,
         Bilinear,

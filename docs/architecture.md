@@ -260,9 +260,26 @@ graph LR
     F --> G
 ```
 
-`src/scene/gltf_loader_impl.cpp` 是**唯一的 .cpp 实现单元**（5 行），作用是把
-tinygltf 的 `#define ..._IMPLEMENTATION` 收敛到单个编译单元，避免 header-only
-库在多处 include 时产生符号重定义。
+### 实现单元分工（⚠ 与文件名直觉相反）
+
+`src/` 几乎全是头文件，仅有 **1 个** `.cpp`：`src/scene/gltf_loader_impl.cpp`（9 行）。
+它的作用是 `#define TINYGLTF_IMPLEMENTATION`，把 tinygltf 的符号收敛到单个编译单元。
+
+连同 `third/` 下的两个，全部第三方实现共三个单元，都编入 `third_party_impl` 静态库：
+
+| 实现单元 | `#define` | 提供的符号 |
+|---|---|---|
+| `third/tinygltf/tiny_gltf_impl.cpp` | `STB_IMAGE_IMPLEMENTATION`、`STB_IMAGE_WRITE_IMPLEMENTATION` | **stb_image + stb_image_write** |
+| `src/scene/gltf_loader_impl.cpp` | `TINYGLTF_IMPLEMENTATION` | **tinygltf** |
+| `third/tiny_obj_loader_impl.cpp` | `TINYOBJLOADER_IMPLEMENTATION` | **tinyobjloader** |
+
+> ⚠️ **文件名陷阱**：`tinygltf/tiny_gltf_impl.cpp` 位于 `tinygltf/` 目录、
+> 名字也叫 `tiny_gltf_impl`，但它**完全不含 tinygltf 的实现**，只提供 stb。
+>
+> 根 `CMakeLists.txt` 原本的注释声称「tinygltf 内部会 define
+> STB_IMAGE_IMPLEMENTATION，所以一个 .cpp 同时提供 stb + tinygltf 的所有符号」，
+> 与实际不符，已修正。**结论：涉及第三方实现归属时，必须读 `.cpp` 源文件，
+> 不能依赖文件名或既有注释推断。**
 
 ## 五、命名空间现状
 
@@ -308,20 +325,83 @@ tinygltf 的 `#define ..._IMPLEMENTATION` 收敛到单个编译单元，避免 h
 接入需要同时改造这两点，属架构级变更，需先立 ADR。当前定位为
 **技术验证 / 基准测试用光栅化器**。
 
-### 6.2 日志双模式格式不兼容
+### 6.2 日志双模式：内置模式已改为类型安全的变参模板
 
-`core/log.h` 有两种模式，**格式字符串语义不同**：
+`core/log.h` 有两种模式，**占位符语法统一为 fmt 风格的 `{}`**：
 
-| 模式 | 触发条件 | 格式风格 |
+| 模式 | 触发条件 | 实现 |
 |---|---|---|
-| spdlog | 定义 `SR_USE_SPDLOG` 且链接 `mylog` | fmt 风格 `{}` 占位符 |
-| 内置极简 | 默认 | printf 风格 `%d` / `%s` |
+| spdlog | 定义 `SR_USE_SPDLOG` 且链接 `mylog` | `LOGS_WARN(...)` → fmt 格式化 |
+| 内置 | 默认 | `sr::formatLog`（变参模板 + `std::ostringstream`）→ 单个 `%s` 输出 |
 
-后果：用 `{}` 写的日志语句在默认模式下**不会替换参数**（静默输出字面量 `{}`），
-反之亦然。`core/log.h` 第 91-92 行的注释已声明此限制。
+**哪些目标走哪条路径**（CMake 中只有调了 `sr_enable_logging()` 的目标才启用 spdlog）：
 
-选择理由：渲染器本体内部日志极少，且两种模式不会同时编译；换取的是
-`src/` 默认零第三方依赖。
+| 目标 | 模式 |
+|---|---|
+| `stage6_realtime`、`stage8_realtime`、全部 `practice_*` | spdlog |
+| **`unit_tests`**、其余 20 个示例 | 内置 |
+
+→ **内置模式是常用路径，不是罕见兜底**。这个事实是下面重构的依据。
+
+#### 旧实现的三个缺陷（已修）
+
+旧版 `sr::Log::log` 是真正的 C 可变参函数（`const char* fmt, ...` + `va_list` + `vfprintf`）：
+
+| # | 缺陷 | 发现方式 |
+|---|---|---|
+| 1 | 传 `std::string` 等非 POD 类型经 `...` 是**未定义行为** | TASK-003 给 `image_loader.h` 加日志时，全量构建报出 2 个 **C4840** |
+| 2 | 格式串按 printf 语义解析，但约定写的是 `{}` → **占位符从不被替换**，默认构建下所有带参日志只能看到字面量 `{}`，参数全丢 | 阅读 `vfprintf` 路径时发现 |
+| 3 | 日志文本里的字面 `%`（如 `"100% done"`）被 `vfprintf` 当转换符解析 → UB | 同上 |
+
+缺陷 1 尤其反直觉：很容易误以为「内置模式只是忽略参数，无害」。
+实际上非 POD 类型经 C 可变参传递本身就是 UB，与参数是否被读取无关。
+
+#### 现实现
+
+```cpp
+namespace sr::logfmt {
+    inline void appendRest(std::ostringstream& os, const char* fmt);                  // 递归终止
+    template <typename T, typename... Rest>
+    void appendRest(std::ostringstream& os, const char* fmt, const T& v, const Rest&...);
+}
+
+template <typename... Args>
+std::string formatLog(const char* fmt, const Args&... args);   // {} 按顺序替换
+inline std::string formatLog(const char* fmt);                  // 无参重载，避开 ostringstream
+
+inline const char* levelName(LogLevel l);                       // switch，覆盖全部枚举值
+```
+
+三个设计要点：
+
+1. **格式化逻辑拆成独立函数 `formatLog`**，而不藏在 `Log::log` 里。
+   目的是可测试（`engineering_rules.md`「代码必须保留可测试入口」）：
+   直接断言返回的字符串即可，无需捕获 stderr（在 Windows 上既繁琐又不稳定）。
+   `Log` 测试套件因此得以存在。
+2. **消息先格式化好再用单个 `%s` 输出**，所以消息文本里的字面 `%` 不会被解析（消除缺陷 3）。
+3. **`levelName` 用 `switch` 而非常量数组**：旧数组 `{"TRACE",...,"CRIT "}` **漏了 `Off`**，
+   一旦传 `LogLevel::Off` 就会越界读（枚举有 7 个值，数组只有 6 项）。
+
+#### 降级语义（与 fmt 的差异）
+
+| 情况 | fmt / spdlog | 内置 `formatLog` |
+|---|---|---|
+| 参数多于 `{}` | 忽略多余参数 | **追加输出**（不静默丢信息） |
+| `{}` 多于参数 | 抛 `fmt::format_error` | 原样保留 `{}`（降级而不崩溃） |
+| `{{` / `}}` 转义 | 输出字面 `{` / `}` | **不支持**，`{}` 一律当占位符 |
+| `{:>8}` 等规格 | 支持 | **不支持** |
+| 浮点精度 | 可控 | `ostringstream` 默认 6 位有效数字 |
+
+需要转义与格式规格时改用 spdlog 模式。这些差异已录入 `engineering_rules.md` 红线。
+
+#### 为何不用 `std::format`
+
+`std::format` 能彻底对齐 fmt 语义，但：各编译器支持度差异大（MSVC 19.29+、
+GCC 13+），且本项目 `src/` 已有 C++23 基线但希望尽可能宽容；
+`<sstream>` 在所有目标工具链上都可用。当前日志量极少，格式化能力差异不构成实际约束。
+
+**失效条件**：若将来日志量变大、或需要结构化日志 / 异步刷盘，
+应重新评估直接依赖 spdlog（而非维护两套实现）。
 
 ### 6.3 例外：不设 `database.md` / `protocol.md`
 

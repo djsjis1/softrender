@@ -1,4 +1,6 @@
 #pragma once
+#include <cstdint>
+
 #include "shader/shader.h"
 
 // ============================================================
@@ -85,8 +87,12 @@ inline int clipTriangleNearPlane(const ClipVertex in[3], ClipVertex out[4])
 
 static constexpr int kMaxClipVerts = 12; // 安全上界
 
-// 6 个平面的距离函数
-enum ClipPlane
+// 视锥的 6 个裁剪平面。
+//
+// 为什么用 enum class 而非裸 enum：裸 enum 会把 kNear / kFar 等名字泄进
+// 全局命名空间，而本项目的 DepthBuffer::kFar 表示「最远深度 1e9」，
+// 与裁剪平面 kFar 语义完全不同，同名极易误读。
+enum class ClipPlane : uint8_t
 {
     kNear = 0,
     kFar,
@@ -94,26 +100,37 @@ enum ClipPlane
     kRight,
     kBottom,
     kTop,
-    kClipPlaneCount
 };
+
+// 平面数量。
+//
+// 为什么不用枚举哨兵值（旧版的 kClipPlaneCount）：哨兵值参与 switch 时会
+// 多出一个永不出现的分支，且让「枚举值 == 合法平面」这个不变量变得模糊。
+static constexpr int kClipPlaneCount = 6;
+
+// 防止 ClipPlane 增删平面后忘记同步 kClipPlaneCount（两者不一致会静默漏裁）
+static_assert(kClipPlaneCount == static_cast<int>(ClipPlane::kTop) + 1,
+              "ClipPlane 增删平面后必须同步更新 kClipPlaneCount");
 
 inline float clipPlaneDist(const ClipVertex &v, ClipPlane plane)
 {
     switch (plane)
     {
-    case kNear:
+    case ClipPlane::kNear:
         return v.pos.w + v.pos.z;
-    case kFar:
+    case ClipPlane::kFar:
         return v.pos.w - v.pos.z;
-    case kLeft:
+    case ClipPlane::kLeft:
         return v.pos.w + v.pos.x;
-    case kRight:
+    case ClipPlane::kRight:
         return v.pos.w - v.pos.x;
-    case kBottom:
+    case ClipPlane::kBottom:
         return v.pos.w + v.pos.y;
-    case kTop:
+    case ClipPlane::kTop:
         return v.pos.w - v.pos.y;
     }
+    // 不可达：enum class 的全部枚举值已穷举。
+    // 保留返回值是为了避免部分编译器在开关优化关闭时报「非 void 函数未返回值」。
     return 0;
 }
 
@@ -154,7 +171,7 @@ inline int clipTriangleFullFrustum(const ClipVertex in[3], ClipVertex out[kMaxCl
     ClipVertex *dst = bufB;
     for (int p = 0; p < kClipPlaneCount; ++p)
     {
-        n = clipPolygonOnePlane(src, n, dst, ClipPlane(p));
+        n = clipPolygonOnePlane(src, n, dst, static_cast<ClipPlane>(p));
         if (n == 0)
             return 0;
         std::swap(src, dst);

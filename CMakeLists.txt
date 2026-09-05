@@ -19,9 +19,16 @@ if(SR_ENABLE_SPDLOG)
     add_subdirectory(third/log EXCLUDE_FROM_ALL)
 endif()
 
-# stb_image + stb_image_write + tinygltf：统一实现库
-# tinygltf 内部会 #define STB_IMAGE_IMPLEMENTATION 并 include stb_image.h
-# 所以一个 .cpp 文件同时提供 stb + tinygltf 的所有符号
+# 第三方 header-only 库的统一实现库。
+#
+# 为什么需要它：stb / tinygltf / tinyobjloader 都靠「在**恰好一个** .cpp 里
+# #define XXX_IMPLEMENTATION」来产出符号。若多个编译单元都定义，会符号重定义；
+# 若一个都不定义，链接时报未解析符号。故每个库固定一个实现单元。
+#
+# 三个实现单元的真实分工（⚠ 与文件名给人的直觉不同，改动前请先读源文件）：
+#   third/tinygltf/tiny_gltf_impl.cpp → stb_image + stb_image_write（**不含 tinygltf**）
+#   src/scene/gltf_loader_impl.cpp    → tinygltf
+#   third/tiny_obj_loader_impl.cpp    → tinyobjloader
 add_library(third_party_impl STATIC
     third/tinygltf/tiny_gltf_impl.cpp
     third/tiny_obj_loader_impl.cpp

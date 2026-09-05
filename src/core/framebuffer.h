@@ -38,13 +38,33 @@ class Framebuffer
         pixels_[size_t(y) * width_ + x] = c;
     }
 
+    // 读一个像素。越界返回 colors::black。
+    //
+    // 【为什么读路径也要兜底】setPixel 的注释已说明越界是预期会发生的正常情况
+    // （光栅化时三角形常部分在屏幕外）。既然写路径会越界，读路径同样会。
+    // 而 assert 在 Release（NDEBUG）下被编译掉，届时越界读是**未定义行为**。
+    // 保留 assert 供 Debug 期发现逻辑错误，同时用运行时兜底消除 Release 下的 UB。
+    //
+    // 【为什么不抛异常】cpp_project_rules.md 要求「项目统一选择一种错误处理
+    // 策略，禁止混用」。本项目现有代码全是「返回 bool / 静默兜底」风格，无异常使用。
+    //
+    // 【性能】getPixel 不在光栅化热路径上（热路径走 row(y) 直写），
+    // 多一次分支的代价可忽略。
     Color getPixel(int x, int y) const
     {
         assert(x >= 0 && x < width_ && y >= 0 && y < height_);
+        if (x < 0 || x >= width_ || y < 0 || y >= height_)
+            return colors::black;
         return pixels_[size_t(y) * width_ + x];
     }
 
-    // 整行原始指针：供光栅化内层循环免边界检查直写（调用方需保证 y 合法）
+    // 整行原始指针：供光栅化内层循环免边界检查直写。
+    //
+    // 【调用契约】Release 下**不做任何检查**，调用方必须保证 0 <= y < height()，
+    // 且对返回指针的横向访问必须限制在 [0, width()) 内。违反则越界写内存。
+    // renderer.h 第 102-108 行通过把包围盒 clamp 到帧缓冲尺寸来满足此契约；
+    // 修改包围盒计算或行指针用法时必须重新确认 clamp 仍然生效
+    // （已录入 engineering_rules.md 红线约束）。
     Color* row(int y)
     {
         assert(y >= 0 && y < height_);

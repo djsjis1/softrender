@@ -13,7 +13,12 @@
 // 根据文件扩展名自动选择格式。
 //
 // 源码：third/stb/stb_image_write.h
-// 实现：third/stb/stb_image_write_impl.cpp
+// 实现：third/tinygltf/tiny_gltf_impl.cpp（#define STB_IMAGE_WRITE_IMPLEMENTATION）
+//       → 编入 third_party_impl 静态库
+// ⚠ 旧注释曾称「实现在 third/stb/stb_image_write_impl.cpp」，该文件并不存在。
+//   也注意 tiny_gltf_impl.cpp 这个文件名有误导性：它只提供 stb 的两个库，
+//   tinygltf 的实现在 src/scene/gltf_loader_impl.cpp。
+// 本文件只声明 stbi_write_* 的 C 接口，不定义 *_IMPLEMENTATION。
 // ============================================================
 
 extern "C" {
