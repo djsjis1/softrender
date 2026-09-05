@@ -13,15 +13,42 @@
 // 基准图（golden image）的差异。允许少量像素偏差（抗锯齿/
 // 浮点精度导致的 1-2 灰度差异），但大面积偏差 = 回归 bug。
 //
-// 用法：
-//   1. 首次运行：生成基准图 saveGolden("test_scene", fb);
-//   2. 后续运行：compareWithGolden("test_scene", fb, threshold);
-//      返回 true = 通过，false = 回归
+// 【为何需要它】单元测试只能断言局部性质（某个像素是否被涂色、
+// 某个点积是否为零），**无法锁定完整渲染结果的视觉正确性**。
+// rasterizer_fast 的深度插值权重错位能长期潜伏，正是因为缺这张网。
 //
-// 基准图存放：tests/golden/<name>.tga
+// 用法：
+//   1. 首次建立基准：配置时加 -DSR_UPDATE_GOLDEN=ON，运行测试即生成基准图
+//   2. 后续回归：compareWithGolden("test_scene", fb, threshold)
+//      返回 passed=true 即通过
+//
+// 基准图存放：tests/golden/<name>.tga（路径由编译期 SR_GOLDEN_DIR 注入）
 // ============================================================
 namespace regression
 {
+
+    // 基准图目录。
+    //
+    // 【为何不能硬编码相对路径】旧实现写的是 "tests/golden/" + name + ".tga"，
+    // 只有从**仓库根目录**运行才正确。而 CI 用 ctest --test-dir build，
+    // 工作目录是 build/ → 解析成 build/tests/golden/ → 找不到基准图 →
+    // 旧逻辑会走「不存在就自动创建并返回 passed」分支 → **测试永远假通过**。
+    // 现在由 CMake 通过 SR_GOLDEN_DIR 注入绝对路径，与工作目录无关。
+    inline std::string goldenDir()
+    {
+#ifdef SR_GOLDEN_DIR
+        return SR_GOLDEN_DIR;
+#else
+        // 回退：未经 CMake 配置、直接从仓库根目录运行测试二进制时可用
+        return "tests/golden";
+#endif
+    }
+
+    // 基准图完整路径
+    inline std::string goldenPath(const std::string &name)
+    {
+        return goldenDir() + "/" + name + ".tga";
+    }
 
     struct CompareResult
     {
@@ -75,8 +102,7 @@ namespace regression
     // 保存基准图
     inline bool saveGolden(const std::string &name, const Framebuffer &fb)
     {
-        std::string path = "tests/golden/" + name + ".tga";
-        return tga::write(path, fb);
+        return tga::write(goldenPath(name), fb);
     }
 
     // 加载基准图并比较
@@ -84,11 +110,13 @@ namespace regression
                                            float pixelThreshold = 2.0f)
     {
         CompareResult r{};
-        std::string path = "tests/golden/" + name + ".tga";
+        const std::string path = goldenPath(name);
         tga::Image img;
         if (!tga::read(path, img))
         {
-            // 基准图不存在，自动保存为基准（首次运行）
+#ifdef SR_UPDATE_GOLDEN
+            // 本地开发：只有显式要求更新基准时才自动创建。
+            // 配置时加 -DSR_UPDATE_GOLDEN=ON，提交前记得关掉。
             saveGolden(name, fb);
             r.passed = true;
             r.totalPixels = fb.width() * fb.height();
@@ -98,8 +126,25 @@ namespace regression
             r.mismatchRatio = 0;
             std::printf("[REGRESSION] Golden created: %s\n", path.c_str());
             return r;
+#else
+            // CI / 默认：基准图缺失必须**直接失败**。
+            //
+            // 旧实现在这里自动创建并返回 passed，是典型的静默失败：
+            // 一旦路径算错（见 goldenDir 注释）或基准图忘了提交，
+            // 测试会永远绿灯 —— 比没有测试更危险。
+            r.passed = false;
+            r.totalPixels = fb.width() * fb.height();
+            r.mismatchedPixels = r.totalPixels;
+            r.maxDelta = 255.0f;
+            r.avgDelta = 255.0f;
+            r.mismatchRatio = 1.0f;
+            std::printf("[REGRESSION] MISSING golden image: %s\n", path.c_str());
+            std::printf("[REGRESSION] 若为首次建立基准，请用 -DSR_UPDATE_GOLDEN=ON 重新配置；\n"
+                        "[REGRESSION] 并确认 goldenDir() 解析出的路径与实际仓库位置一致。\n");
+            return r;
+#endif
         }
-        // 构建 Framebuffer 从 img
+        // 尺寸不一致时 compare() 会直接判失败（totalPixels=0），这里不重复检查
         Framebuffer golden(img.width, img.height);
         for (int y = 0; y < img.height; ++y)
             for (int x = 0; x < img.width; ++x)

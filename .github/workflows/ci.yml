@@ -29,7 +29,39 @@ jobs:
         run: cmake --build build --config ${{ matrix.build_type }} --parallel
 
       - name: Run Unit Tests
-        run: ctest --test-dir build --build-config ${{ matrix.build_type }} --output-on-failure
+        # --parallel 必需：gtest_discover_tests 把每个用例注册为独立 ctest 项，
+        # 120 用例 = 120 次进程启动。串行实测约 40 秒，并行降到 ~14 秒，
+        # 而测试本身单进程只需 ~18 毫秒 —— 开销全在进程创建。
+        #
+        # -LE fast 排除 unit_tests_all：那是给本地开发用的单进程冒烟项
+        # （ctest -L fast，0.4 秒），在 CI 里会把全部用例再跑一遍，纯冗余。
+        # CI 保留 discover 粒度是为了失败时能直接定位到单个用例名。
+        run: ctest --test-dir build --build-config ${{ matrix.build_type }} --output-on-failure --parallel -LE fast
+
+      - name: Verify platform guards
+        shell: bash
+        run: |
+          # 回归断言：三个 realtime 示例无条件使用 Win32Window，而
+          # platform/win32_window.h 整体包在 #ifdef _WIN32 内。
+          # CMakeLists.txt 必须用 if(WIN32) 守卫整个 add_executable，
+          # 否则非 Windows 平台编译必然失败。
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            for t in stage6_realtime stage8_realtime stage1_sprite_anim; do
+              if [ -f "build/bin/$t" ]; then
+                echo "::error::$t 不应在非 Windows 平台产出（if(WIN32) 守卫失效）"
+                exit 1
+              fi
+            done
+            echo "平台守卫生效：三个 realtime 目标已正确跳过"
+          else
+            for t in stage6_realtime stage8_realtime stage1_sprite_anim; do
+              if [ ! -f "build/bin/${{ matrix.build_type }}/$t.exe" ]; then
+                echo "::error::Windows 上缺少 $t.exe"
+                exit 1
+              fi
+            done
+            echo "Windows 目标齐备"
+          fi
 
       - name: Run Stage Examples (smoke test)
         shell: bash
@@ -40,13 +72,38 @@ jobs:
           else
             BIN="build/bin"
           fi
-          # 离屏示例（不需要窗口）
-          for stage in stage1_lines stage2_triangles stage3_cube stage4_zbuffer stage5_texture stage6_offline stage7_clip stage8_offline stage9_msaa stage10_pbr stage11_postprocess; do
-            if [ -f "$BIN/$stage" ] || [ -f "$BIN/$stage.exe" ]; then
-              echo "Running $stage..."
-              "$BIN/$stage" || "$BIN/$stage.exe" || true
+          # 只跑离屏示例。三个 realtime 目标会开窗并进入消息循环，在 CI 上会挂死。
+          # demo_gltf / demo_pbr_material / demo_skinning 是自产自销的往返测试
+          # （运行时先写 .gltf 到 output/ 再读回），不需外部资产。
+          TARGETS="stage1_lines stage2_triangles stage3_cube stage4_zbuffer stage5_texture
+          stage6_offline stage7_clip stage8_offline stage9_msaa stage10_pbr
+          stage11_postprocess stage12_threaded stage1_sprite
+          demo_2d demo_gltf demo_pbr_material demo_ibl_pbr demo_skinning demo_stars
+          practice_hello_2d"
+          RAN=0
+          for stage in $TARGETS; do
+            # 先解析出可执行文件路径，再直接调用。
+            # 旧写法 "$BIN/$stage" || "$BIN/$stage.exe" || true 末尾的 || true
+            # 让本步骤**永远不会失败**，属典型的掩盖症状。
+            if [ -x "$BIN/$stage" ]; then
+              EXE="$BIN/$stage"
+            elif [ -f "$BIN/$stage.exe" ]; then
+              EXE="$BIN/$stage.exe"
+            else
+              echo "::warning::未找到 $stage，跳过"
+              continue
             fi
+            echo "Running $stage..."
+            # 不加 || true：shell: bash 默认 -e，非零退出码会正常使步骤失败
+            "$EXE"
+            RAN=$((RAN + 1))
           done
+          echo "共运行 $RAN 个离屏示例"
+          # 防止「一个都没找到」也继续绿灯：至少应跑到 15 个
+          if [ "$RAN" -lt 15 ]; then
+            echo "::error::只运行了 $RAN 个示例，远低于预期，疑似构建产物缺失"
+            exit 1
+          fi
 
       - name: Upload Artifacts
         if: always()

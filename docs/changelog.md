@@ -7,6 +7,78 @@
 
 ## 2026-09-05
 
+### CI 跨平台修复与像素回归接线（TASK-004，代码完成）
+
+单元测试 113 → **120**；新增集成回归目标 `render_regression`（3 个场景）；
+全量 `ctest` 从 **39.89 秒 → 14.06 秒**；Windows 上 24 个 exe 全部产出。
+
+#### CI 修复
+
+| 变更 | 影响范围 |
+|---|---|
+| **修复 ubuntu / macos job 必然编译失败**：给 `stage1_sprite_anim` / `stage6_realtime` / `stage8_realtime` 的整个 `add_executable` 加 `if(WIN32)` 守卫（旧写法只守住了 `target_link_libraries`，没守住编译） | `CMakeLists.txt` |
+| **去掉 smoke test 末尾的 `\|\| true`**：该写法让步骤永远不会失败，属典型的掩盖症状 | `.github/workflows/ci.yml` |
+| smoke 清单 11 项 → 20 项（补 `stage12_threaded`、`stage1_sprite`、5 个 demo、`practice_hello_2d`） | 同上 |
+| 新增「至少跑到 15 个」下限断言，防止「一个都没找到」也绿灯 | 同上 |
+| 新增 **Verify platform guards** 步骤：把平台守卫修复本身变成回归测试 | 同上 |
+| `ctest` 加 `--parallel -LE fast` | 同上 |
+
+**守卫完备性的验证方式**：全仓扫描确认 `src/` 与 `tests/` 的 Win32 引用数为 **0**，
+Win32 依赖只存在于三个已守卫的示例 + `platform/win32_window.h` 本身。
+这比用 `if(FALSE)` 模拟更有说服力：证明的不是「`if(WIN32)` 语法有效」，
+而是「没有遗漏的第四个文件」。
+
+#### 像素回归接线
+
+`pixel_regression.h` 与 `tests/golden/` 此前零引用、目录为空，能力未落地。
+现已接线，并修复了**两个会导致永远假通过**的陷阱：
+
+| 陷阱 | 旧行为 | 修复 |
+|---|---|---|
+| 硬编码相对路径 `"tests/golden/"` | `ctest --test-dir build` 的工作目录是 `build/`，解析成 `build/tests/golden/` → 找不到基准图 | 新增 `goldenDir()` / `goldenPath()`，由 CMake 用 `file(TO_CMAKE_PATH)` 注入**绝对路径** `SR_GOLDEN_DIR` |
+| 基准图不存在时自动创建并返回 `passed=true` | 叠加上条 → **测试永远绿灯**，比没有测试更危险 | 改为 `SR_UPDATE_GOLDEN` 开关控制；默认（CI）下缺失**直接失败**并给出绝对路径与修复指引 |
+
+**反向验证已做**：把一张基准图重命名走后，测试输出
+`[REGRESSION] MISSING golden image: <绝对路径>` 并 **FAILED**（退出码 -1）。
+并从 `build/` 目录运行验证了绝对路径注入确实绕开工作目录。
+
+三个回归场景（均确定性、无随机、无时间依赖，128×96）：
+
+| 场景 | 锁定什么 |
+|---|---|
+| `zbuffer_twoOverlappingCubes` | 深度测试 + 背面剔除 + 视锥裁剪的联合行为 |
+| `pipeline_phongTexturedSphere` | 变换链 + 透视校正插值 + 纹理采样 + Phong 着色 |
+| `blend2d_alphaComposition` | alpha 混合（三种模式）+ sr2d 图元 + 变换栈 + scissor + 点阵字体 |
+
+刻意**不**回归 `demo_stars`（含随机星点）与 `stage12_threaded`（线程顺序不定）。
+
+另新增 `PixelRegression` 单元套件（7 个用例）验证 `compare()` 本身的判定逻辑：
+若它恒返回 true，三个集成场景就全是假通过。其中
+`compare_uniformSmallDrift_failsOnAvgDelta` 验证「平均差 < 0.5」这个条件能**单独**触发失败
+（全图每像素只差 1 时，无任何像素超单像素阈值，但系统性偏移仍必须被拦下）。
+
+#### ctest 项数与标签
+
+全量 `ctest` 共 **122 项** = 120（discover 展开）+ 1（`unit_tests_all`，`fast` 标签）
++ 1（`render_regression`，`regression` 标签）。
+
+| 命令 | 项数 | 耗时 | 用途 |
+|---|---|---|---|
+| `ctest -L fast` | 1 | 0.43 秒 | 本地开发迭代 |
+| `ctest -L regression` | 1 | 0.59 秒 | 只跑像素回归 |
+| `ctest --parallel -LE fast` | 121 | 14.06 秒 | **CI 用**（排除与 discover 项重复的 `unit_tests_all`） |
+| `ctest`（串行、无标签） | 122 | ~40 秒 | 不推荐 |
+
+#### 待用户手动完成
+
+| 项 | 原因 |
+|---|---|
+| 删除 `src/test/test_framework.h`（96 行自研 `minitest`，零引用） | 删除工具被环境阻断，连续两次报成功而文件仍在。属无害死代码，不影响构建 |
+| 删除空目录 `src/platform/` | 同上（且 git 不跟踪空目录） |
+| 推送到 GitHub 并确认三平台 job 全绿 | 需用户提供远端仓库；本地无法验证 Linux/macOS 构建 |
+
+---
+
 ### 外部输入校验与边界安全（TASK-003，已完成）
 
 单元测试 97 → **113**，全量构建**零错误零警告**（修前有 2 个 C4840），

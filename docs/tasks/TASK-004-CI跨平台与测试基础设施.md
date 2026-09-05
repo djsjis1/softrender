@@ -3,10 +3,10 @@
 ## 基本信息
 
 - 创建日期：2026-09-05
-- 状态：待开始
+- 状态：**代码已完成，待远端 CI 验收**
 - 涉及模块：`CMakeLists.txt`、`.github/workflows/ci.yml`、`src/test/`、`tests/`
 - 变更级别：**L**（跨模块 + CI + 新增测试类型）
-- 前置依赖：TASK-001（无 git 仓库则 CI 从未运行过，无法验收）
+- 前置依赖：TASK-001（已完成）
 
 ## 目标
 
@@ -172,21 +172,79 @@ GTest 用例注册为独立 ctest 测试项**，94 用例 = 94 次进程创建�
 
 ## 进度清单
 
-- [ ] `CMakeLists.txt` 给三个 realtime 目标加 `if(WIN32)` 守卫（方案 A）
-- [ ] `ci.yml` 去掉 `|| true`，改为探测后直接调用
-- [ ] `ci.yml` smoke 清单补 `stage12_threaded`、`stage1_sprite`、`demo_2d`、
-      `demo_ibl_pbr`、`demo_gltf`、`demo_pbr_material`、`demo_skinning`
-- [ ] `ci.yml` 的 `ctest` 加 `--parallel`
-- [ ] 删除 `src/test/test_framework.h`
-- [ ] 删除空目录 `src/platform/`
-- [ ] `pixel_regression.h` 增加基准目录参数（CMake 注入绝对路径）
-- [ ] `pixel_regression.h` 自动创建基准改为 `SR_UPDATE_GOLDEN` 开关控制
-- [ ] 新建 `tests/integration/render_regression_test.cpp`（3 个确定性场景）
-- [ ] `CMakeLists.txt` 注册回归测试目标 + `add_test`
-- [ ] 生成并提交 `tests/golden/*.tga` 基准图
-- [ ] `CMakeLists.txt` 增加 `unit_tests_all` 冒烟测试项 + `fast` label
-- [ ] **推送到 GitHub，确认三个平台 job 全绿**
-- [ ] **故意删除一个基准图，确认 CI 红灯**（验证不是假通过）
+- [x] `CMakeLists.txt` 给三个 realtime 目标加 `if(WIN32)` 守卫（方案 A）
+- [x] **验证守卫集合是完备的**：全仓扫描确认 `src/` 与 `tests/` 的 Win32 引用数为 **0**，
+      Win32 依赖只存在于三个已守卫的示例 + `platform/win32_window.h` 本身
+      （`practice/hello_2d.cpp` 的匹配仅在注释里）。这比用 `if(FALSE)` 模拟更有说服力：
+      它证明的不是「`if(WIN32)` 语法有效」，而是「没有遗漏的第四个文件」
+- [x] `ci.yml` 去掉 `|| true`，改为先探测可执行文件再直接调用
+- [x] `ci.yml` smoke 清单从 11 项扩到 20 项（补 `stage12_threaded`、`stage1_sprite`、
+      5 个 demo、`practice_hello_2d`）
+- [x] `ci.yml` smoke 步骤新增「至少跑到 15 个」的下限断言，防止「一个都没找到」也绿灯
+- [x] `ci.yml` 新增 **Verify platform guards** 步骤：非 Windows 断言三个 realtime
+      目标未产出，Windows 断言齐备 —— 把本修复本身变成回归测试
+- [x] `ci.yml` 的 `ctest` 加 `--parallel` 与 `-LE fast`
+- [x] `pixel_regression.h` 新增 `goldenDir()` / `goldenPath()`，由 CMake 注入绝对路径
+- [x] `pixel_regression.h` 自动创建基准改为 `SR_UPDATE_GOLDEN` 开关控制，
+      默认（CI）下基准图缺失**直接失败**
+- [x] 新建 `tests/integration/render_regression_test.cpp`（3 个确定性场景）
+- [x] `CMakeLists.txt` 注册 `render_regression` 目标 + `add_test` + `regression` 标签
+- [x] 生成并提交 3 张 `tests/golden/*.tga` 基准图（各 36 KB，共 ~108 KB）
+- [x] `CMakeLists.txt` 新增 `unit_tests_all` 冒烟项 + `fast` 标签
+- [x] `tests/test_core.cpp` 新增 `PixelRegression` 套件（7 个用例）验证 `compare()` 判定逻辑
+- [ ] **删除 `src/test/test_framework.h`** —— ⚠️ **被环境阻断，需用户手动执行**
+- [ ] **删除空目录 `src/platform/`** —— 同上（且 git 不跟踪空目录，仅本地工作区残留）
+- [ ] **推送到 GitHub，确认三个平台 job 全绿** —— 需用户提供远端仓库
+
+### 已完成的验证
+
+| 验证项 | 结果 |
+|---|---|
+| 全量重新配置 + 构建 | 零错误零警告，Windows 上 **24 个 exe** 全部产出（三个 realtime 目标未被误伤） |
+| 基准图生成（`SR_UPDATE_GOLDEN=ON`） | 3 张均创建成功，路径为 `D:/code/.std/softrender/tests/golden/...` |
+| **从 `build/` 目录运行** | 仍正确写到仓库的 `tests/golden/` → 绝对路径注入生效 |
+| 真实比对（`SR_UPDATE_GOLDEN=OFF`） | 3 个场景全部 PASS，**无** `Golden created` 输出 → 确实在加载比对 |
+| **反向验证**：故意重命名走一张基准图 | 测试 **FAILED**，退出码 -1，报错含绝对路径与修复指引 → 假通过陷阱已真正修复 |
+| `ctest -L fast` | 1 项 / 0.43 秒 |
+| `ctest -L regression` | 1 项 / 0.59 秒 |
+| `ctest --parallel -LE fast`（CI 将用的命令） | **121 项全绿 / 14.06 秒**（修前串行 39.89 秒） |
+| `unit_tests` | 113 → **120 用例 / 33 套件**全绿 |
+| 20 个离屏示例冒烟 | 全部正常退出 |
+
+### 两个陷阱的修复证据
+
+**陷阱一：相对路径**。旧版 `pixel_regression.h:78,87` 硬编码 `"tests/golden/"`。
+实测从 `build/` 目录运行时，新版输出的路径是
+`D:/code/.std/softrender/tests/golden/zbuffer_twoOverlappingCubes.tga` ——
+绕开了工作目录，证明 `SR_GOLDEN_DIR` 注入生效。
+
+**陷阱二：自动创建 = 假通过**。反向验证已做：把基准图重命名走后，
+测试输出 `[REGRESSION] MISSING golden image: <绝对路径>` 并 **FAILED**（退出码 -1）。
+旧逻辑在这里会静默创建并返回 passed。
+
+### `ctest` 项数说明
+
+全量 `ctest` 共 **122 项** = 120（`gtest_discover_tests` 展开的单元测试）
++ 1（`unit_tests_all`，`fast` 标签）+ 1（`render_regression`，`regression` 标签）。
+
+`unit_tests_all` 与 120 个 discover 项**内容重复**（前者单进程跑全部，后者逐项跑）。
+CI 用 `-LE fast` 排除它 → 121 项，保留失败定位粒度且不重复跑。
+本地开发用 `-L fast` → 1 项 / 0.43 秒。
+
+### 被环境阻断的删除操作
+
+`src/test/test_framework.h`（96 行自研 `minitest` 框架）与空目录 `src/platform/`
+应删除，但删除工具连续两次报告成功而文件仍存在，判定为环境层面阻断。
+
+**影响评估：无**。`test_framework.h` 全仓零引用（已用两项独立检查确认：
+源码扫描 + CMake 扫描），不参与任何目标编译，属无害死代码。
+
+**需用户手动执行**：
+```
+git rm src/test/test_framework.h
+rmdir src\platform
+git commit -m "chore(test): 删除自研测试框架 minitest（违反禁止自研测试框架，且零引用）"
+```
 
 ## 风险
 
