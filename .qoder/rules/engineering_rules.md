@@ -176,19 +176,44 @@ cmake --build build --config Release --target unit_tests
 **测试**
 
 ```powershell
-# 全量测试（并行；串行约 40 秒，并行约 2-3 秒）
-ctest --test-dir build --output-on-failure -j
-
-# 开发迭代时用这个：单进程跑完 94 个用例，约 30 毫秒
+# 开发迭代首选：单进程跑完 120 个用例，约 20 毫秒
 .\build\bin\Release\unit_tests.exe
+
+# 全量 ctest（CI 用的命令；串行约 40 秒，并行约 13 秒）
+ctest --test-dir build -C Release --parallel -LE fast --output-on-failure
+
+# 只跑像素回归（3 个端到端场景）
+ctest --test-dir build -C Release -L regression --output-on-failure
+
+# ctest 的冒烟项（单进程跑全部单元测试，0.4 秒）
+ctest --test-dir build -C Release -L fast
 
 # 只跑某个套件 / 用例
 .\build\bin\Release\unit_tests.exe --gtest_filter=RasterizerFast.*
 ```
 
 > ⚠️ `ctest` 慢的原因：`gtest_discover_tests` 把每个用例注册为独立 ctest 项，
-> 94 用例 = 94 次进程启动，开销全在进程创建而非测试本身。
+> 120 用例 = 120 次进程启动，开销全在进程创建而非测试本身。
+> `-LE fast` 排除 `unit_tests_all`，避免与 120 个 discover 项重复跑。
 > 详见 `docs/troubleshooting.md`。
+
+**Sanitizer**（默认关闭，需显式开启）
+
+```powershell
+# 单独配置一个带 Sanitizer 的构建目录，不干扰日常 Release 构建
+cmake -S . -B build/asan -DSR_ENABLE_SANITIZERS=ON
+cmake --build build/asan --config Debug --target unit_tests --parallel
+
+# 运行前必须把 MSVC ASAN 运行时目录加进 PATH，否则退出码 0xC0000135
+$env:PATH = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\<版本>\bin\Hostx64\x64;" + $env:PATH
+.\build\asan\bin\Debug\unit_tests.exe
+```
+
+> Sanitizer 只在 **Debug 配置**生效（用 `$<$<CONFIG:Debug>:...>` 生成器表达式限定），
+> Release 永不带入 —— 实测验证：Debug exe 5.09 MB 且导入 ASAN 运行时，
+> Release exe 847 KB 且不导入。
+> MSVC 只支持 ASAN，**不支持 UBSAN**；UBSAN 交给 CI 的 ubuntu / macos job。
+> 两个越界测试在 Debug 下会 `GTEST_SKIP()`（`assert` 会先中止进程），属预期行为。
 
 **运行示例**
 
@@ -219,9 +244,14 @@ clang-tidy <files>               # 配置见根目录 .clang-tidy（待建立）
 **DoD 最小验证集**（宣称完成前必须全部通过）
 
 ```powershell
-cmake --build build --config Release --parallel   # 零错误
-.\build\bin\Release\unit_tests.exe                # 94 用例全绿
+cmake --build build --config Release --parallel   # 零错误零警告
+.\build\bin\Release\unit_tests.exe                # 120 用例全绿
+.\build\bin\Release\render_regression.exe         # 3 个像素回归全绿
 ```
+
+涉及渲染输出的改动额外要求：跑一遍 20 个离屏示例，确认均正常退出。
+涉及 `CMakeLists.txt` 的改动额外要求：比对可执行目标清单与改动前一致
+（当前基线：Windows 上 **25 个 exe**）。
 
 ---
 
