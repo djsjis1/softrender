@@ -1,0 +1,62 @@
+# ============================================================
+# SoftRenderer .gitignore
+#
+# 按 .qoder/rules/project_structure_rules.md「Git 忽略规范」覆盖五类：
+#   构建产物 / IDE 临时文件 / 测试与覆盖率输出 / 第三方构建产物 / 临时文件
+#
+# 例外说明：
+#   - output/ 用「output/*」而非「output/」：git 无法重新包含被排除目录内的
+#     文件，写成 output/ 会让 !output/.gitkeep 失效。所有示例都以相对路径
+#     "output/xxx.tga" 写文件，目录必须存在，故保留 .gitkeep 占位。
+#   - tests/golden/ 是像素回归基准图，必须纳入版本控制，不能被忽略。
+#   - third/ 下的第三方源码需要入库（本项目采用源码内嵌策略），
+#     只忽略其构建产物目录。
+# ============================================================
+
+# ---------- 构建产物 ----------
+build/
+cmake-build-*/
+out/
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.so.*
+*.dylib
+*.a
+*.lib
+*.exp
+*.ilk
+*.pdb
+
+# ---------- IDE 临时文件 ----------
+.vs/
+.idea/
+*.user
+*.suo
+*.sln.docstates
+*.swp
+.DS_Store
+
+# ---------- 测试与覆盖率输出 ----------
+Testing/
+coverage/
+*.gcda
+*.gcno
+*.profraw
+
+# ---------- 第三方构建产物（源码本身需入库）----------
+vcpkg_installed/
+third/entt/build/
+
+# ---------- 临时文件 ----------
+*.tmp
+*.bak
+*~
+build_log.txt
+cmake_log.txt
+
+# ---------- 渲染输出（示例运行产物，可重新生成）----------
+output/*
+!output/.gitkeep

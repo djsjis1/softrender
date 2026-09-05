@@ -1,0 +1,36 @@
+{
+    "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "${workspaceFolder}",
+                "${workspaceFolder}/src",
+                "${workspaceFolder}/build/generated",
+                "${workspaceFolder}/third",
+                "${workspaceFolder}/third/stb",
+                "${workspaceFolder}/third/tinygltf",
+                "${workspaceFolder}/third/nlohmann",
+                "${workspaceFolder}/third/entt/src",
+                "${workspaceFolder}/third/log",
+                "${workspaceFolder}/third/log/spdlog-1.17.0/include",
+                "${workspaceFolder}/third/googletest-main/googletest/include",
+                "${workspaceFolder}/third/googletest-main/googlemock/include"
+            ],
+            "defines": [
+                "_DEBUG",
+                "UNICODE",
+                "_UNICODE",
+                "NOMINMAX",
+                "WIN32_LEAN_AND_MEAN",
+                "SR_HAS_STB_IMAGE",
+                "SR_USE_SPDLOG",
+                "SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE"
+            ],
+            "cStandard": "c17",
+            "cppStandard": "c++23",
+            "intelliSenseMode": "windows-msvc-x64",
+            "configurationProvider": "ms-vscode.cmake-tools"
+        }
+    ],
+    "version": 4
+}

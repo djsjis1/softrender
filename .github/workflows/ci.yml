@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+
+jobs:
+  build-and-test:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        build_type: [Release]
+      fail-fast: false
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Configure CMake
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel
+
+      - name: Run Unit Tests
+        run: ctest --test-dir build --build-config ${{ matrix.build_type }} --output-on-failure
+
+      - name: Run Stage Examples (smoke test)
+        shell: bash
+        run: |
+          mkdir -p output
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            BIN="build/bin/${{ matrix.build_type }}"
+          else
+            BIN="build/bin"
+          fi
+          # 离屏示例（不需要窗口）
+          for stage in stage1_lines stage2_triangles stage3_cube stage4_zbuffer stage5_texture stage6_offline stage7_clip stage8_offline stage9_msaa stage10_pbr stage11_postprocess; do
+            if [ -f "$BIN/$stage" ] || [ -f "$BIN/$stage.exe" ]; then
+              echo "Running $stage..."
+              "$BIN/$stage" || "$BIN/$stage.exe" || true
+            fi
+          done
+
+      - name: Upload Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: output-${{ matrix.os }}
+          path: output/
+          if-no-files-found: ignore
