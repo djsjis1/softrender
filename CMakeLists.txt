@@ -122,22 +122,32 @@ add_executable(stage3_cube examples/stage3_cube.cpp)
 add_executable(stage4_zbuffer examples/stage4_zbuffer.cpp)
 add_executable(stage5_texture examples/stage5_texture.cpp)
 
-# 像素画示例：静态勇者（导出 PNG）+ 实时动画（窗口 + 帧序列）
+# 像素画示例：静态勇者（导出 PNG，跨平台）
 add_executable(stage1_sprite examples/stage1_sprite.cpp)
-add_executable(stage1_sprite_anim examples/stage1_sprite_anim.cpp)
-target_include_directories(stage1_sprite_anim PRIVATE ${CMAKE_SOURCE_DIR})
+
+# 实时动画（窗口 + 帧序列）：仅 Windows。
+#
+# 为什么整个目标都要守卫、而不只是链接库：platform/win32_window.h 的**全部内容**
+# 包在 #ifdef _WIN32 内，非 Windows 平台该头展开为空、Win32Window 类不存在，
+# 而本示例无条件使用它 → 编译必然失败。旧写法的 if(WIN32) 只包住了
+# target_link_libraries(gdi32 user32)，没包住编译本身，导致 CI 的
+# ubuntu / macos 两个 job 100% 编译失败（详见 docs/tasks/DONE/ 中的 TASK-004）。
 if(WIN32)
+    add_executable(stage1_sprite_anim examples/stage1_sprite_anim.cpp)
+    target_include_directories(stage1_sprite_anim PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(stage1_sprite_anim PRIVATE gdi32 user32)
 endif()
 
-# 阶段 6：实时窗口（Win32 GDI）。gdi32 用于 SetDIBitsToDevice，
-# user32 用于窗口/消息（MSVC 通常自动链接，这里显式写出更稳妥）
-add_executable(stage6_realtime examples/stage6_realtime.cpp)
-target_include_directories(stage6_realtime PRIVATE ${CMAKE_SOURCE_DIR})
+# 阶段 6：实时窗口（Win32 GDI），仅 Windows。gdi32 用于 SetDIBitsToDevice，
+# user32 用于窗口/消息（MSVC 通常自动链接，这里显式写出更稳妥）。
+# 守卫理由同 stage1_sprite_anim：源文件无条件使用 Win32Window。
+# 跨平台的验证由下面的 stage6_offline 承担（同一套 Renderer+Shader）。
 if(WIN32)
+    add_executable(stage6_realtime examples/stage6_realtime.cpp)
+    target_include_directories(stage6_realtime PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(stage6_realtime PRIVATE gdi32 user32)
+    sr_enable_logging(stage6_realtime)
 endif()
-sr_enable_logging(stage6_realtime)
 
 # 阶段 6 的离屏验证：用同一套 Renderer+Shader 渲染一帧写 TGA
 add_executable(stage6_offline examples/stage6_offline.cpp)
@@ -147,12 +157,13 @@ add_executable(stage7_clip examples/stage7_clip.cpp)
  
 # 阶段 8：Shadow Mapping + 法线贴图
 add_executable(stage8_offline examples/stage8_offline.cpp)
-add_executable(stage8_realtime examples/stage8_realtime.cpp)
-target_include_directories(stage8_realtime PRIVATE ${CMAKE_SOURCE_DIR})
+# 实时窗口版仅 Windows，守卫理由同 stage6_realtime；跨平台验证由 stage8_offline 承担
 if(WIN32)
+    add_executable(stage8_realtime examples/stage8_realtime.cpp)
+    target_include_directories(stage8_realtime PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(stage8_realtime PRIVATE gdi32 user32)
+    sr_enable_logging(stage8_realtime)
 endif()
-sr_enable_logging(stage8_realtime)
 
 # 阶段 9：MSAA 抗锯齿
 add_executable(stage9_msaa examples/stage9_msaa.cpp)
@@ -222,14 +233,61 @@ foreach(_practice_src ${SR_PRACTICE_SOURCES})
     sr_add_practice("${_practice_src}")
 endforeach()
 
+# 基准图目录的绝对路径，unit_tests 与 render_regression 共用。
+# 必须以绝对路径注入：ctest 的工作目录是 build/，而 pixel_regression.h 旧版
+# 硬编码相对路径 "tests/golden/" 会解析成 build/tests/golden/ → 找不到基准图 →
+# 旧逻辑自动创建并返回 passed → **测试永远假通过**。
+# file(TO_CMAKE_PATH) 把 Windows 反斜杠转为正斜杠，避免路径中的 \ 在 C
+# 字符串字面量里被当转义符。
+file(TO_CMAKE_PATH "${CMAKE_SOURCE_DIR}/tests/golden" SR_GOLDEN_DIR_PATH)
+
 # 单元测试（Google Test，源码在 third/googletest-main）
 enable_testing()
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 add_subdirectory(third/googletest-main EXCLUDE_FROM_ALL)
 add_executable(unit_tests tests/test_core.cpp)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main softrenderer)
+# unit_tests 里的 PixelRegression 套件会验证 goldenPath 确实是绝对路径，
+# 所以本目标也需要该定义；缺失时那个用例会 FAIL 而不是静默退化。
+target_compile_definitions(unit_tests PRIVATE "SR_GOLDEN_DIR=\"${SR_GOLDEN_DIR_PATH}\"")
 include(GoogleTest)
 gtest_discover_tests(unit_tests)
+
+# 开发迭代用的快速冒烟项：单进程跑完全部用例（实测 ~7 毫秒）。
+#
+# 为何需要它：gtest_discover_tests 把**每个用例**注册为一个独立 ctest 项，
+# 113 用例 = 113 次进程创建，串行实测约 40 秒 —— 开销全在进程启动而非测试本身。
+# 保留 discover 是为了 CI 失败时能精确定位到单个用例；开发时用
+#   ctest --test-dir build -L fast
+# 只跑这一项。CI 则用 ctest --parallel 并行跑全部项。
+add_test(NAME unit_tests_all COMMAND unit_tests)
+set_tests_properties(unit_tests_all PROPERTIES LABELS "fast")
+
+# ============================================================
+# 集成测试：端到端像素回归
+#
+# 单元测试只能断言局部性质，无法锁定「整条管线跑完画面是否对的」。
+# rasterizer_fast 的深度插值权重错位能长期潜伏，正是因为缺这张网
+# （详见 docs/tasks/DONE/TASK-002-光栅化器缺陷修复.md）。
+#
+# 基准图在 tests/golden/*.tga，已纳入版本控制（.gitignore 不排除该目录）。
+# ============================================================
+option(SR_UPDATE_GOLDEN "像素回归：基准图缺失时自动创建而非失败（仅本地更新基准时用，提交前必须关掉）" OFF)
+
+add_executable(render_regression tests/integration/render_regression_test.cpp)
+target_link_libraries(render_regression PRIVATE GTest::gtest_main softrenderer)
+target_compile_definitions(render_regression PRIVATE "SR_GOLDEN_DIR=\"${SR_GOLDEN_DIR_PATH}\"")
+if(SR_UPDATE_GOLDEN)
+    target_compile_definitions(render_regression PRIVATE SR_UPDATE_GOLDEN)
+    message(STATUS "SR_UPDATE_GOLDEN=ON：缺失的基准图将被自动创建。提交前请关掉本选项。")
+endif()
+
+# 不用 gtest_discover_tests：只有 3 个用例，整个二进制作为一项即可，
+# 避开 3 次额外的进程启动。打 regression 标签，便于单独跑或排除：
+#   ctest --test-dir build -L regression      # 只跑像素回归
+#   ctest --test-dir build -LE regression     # 排除像素回归
+add_test(NAME render_regression COMMAND render_regression)
+set_tests_properties(render_regression PROPERTIES LABELS "regression")
 
 # 安装规则
 include(cmake/install.cmake)

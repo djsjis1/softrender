@@ -1,105 +1,66 @@
 # 当前活跃任务
 
 > 本文件是 `ai_workflow_rules.md` Step 0 要求开工前必读的入口。
-> 全部任务索引见 [`README.md`](README.md)。
+> 全部任务索引见 [`README.md`](README.md)，已完成任务档案在 [`DONE/`](DONE/)。
 
-## TASK-004：CI 跨平台修复与测试基础设施
+## TASK-005：构建系统现代化
 
 **快速状态**：待开始（下一个执行目标）
 
-**目标**：让 CI 第一次真正跑起来并全绿，清理死代码，接线像素回归测试。
+**目标**：消除 CMake 全局指令、补齐三构建类型与 Sanitizer、接入静态检查与格式化。
 
-**最关键的一步**：`CMakeLists.txt` 给三个 realtime 示例加 `if(WIN32)` 守卫——
-`platform/win32_window.h` 整体包在 `#ifdef _WIN32` 内，而
-`stage6_realtime` / `stage8_realtime` / `stage1_sprite_anim` 无条件使用 `Win32Window`，
-ubuntu 与 macos 两个 job **100% 编译失败**。
+**阻塞项**：**需用户确认是否安装 LLVM 工具链**。
+实测 `where.exe clang-format` 无输出，`clang-format` 与 `clang-tidy` 均未安装，
+因此本任务的「零警告 `/WX`」「`.clang-tidy`」「全仓格式化」三节无法验收。
+不安装也可先做 target-based 改造与 Sanitizer 两节。
 
-**阻塞项**：本地无法验证 Linux/macOS 构建，**验收依赖推送到 GitHub 后的远端 CI**。
-当前仓库未配置远端。
+**下一步**：CMake target-based 改造（消除 6 处 `include_directories` + `link_libraries`）
+
+**关键约束**：改造前必须记录基线（24 个 exe + 120 单元测试 + 3 回归），
+改造后**删除 build 缓存全新配置**再逐项比对，出问题直接 `git revert`。
 
 ---
 
-## 已完成：TASK-003 外部输入校验与边界安全
+## 剩余待修缺陷（按优先级）
 
-**完成于** 2026-09-05。单元测试 97 → **113 全绿**，全量构建零警告，20 个离屏示例全部正常。
+| # | 缺陷 | 任务 |
+|---|---|---|
+| 1 | 无 Sanitizer：TASK-003 修的那类 UB（整数溢出、越界读）目前**没有任何机制能自动发现** | TASK-005 |
+| 2 | MSVC 只有 `/W4` 无 `/WX`，规范要求零警告编译 | TASK-005 |
+| 3 | `.clang-format` 从未执行：19 个 `src/` 头文件 namespace 缩进违反配置第 92 行 | TASK-005 |
+| 4 | `tests/test_core.cpp` 1200+ 行单文件，29+ 套件混在一起 | TASK-006 |
+| 5 | 无覆盖率度量，规范要求核心模块行覆盖率 ≥ 80% | TASK-006 |
+| 6 | **60 个顶层类型位于全局命名空间**，`Position`/`Light`/`Texture` 对下游集成方构成实际冲突风险 | TASK-007 |
 
-修复了原计划的四类缺陷，**并在实施中新发现三类**：
+### 需用户手动执行的两项
 
-| 类别 | 内容 |
+| 项 | 原因 |
 |---|---|
-| 计划内 | `image_loader.h:38` 有符号整数溢出 UB；`getPixel`/`DepthBuffer::get` 在 Release 下越界读 UB；`blend.h` 截断而非四舍五入；5 个枚举不合规 |
-| **新发现** | `core/log.h` 内置模式 4 个缺陷（非 POD 过 varargs 的 UB、`{}` 从不替换、字面 `%` 的 UB、`levelName` 数组漏 `Off`） |
-| **新发现** | `image_loader.h` / `image_write.h` / `CMakeLists.txt` 三处注释声称**不存在的文件**；真实分工是 `tiny_gltf_impl.cpp` 只提供 stb、**不含 tinygltf** |
-| **新发现** | `gltf_types.h` 的 `Channel::path` 无默认值，而 glTF 允许 `"weights"` 等值 → 三个分支全不命中时是不确定值 |
-
-`core/log.h` 的重构值得单独强调：`unit_tests` 与 20 个示例都未启用 spdlog，
-所以内置模式是**常用路径**而非兜底 —— 意味着默认构建下所有带参日志一直是无效的。
-现已改为变参模板，并把格式化拆成可测试的 `sr::formatLog`。
-
-详见 [`DONE/TASK-003-输入校验与边界安全.md`](DONE/TASK-003-输入校验与边界安全.md)。
+| `git rm src/test/test_framework.h` + `rmdir src\platform` | 删除工具被环境阻断，连续两次报成功而文件仍在。属无害死代码（零引用、不参与编译） |
+| 推送远端并确认三平台 CI 全绿 | 本地无法验证 Linux/macOS 构建，TASK-004 的最终验收依赖远端 CI |
 
 ---
 
-## 已完成：TASK-002 光栅化器缺陷修复
+## 已完成
 
-**完成于** 2026-09-05，commit `73122d3`，已 `--no-ff` 合入 `develop`。
+| 任务 | 核心成果 | 测试数 |
+|---|---|---|
+| [TASK-004](TASK-004-CI跨平台与测试基础设施.md) | 修复 ubuntu/macos job 必然编译失败；去掉吞失败的 `\|\| true`；接线像素回归并修复两个「永远假通过」陷阱（已反向验证）；ctest 39.89 秒 → 14.06 秒 | 113 → **120** + 3 回归 |
+| [DONE/TASK-003](DONE/TASK-003-输入校验与边界安全.md) | `image_loader.h` 整数溢出 UB；`getPixel`/`DepthBuffer::get` Release 越界读 UB；`blend.h` 截断改四舍五入；5 个枚举合规；**`core/log.h` 内置模式重写为变参模板**（消除 4 个缺陷） | 97 → **113** |
+| [DONE/TASK-002](DONE/TASK-002-光栅化器缺陷修复.md) | `rasterizer_fast.h` 深度插值重心权重错位（实测误差 0.325）+ 顺时针三角形静默丢弃 | 94 → **97** |
+| TASK-001 | git 初始化 + `.gitignore`；README / architecture / modules / changelog / troubleshooting / third 文档；7 个 TASK 建档；规则红线（11 条）与命令 | — |
 
-修复了两个**被现有测试完全掩盖**的真实缺陷：
+### 三个最值得记住的教训
 
-1. `rasterizer_fast.h` 深度插值的重心权重错位（同序映射 → 错位映射）
-   实测误差：靠近 v0 处期望 0.17917、实际 **0.50417**
-2. `setupEdges` 不做符号归一化 → 顺时针三角形被**静默丢弃**
-   实测：`fb` 全黑、`zb` 恒为 `1e9`
+1. **一致性测试不能替代正确性测试**。`SSE2MatchesScalar` 在修复前就通过——因为标量版与
+   SSE2 版犯了同样的权重错位，两版彼此一致。正确性必须由独立算出的期望值来验证
+   （TASK-002 用面积法另写了一份 `barycentricByArea`，刻意不复用被测代码的边函数）。
 
-新增 3 个回归测试，单元测试 94 → **97 全绿**。详见
-[`DONE/TASK-002-光栅化器缺陷修复.md`](DONE/TASK-002-光栅化器缺陷修复.md)。
+2. **对称盲点会让测试失效**。三角形几何重心处 `w0=w1=w2=1/3`，正确映射与错位映射
+   都得到同一个值。采样点必须取靠近各顶点的非对称位置。同理，插值类测试的
+   三个顶点取值**必须互不相等**——这条已写进 `engineering_rules.md` 红线。
 
----
-
-## 已完成：TASK-001 工程基线建设（部分）
-
-- git 仓库初始化于 `develop`，首次提交 `e12b16e`（891 文件）
-- `.gitignore` + `output/.gitkeep`
-- 根 `README.md`、`docs/architecture.md`、`docs/modules.md`、
-  `docs/changelog.md`、`docs/troubleshooting.md`、`third/README.md`
-- `docs/tasks/` 建档（7 个 TASK）
-- `.qoder/rules/engineering_rules.md` 的「红线约束」（11 条）与「命令」两节已填写
-
-**剩余项**：
-
-1. 校正 `docs/engineering/54-项目当前状态总览.md` 的数据漂移
-   （含 TASK-002 要求的「SSE2 四像素并行」移至实验性）
-2. 删除空目录 `src/platform/`（git 不跟踪空目录，仅本地工作区残留）
-3. 处理 `.qoder/rules/1.md`（空的 always_on 规则文件，无意义命名）
-
----
-
-## 排队中的任务（按依赖顺序）
-
-| 顺序 | 任务 | 关键内容 | 阻塞项 |
-|---|---|---|---|
-| → | [TASK-004](TASK-004-CI跨平台与测试基础设施.md) | CI 在 Linux/macOS 必然编译失败 + 死代码清理 + 像素回归接线 | 需推送远端才能验收 |
-| 5 | [TASK-005](TASK-005-构建系统现代化.md) | CMake target-based 改造 + Sanitizer + clang-tidy + 全仓格式化 | **需用户确认是否安装 LLVM 工具链** |
-| 6 | [TASK-006](TASK-006-测试目录重构与覆盖率.md) | 拆分 1079 行测试文件 + 覆盖率接入 | 需 TASK-004 完成 |
-| 7 | [TASK-007](TASK-007-全局命名空间收敛.md) | 60 个全局类型收敛进 `namespace sr` | 需 ADR；**必须最后执行** |
-
-## 最高优先级的待修缺陷
-
-前五项已修复（保留作为历史记录）：
-
-1. ~~`rasterizer_fast.h` 深度插值重心权重错位~~ → **已修复**（TASK-002）
-2. ~~`rasterizer_fast.h` 顺时针三角形被静默丢弃~~ → **已修复**（TASK-002）
-3. ~~`image_loader.h:38` 有符号整数溢出 UB~~ → **已修复**（TASK-003）
-4. ~~`Framebuffer::getPixel` 在 Release 下越界读 UB~~ → **已修复**（TASK-003）
-5. ~~`core/log.h` 内置模式的 4 个缺陷~~ → **已修复**（TASK-003）
-
-**当前剩下的最高优先级**：
-
-6. **CI 在 ubuntu / macos 上 100% 编译失败**（TASK-004）
-   —— 三个 realtime 示例无条件使用 `Win32Window`，而该头文件整体包在
-   `#ifdef _WIN32` 内。因仓库从未 push，此问题从未暴露
-7. **CI smoke test 末尾的 `|| true` 吞掉所有失败**（TASK-004）
-   —— 该步骤永远不会红，属典型的掩盖症状
-8. **像素回归测试未接线**（TASK-004）
-   —— 113 个单元测试全是局部性质断言，**没有任何测试锁定完整渲染结果**；
-   TASK-002 那个 bug 能长期潜伏正是因为缺这张网
+3. **不能依赖文件名或既有注释推断事实**。`tiny_gltf_impl.cpp` 位于 `tinygltf/` 目录、
+   名字也叫 `tiny_gltf_impl`，但它完全不含 tinygltf 的实现，只提供 stb。
+   根 `CMakeLists.txt` 的旧注释也是错的，我最初轻信并写进了两份文档，
+   读 `.cpp` 后才发现。
