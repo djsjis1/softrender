@@ -45,6 +45,19 @@
 #include "scene/texture.h"
 #include "test/pixel_regression.h"
 
+// ⚠ 本文件**故意不使用** `using namespace sr;`。
+//
+// 实测证明它与下方的 ECS 编译期哨兵不相容：全局作用域的 `struct Position`
+// 哨兵与 using-directive 引入的 `sr::Position` 构成 **二义性**（MSVC C2872），
+// 而不是「全局声明遮蔽 using-directive 名字」—— using-directive 会把 sr 的成员
+// 当作最近公共外围命名空间（此处即全局）的成员参与查找，两者同级。
+//
+// 另外 gtest 的 `TEST(GBuffer, WriteAndRead)` 会创建名为 `GBuffer` 的**命名空间**，
+// 与 using-directive 引入的 `sr::GBuffer` 类同名也会冲突。
+//
+// 哨兵的价值（用编译器锁定「全局作用域不再有 Position」这个不变量）
+// 高于 using-directive 的书写便利，因此本文件统一写显式 `sr::` 限定。
+
 // ==================== 向量 ====================
 
 TEST(Vec, DotOrthogonal)
@@ -1185,7 +1198,7 @@ TEST(ECS, globalCanaryTypesAreDistinctFromSrComponents)
 
 TEST(GBuffer, WriteAndRead)
 {
-    GBuffer gbuf;
+    sr::GBuffer gbuf;
     gbuf.resize(4, 4);
     EXPECT_TRUE(gbuf.write(1, 1, 0.5f, Vec3f{1, 2, 3}, Vec3f{0, 1, 0}, 0.3f, Vec3f{0.8f, 0.2f, 0.1f}, 0.0f));
     EXPECT_FALSE(gbuf.write(1, 1, 0.8f, Vec3f{0, 0, 0}, Vec3f{0, 1, 0}, 0.5f, Vec3f{1, 1, 1}, 1.0f));  // farther
@@ -1342,7 +1355,7 @@ TEST(ResourceManager, CacheAndPurge)
 
 TEST(CommandBuffer, SequentialExecution)
 {
-    CommandBuffer cmd;
+    sr::CommandBuffer cmd;
     int counter = 0;
     cmd.record([&]() { counter += 1; });
     cmd.record([&]() { counter += 10; });
@@ -1353,7 +1366,7 @@ TEST(CommandBuffer, SequentialExecution)
 
 TEST(CommandBuffer, ParallelExecution)
 {
-    CommandBuffer cmd;
+    sr::CommandBuffer cmd;
     std::atomic<int> counter{0};
     for (int i = 0; i < 100; ++i)
         cmd.record([&]() { counter.fetch_add(1); });
@@ -1363,7 +1376,7 @@ TEST(CommandBuffer, ParallelExecution)
 
 TEST(ThreadPool, SubmitAndWait)
 {
-    ThreadPool pool(4);
+    sr::ThreadPool pool(4);
     std::atomic<int> sum{0};
     for (int i = 0; i < 50; ++i)
         pool.submit([&]() { sum.fetch_add(1); });

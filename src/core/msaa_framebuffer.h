@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <utility>  // std::pair（kMSAA4Offsets 的元素类型）
 #include <vector>
 
 #include "core/color.h"
@@ -23,7 +24,13 @@
 // 4x MSAA 的旋转网格采样点（像素中心为原点的偏移）：
 //   (+3/8, +1/8), (+1/8, +3/8), (-1/8, -3/8), (-3/8, -1/8)
 // 这是 GPU 硬件常用的模式，对角线边缘覆盖更均匀。
+//
+// 【命名空间】MSAAFramebuffer 与 kMSAA4Offsets 已迁入 namespace sr
+// （ADR-001 第 2 批）。引用方：仅 stage9_msaa.cpp。
 // ============================================================
+
+namespace sr
+{
 
 template <int N>
 class MSAAFramebuffer
@@ -116,3 +123,5 @@ class MSAAFramebuffer
 // 4x MSAA 标准旋转网格采样偏移（像素坐标的分数偏移）
 inline constexpr std::array<std::pair<float, float>, 4> kMSAA4Offsets = {
     {{0.375f, 0.125f}, {0.125f, 0.375f}, {-0.125f, -0.375f}, {-0.375f, -0.125f}}};
+
+} // namespace sr

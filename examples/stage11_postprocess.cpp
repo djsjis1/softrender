@@ -17,6 +17,9 @@
 #include "raster/triangle.h"
 #include "scene/mesh.h"
 
+// 本库公共符号正逐步迁入 namespace sr（见 docs/adr/ADR-001）。
+using namespace sr;
+
 // 简易 HDR 渲染：画带自发光强度的球
 static void renderHDRScene(FloatFramebuffer &hdrFB, int W, int H)
 {

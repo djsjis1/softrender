@@ -15,7 +15,14 @@
 // 需要浮点缓冲暂存，最后经色调映射压回 [0,1] 再显示。
 //
 // 同时自带深度缓冲，可直接用于主渲染 pass。
+//
+// 【命名空间】FloatFramebuffer 已迁入 namespace sr（ADR-001 第 2 批）。
+// 引用方：post_effects.h、gbuffer.h、demo_stars.cpp、stage11_postprocess.cpp。
 // ============================================================
+
+namespace sr
+{
+
 class FloatFramebuffer
 {
 public:
@@ -150,3 +157,5 @@ private:
     std::vector<Vec3f> pixels_;
     DepthBuffer depth_;
 };
+
+} // namespace sr

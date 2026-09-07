@@ -21,6 +21,10 @@
 #include "core/tga.h"
 #include "math/vec.h"
 
+// 本库公共符号正逐步迁入 namespace sr（见 docs/adr/ADR-001）。
+// 示例属于应用代码，用 using-directive 比逐处写 sr:: 前缀更接近真实集成方式。
+using namespace sr;
+
 // 简单 2D 噪声（value noise）
 static float hash21(float x, float y)
 {

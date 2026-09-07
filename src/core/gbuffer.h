@@ -20,7 +20,13 @@
 //   Depth: 深度（共用 FloatFramebuffer 的 depth）
 //
 // 参考：LearnOpenGL Deferred Shading、Filament 的 FrameGraph。
+//
+// 【命名空间】GBuffer 及本文件的延迟光照自由函数已迁入 namespace sr
+// （ADR-001 第 2 批）。实测引用面：仅本文件 + tests/test_core.cpp，故不留全局别名。
 // ============================================================
+
+namespace sr
+{
 
 struct GBuffer
 {
@@ -118,3 +124,5 @@ inline void lightingPass(const GBuffer &gbuf, const Vec3f &lightDir,
         outColor[i] = (diff + spec) * lightColor * NdotL + albedo * ambient;
     }
 }
+
+} // namespace sr

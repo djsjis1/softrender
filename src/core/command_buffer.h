@@ -19,7 +19,13 @@
 //   cmd.executeParallel(4); // 4 线程并行执行所有命令
 //
 // 注意：命令之间必须无数据依赖（不同物体/不同 tile 的渲染）。
+//
+// 【命名空间】CommandBuffer 与 ThreadPool 已迁入 namespace sr（ADR-001 第 2 批）。
+// 引用方：仅 tests/test_core.cpp（stage12_threaded 用自己的 std::thread 分条）。
 // ============================================================
+
+namespace sr
+{
 
 class CommandBuffer {
 public:
@@ -137,6 +143,12 @@ private:
     std::mutex mutex_;
     std::condition_variable cv_;
     std::condition_variable doneCv_;
-    bool stop_;
+    // 声明即初始化：stop_ 是线程池的**退出标志**，工作线程会在构造后立即
+    // 读它。若构造函数漏了初始化（或将来改动遗漏），读到的就是不确定值，
+    // 而且因为有多线程参与，表现为难重现的偶发挂死/提前退出。
+    // engineering_rules.md：「线程必须有明确生命周期与可控退出标志」。
+    bool stop_ = false;
     int activeCount_ = 0;
 };
+
+} // namespace sr

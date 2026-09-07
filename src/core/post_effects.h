@@ -19,6 +19,13 @@
 
 namespace postprocess {
 
+// FloatFramebuffer 已迁入 namespace sr（ADR-001 第 2 批），而本命名空间仍在全局。
+// 在 namespace postprocess 内部的名字查找只会回落到**全局**，不会进入 sr，
+// 所以必须显式引入。用 using-**声明**而非 using-directive：只引入确实需要的
+// 一个名字，避免把整个 sr 暴露到本命名空间而引入意外歧义。
+// （Vec3f / Color 仍在全局，靠回落正常解析，无需引入。）
+using sr::FloatFramebuffer;
+
 // ---- DOF 景深 ----
 // focusDist: 焦点距离（视图空间 z）
 // focusRange: 焦点清晰范围
