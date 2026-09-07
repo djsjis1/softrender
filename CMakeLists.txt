@@ -164,12 +164,21 @@ add_library(SoftRenderer::softrenderer ALIAS softrenderer)
 
 # 项目内部开发标志（INTERFACE 库，只给本仓的示例 / 练习 / 测试目标链接）
 add_library(sr_dev_flags INTERFACE)
-# 代码要求零警告通过（cpp_project_rules.md「零警告原则」）。
-# /WX 与 -Werror 待 TASK-005c 实测警告数清零后再加。
+# 零警告原则（cpp_project_rules.md）：要求在 -Wall -Wextra -Werror 下无警告编译。
+#
+# 【为何现在就能开 /WX】实测多次全量构建在 /W4 下已是**零警告**，
+# 所以开启 /WX 不会引入新的编译失败，只是把已有约定变成构建期强制。
+#
+# 【作用范围】sr_dev_flags 只被本仓的示例 / 练习 / 测试目标链接，因此：
+#   - third_party_impl 不受影响（它只有自己的 PRIVATE /utf-8 /wd4819）
+#   - googletest / spdlog 不受影响（由 add_subdirectory 引入，不链接本目标）
+#   - 下游集成方不受影响（本目标不导出）
+# 这一点很关键：若把 /W4 /WX 放进 softrenderer INTERFACE，就会把本项目的
+# 警告策略强加给所有集成方，包括他们自己的代码。
 if(MSVC)
-    target_compile_options(sr_dev_flags INTERFACE /W4)
+    target_compile_options(sr_dev_flags INTERFACE /W4 /WX)
 else()
-    target_compile_options(sr_dev_flags INTERFACE -Wall -Wextra)
+    target_compile_options(sr_dev_flags INTERFACE -Wall -Wextra -Werror)
 endif()
 # 禁用 windows.h 的 min/max 宏，避免破坏 std::min/std::max。
 # 只对引用 windows.h 的目标有意义（即 platform/win32_window.h 与三个 realtime 示例）；

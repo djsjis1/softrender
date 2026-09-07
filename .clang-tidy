@@ -1,0 +1,107 @@
+# ============================================================
+# SoftRenderer .clang-tidy 配置
+#
+# 按 .qoder/rules/cpp_project_rules.md「工具链规范」启用
+# bugprone-* / cppcoreguidelines-* / modernize-* / performance-* / readability-*。
+#
+# ⚠️ 本配置在创建时 clang-tidy **尚未安装**，因此未经实跑调参。
+#    下面被显式禁用的检查，都是根据本代码库的既有写法**推定**会大量误报的，
+#    每条都写了禁用理由。首次实跑后应按真实输出增删，并更新本文件的理由说明。
+#
+# 只检查 src/：第三方库由 third/.clang-tidy 单独关闭全部检查。
+# ============================================================
+---
+Checks: >
+  bugprone-*,
+  cppcoreguidelines-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  -bugprone-easily-swappable-parameters,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -cppcoreguidelines-macro-usage,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-function-cognitive-complexity,
+  -modernize-use-trailing-return-type,
+  -modernize-avoid-c-arrays,
+  -readability-redundant-access-specifiers
+
+# 只报告 src/ 下头文件里的问题，忽略第三方与构建目录
+HeaderFilterRegex: '.*/src/.*'
+
+# 不自动改写源码：本项目要求格式化与静态检查分离，
+# 修复必须经人工判断（自动 fix 会绕过 review 并可能改变热路径语义）
+WarningsAsErrors: ''
+
+FormatStyle: file
+
+CheckOptions:
+  # 图形代码里 0.5f（像素中心偏移）、255.0f（8 位颜色上界）、1e-8f（退化三角形阈值）
+  # 这类字面量的含义由上下文与注释承载，强行提取为常量反而降低可读性。
+  # 但真正的魔数仍应提取 —— 见 engineering_rules.md「魔数提取为具名常量」。
+  - key: readability-magic-numbers.IgnoredFloatingPointValues
+    value: '0.5;1.0;2.0;255.0;0.0'
+
+  # 允许 assert 中的断言表达式（本项目用 assert 做 Debug 期边界契约检查）
+  - key: bugprone-assert-side-effect.AssertFunctionName
+    value: 'assert'
+...
+
+# ============================================================
+# 禁用理由逐条说明
+# ============================================================
+#
+# -bugprone-easily-swappable-parameters
+#   图形代码的函数签名天然是 (float x, float y) / (float x0, float y0, float x1, float y1)
+#   / (Vec2f v0, Vec2f v1, Vec2f v2)。这些参数**本就同类型且可交换**，
+#   该检查会在几乎每个图元函数上报警，噪声远超价值。
+#   真正的调用错误由像素回归测试（tests/integration/）捕获，比静态检查更可靠。
+#
+# -cppcoreguidelines-pro-bounds-pointer-arithmetic / -readability-magic-numbers
+#   renderer.h 的内层循环刻意使用 fb.row(y) / zbuf_.row(y) **行指针直写**，
+#   绕过逐像素边界检查以换取性能；包围盒预先 clamp 保证安全
+#   （已录入 engineering_rules.md 红线约束）。
+#   指针算术是这里的核心手段，不是缺陷。
+#
+# -cppcoreguidelines-pro-type-vararg
+#   core/log.h 的内置模式最终仍会调 std::fprintf(stderr, "[%s] %s:%d: %s\n", ...)。
+#   但参数已经过 sr::formatLog（变参模板 + ostringstream）类型安全地格式化完毕，
+#   fprintf 只接收固定 4 个参数、消息经单个 %s 传入，不存在可变参类型风险。
+#   这是有意的：用一次 vararg 调用换取 src/ 零第三方依赖。
+#
+# -cppcoreguidelines-avoid-non-const-global-variables
+#   sr::Log::level_ 是 static inline 成员（Meyers 式全局状态），
+#   日志级别本就需要进程级单例，且提供了 level()/setLevel() 访问器。
+#
+# -cppcoreguidelines-macro-usage
+#   SR_LOG_* / SR_PROFILE_SCOPE 必须是宏：它们依赖 __FILE__ / __LINE__ 与
+#   条件编译（SR_USE_SPDLOG 双模式），函数无法替代。
+#
+# -readability-identifier-length
+#   数学与光栅化代码里 x/y/z/u/v/w/r/g/b/a/e0/e1/e2/dx/dy 是**领域标准记号**，
+#   改成 descriptive 名称反而让熟悉图形学的读者更难对应到公式。
+#   vec.h / mat4.h / rasterizer_fast.h 的注释已解释每个符号的几何含义。
+#
+# -readability-function-cognitive-complexity
+#   Renderer::rasterTriangle 与 sr2d::plotBlend 的复杂度来自渲染管线本身
+#   （裁剪→透视除法→视口变换→剔除→增量边函数→深度测试→插值→着色），
+#   每一步都必须在同一个像素循环内完成，拆函数会破坏热路径。
+#   这类函数靠**分步注释**而非拆分来保证可读性。
+#
+# -modernize-use-trailing-return-type
+#   会把全部约 300 个函数签名改写一遍，纯风格变更，零收益，
+#   且与 .clang-format 的 AlwaysBreakAfterReturnType: None 配置冲突。
+#
+# -modernize-avoid-c-arrays
+#   clip.h 的 ClipVertex bufA[kMaxClipVerts] 与 shader.h 的 ClipVertex tri[3]
+#   是**栈上定长数组**，位于逐三角形热路径。换成 std::array 会引入
+#   构造/边界检查开销，且这些数组的大小是编译期常量、生命周期限于函数内，
+#   不存在 C 数组的典型风险（ decay、size 丢失）。
+#
+# -readability-redundant-access-specifiers
+#   本项目头文件用连续多个 public:/private: 分段组织（如 renderer.h 把
+#   cullBackface/nearClip 两个开关单独成段），这是有意的可读性安排。

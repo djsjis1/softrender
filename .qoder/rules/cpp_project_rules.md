@@ -278,6 +278,29 @@ class VideoDecoder {
 * 文件名与类名一致，使用 PascalCase：`VideoDecoder.h`、`VideoDecoder.cpp`
 * 工具类/函数文件使用 snake_case：`string_utils.h`、`frame_pool.cpp`
 
+### SoftRenderer 项目例外：`src/` 下统一 snake_case
+
+本项目 52 个头文件**全部是 snake_case**（`framebuffer.h` 里是 `class Framebuffer`、
+`renderer2d.h` 里是 `class Renderer2D`），不改为 PascalCase。
+
+依据：`.qoder/rules/README.md`「规则与现实冲突时，先修规则，再执行」。
+
+理由：
+
+1. **本项目是 header-only 库**，每个头文件既导出类型也导出大量自由函数
+   （`blend.h` 的 `blendPixels`、`clip.h` 的 `clipTriangleFullFrustum`、
+   `shape2d.h` 的 `sr2d::fillRect`），本质上更接近上文已允许的
+   「工具类/函数文件」而非「类文件」。PascalCase 文件名会误导使用者
+   以为文件只含单个类。
+2. **与依赖风格一致**：`#include "core/framebuffer.h"` 的路径风格与
+   `stb_image.h`、`tiny_obj_loader.h`、`tiny_gltf.h` 等第三方依赖一致。
+3. **重命名成本与收益不对等**：52 个头文件重命名会破坏全部 `#include` 路径
+   （22 个示例 + 测试 + 下游使用者），而对可读性零提升 ——
+   `framebuffer.h` ↔ `Framebuffer` 的词根对应已经足够清晰。
+
+约束：新增头文件**必须**继续用 snake_case，且与其主类型名保持词根对应
+（如新增 `class Frustum` → `frustum.h`）。禁止混入 PascalCase 文件名。
+
 ---
 
 # C++ 并发实现规范
