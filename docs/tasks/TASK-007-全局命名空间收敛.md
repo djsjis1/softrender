@@ -3,11 +3,17 @@
 ## 基本信息
 
 - 创建日期：2026-09-05
-- 状态：待开始
-- 涉及模块：**全部** `src/`（30 个头文件）、`examples/`（22 个）、`tests/`、`practice/`
-- 变更级别：**L**（架构级 + 破坏公共接口 + 必须建 ADR）
+- 状态：**第 1 批已完成**（ECS 组件），余 52 个类型待分批
+- 涉及模块：**全部** `src/`、`examples/`（22 个）、`tests/`、`practice/`
+- 变更级别：**L**（架构级 + 破坏公共接口 + 已建 ADR）
 - 前置依赖：TASK-001、TASK-005（格式化完成）、TASK-006（测试拆分完成）
-- **必须最后执行**：本任务触及每一个源文件，与任何并行任务都会冲突
+- **决策记录**：[`docs/adr/ADR-001-namespace-convergence.md`](../adr/ADR-001-namespace-convergence.md)
+
+> ⚠️ **本档案下方的「收敛策略：渐进式」一节已被 ADR-001 推翻。**
+> 原计划的「全量别名桥」方案有根本缺陷：`using sr::Position;` 仍然把
+> `Position` 注入全局命名空间，**别名桥不解决撞名问题**。
+> 实际采用的是 ADR-001 的方案 D：**按引用面大小分类**。
+> 下方原文保留作为决策演进记录（ADR 不得事后修改，但任务档案可以标注）。
 
 ## 目标
 
@@ -143,20 +149,46 @@ namespace sr {}
 
 ## 进度清单
 
-- [ ] 创建 `docs/adr/ADR-001-namespace-convergence.md`
-- [ ] 新建 `src/core/namespace.h`
-- [ ] 阶段二·优先级 1：迁移 `scene/components.h`（8 个 ECS 组件）+ 单独 commit
-- [ ] 阶段二·优先级 2：迁移 `skeleton.h` / `texture.h` / `mesh.h` / `camera.h` + 单独 commit
-- [ ] 阶段二·优先级 3：迁移 `color.h` / `math/` 全部 + 单独 commit
-- [ ] 阶段二·优先级 4：迁移 `shader/` / `core/` 其余 / `raster/` + 单独 commit
-- [ ] 迁移全局枚举 `ClipPlane`、`BlendMode`
-- [ ] 迁移全局自由函数 `blendPixels`、`interpolateVaryings`、`drawLine` 等
-- [ ] 阶段三：移除全部全局 `using` 别名
-- [ ] 版本号升至 2.0.0（`CMakeLists.txt` + `cmake/version.cmake`）
-- [ ] 更新 `docs/architecture.md` §5「命名空间现状」
-- [ ] 更新 `docs/modules.md` 各模块的类型表
+### 第 1 批：ECS 组件 —— 已完成（2026-09-07）
+
+- [x] 创建 `docs/adr/README.md` 索引
+- [x] 创建 `docs/adr/ADR-001-namespace-convergence.md`（4 个备选方案对比）
+- [x] 新建 `src/core/namespace.h`（约定锚点 + 迁移进度文档）
+- [x] **实测引用面**：`components.h` 仅被 2 个文件引用；`Light` 零使用；
+      22 个示例无一使用 ECS → 判定可不留别名直接迁完
+- [x] `scene/components.h`：8 个组件迁入 `namespace sr`，**不留全局别名**
+- [x] `tests/test_core.cpp` ECS 套件改用 `sr::` 限定
+- [x] 新增**编译期哨兵**：在测试文件全局作用域声明 8 个同名类型。
+      能编译通过本身就证明目标达成；若有人加回 `using sr::X;` 会直接报重定义
+- [x] 新增用例 `ECS.globalCanaryTypesAreDistinctFromSrComponents`（`std::is_same` 断言）
+- [x] 验证：全局类型数 **60 → 52**；构建零警告；单元测试 120 → **121 全绿**；
+      像素回归 3 场景仍匹配基准图；25 个 exe 与基线一致
+- [x] 同步 `docs/architecture.md` §5、`docs/modules.md`、`docs/changelog.md`
+
+### 后续批次（待做）
+
+按 ADR-001，先用同样方法**实测每个类型的引用面**，再决定是否需要别名桥：
+
+- [ ] 第 2 批：`skeleton.h`（`Animation`/`Keyframe`/`Bone`/`Skeleton`/
+      `VertexBoneWeights`/`AnimationChannel`）、`texture.h`（`Texture`）、
+      `mesh.h`（`Mesh`/`Vertex`）、`camera.h`（`Camera`/`Camera2D`）
+- [ ] 第 3 批：`color.h`（`Color`）、`math/`（`Vec2/3/4`、`Mat3`、`Mat4`、`Quat`、`Rect2`）
+- [ ] 第 4 批：`shader/`（8 个）、`core/` 其余、`raster/`
+- [ ] 全局枚举 `ClipPlane`（已改 enum class，但仍在全局）、`BlendMode`
+- [ ] 全局自由函数 `blendPixels`、`interpolateVaryings`、`drawLine`、`fillTriangle` 等
+- [ ] 全部完成后移除所有别名，版本升至 2.0.0
 - [ ] 更新 `README.md` 的集成示例代码
-- [ ] `docs/changelog.md` 记录不兼容变更与迁移指引
+
+### 扫描时的陷阱（第 1 批实测经验）
+
+1. **`Select-String` 默认大小写不敏感**：搜 `Light` 会命中小写局部变量 `light`。
+   必须加 `-CaseSensitive`。
+2. **嵌套枚举项会冒充全局类型**：`GltfAnimation::Channel::Path::Rotation` 与
+   全局 `struct Rotation` 同名但完全无关。初扫时曾因此高估迁移成本。
+3. **按行匹配 `^(class|struct)` 会误计**：部分头文件的 namespace 体不缩进
+   （`NamespaceIndentation: None`），导致 namespace 内部的类型也被当成全局。
+   正确做法是对整个文件文本用 `IndexOf("\nnamespace ")` 定位首个 namespace，
+   只统计其**之前**的声明。初版的 65 这个错误数字就是这么来的，实际是 60。
 
 ## 风险
 
@@ -181,3 +213,6 @@ namespace sr {}
 | 日期 | 变更 |
 |------|------|
 | 2026-09-05 | 创建任务；实测扫描确认 60 个全局类型 / 30 个头文件，完成迁移优先级排序 |
+| 2026-09-07 | 立 ADR-001，推翻原「全量别名桥」方案，改为按引用面分类（方案 D） |
+| 2026-09-07 | 完成第 1 批：8 个 ECS 组件迁入 `sr` 且不留别名；全局类型 60 → 52；
+              新增编译期哨兵 + 1 个用例；121 测试全绿 |

@@ -8,6 +8,7 @@
 
 #include <entt/entt.hpp>
 #include <filesystem>
+#include <type_traits>
 
 #include "core/arena.h"
 #include "core/benchmark.h"
@@ -1069,6 +1070,48 @@ TEST(RasterizerFast, fillTriangleSSE2_slopeDepthMatchesScalar)
 
 // ==================== ECS (EnTT) ====================
 
+// 【编译期验收哨兵】在全局作用域声明与 8 个 ECS 组件同名的类型。
+//
+// 这能编译通过，本身就证明了 ADR-001 的目标已达成：下游使用者现在
+// **可以**定义自己的 Position / Light / Texture 而不与本库冲突。
+//
+// 若将来有人图省事在 components.h 里加回 `using sr::Position;`（别名桥），
+// 本处会立即报**重定义编译错误** —— 因为 using 声明仍会把名字注入全局作用域，
+// 根本解决不了撞名。这正是 ADR-001 拒绝对高冲突名字使用别名桥的理由，
+// 用编译错误把它锁定下来，而不是只写在文档里。
+struct Position
+{
+    int canary = 0;
+};
+struct Velocity
+{
+    int canary = 0;
+};
+struct Rotation
+{
+    int canary = 0;
+};
+struct Scale
+{
+    int canary = 0;
+};
+struct MeshRef
+{
+    int canary = 0;
+};
+struct MaterialRef
+{
+    int canary = 0;
+};
+struct Light
+{
+    int canary = 0;
+};
+struct CameraTag
+{
+    int canary = 0;
+};
+
 TEST(ECS, CreateAndDestroy)
 {
     entt::registry registry;
@@ -1085,10 +1128,10 @@ TEST(ECS, EmplaceAndGet)
 {
     entt::registry registry;
     auto e = registry.create();
-    registry.emplace<Position>(e, Vec3f{1, 2, 3});
-    EXPECT_TRUE(registry.all_of<Position>(e));
-    EXPECT_FALSE(registry.all_of<Velocity>(e));
-    auto& pos = registry.get<Position>(e);
+    registry.emplace<sr::Position>(e, Vec3f{1, 2, 3});
+    EXPECT_TRUE(registry.all_of<sr::Position>(e));
+    EXPECT_FALSE(registry.all_of<sr::Velocity>(e));
+    auto& pos = registry.get<sr::Position>(e);
     EXPECT_FLOAT_EQ(pos.pos.x, 1.0f);
     EXPECT_FLOAT_EQ(pos.pos.y, 2.0f);
 }
@@ -1099,20 +1142,43 @@ TEST(ECS, ViewSystem)
     for (int i = 0; i < 5; ++i)
     {
         auto e = registry.create();
-        registry.emplace<Position>(e, Vec3f{float(i), 0, 0});
-        registry.emplace<Velocity>(e, Vec3f{1, 0, 0});
+        registry.emplace<sr::Position>(e, Vec3f{float(i), 0, 0});
+        registry.emplace<sr::Velocity>(e, Vec3f{1, 0, 0});
     }
     // System: move
-    registry.view<Position, Velocity>().each([](Position& p, Velocity& v) { p.pos = p.pos + v.vel; });
+    registry.view<sr::Position, sr::Velocity>().each(
+        [](sr::Position& p, sr::Velocity& v) { p.pos = p.pos + v.vel; });
     // Verify: each position should be initial + 1
     int count = 0;
-    registry.view<Position>().each([&](Position& p) {
+    registry.view<sr::Position>().each([&](sr::Position& p) {
         // 初始值是 0,1,2,3,4，加 1 后应该是 1,2,3,4,5
         EXPECT_GE(p.pos.x, 1.0f);
         EXPECT_LE(p.pos.x, 5.0f);
         ++count;
     });
     EXPECT_EQ(count, 5);
+}
+
+// 验证哨兵类型与 sr:: 组件确实是**不同类型**，而非同一类型的两个名字。
+// 若 components.h 退化成全局定义（或加了 using 别名），上面的哨兵声明
+// 会先报重定义错误；本用例是第二道保险。
+TEST(ECS, globalCanaryTypesAreDistinctFromSrComponents)
+{
+    EXPECT_FALSE((std::is_same<Position, sr::Position>::value));
+    EXPECT_FALSE((std::is_same<Light, sr::Light>::value));
+    EXPECT_FALSE((std::is_same<CameraTag, sr::CameraTag>::value));
+
+    // 哨兵类型可正常使用，证明全局作用域确实归使用者所有
+    Position canary;
+    EXPECT_EQ(canary.canary, 0);
+
+    // sr:: 组件也可正常使用，且成员语义未变
+    sr::Light light;
+    EXPECT_FLOAT_EQ(light.intensity, 1.0f);
+    EXPECT_FLOAT_EQ(light.direction.y, -1.0f);
+
+    sr::MeshRef ref;
+    EXPECT_EQ(ref.meshIndex, -1);  // -1 = 未设置，不是「第 0 个网格」
 }
 
 // ==================== GBuffer ====================

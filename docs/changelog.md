@@ -5,6 +5,92 @@
 > 按 `documentation_rules.md` 要求，每次有意义的变更都必须在此登记。
 > 重大接口变更需同时在变更内容中标注版本号。
 
+## 2026-09-07
+
+### 全局命名空间收敛第 1 批：ECS 组件（TASK-007 / ADR-001）
+
+**不兼容变更（API Break）**：8 个 ECS 组件类型从全局命名空间消失，
+现需写 `sr::` 前缀。
+
+| 旧（全局） | 新 |
+|---|---|
+| `Position` | `sr::Position` |
+| `Velocity` | `sr::Velocity` |
+| `Rotation` | `sr::Rotation` |
+| `Scale` | `sr::Scale` |
+| `MeshRef` | `sr::MeshRef` |
+| `MaterialRef` | `sr::MaterialRef` |
+| `Light` | `sr::Light` |
+| `CameraTag` | `sr::CameraTag` |
+
+迁移指引：`registry.emplace<Position>(e, ...)` → `registry.emplace<sr::Position>(e, ...)`，
+`registry.view<Position, Velocity>()` → `registry.view<sr::Position, sr::Velocity>()`。
+成员字段与语义未变（`MeshRef::meshIndex` 仍为 `-1` 表示未设置）。
+
+#### 为何现在就做、且不留全局别名
+
+先立了 [`ADR-001`](adr/ADR-001-namespace-convergence.md)，其中推翻了 TASK-007
+原计划的「全量别名桥」方案。关键认识：
+
+> `using sr::Position;` 仍然把 `Position` 注入全局命名空间，下游照样撞名。
+> **别名桥不解决撞名问题**，它只是让大改动可以分批提交的工具，
+> 不是对下游的兼容承诺。因此对高冲突名字不应使用别名桥。
+
+改为**按引用面分类**：实测发现引用面最小、冲突风险最高的正是这 8 个 ECS 组件：
+
+| 实测项 | 结果 |
+|---|---|
+| 引用 `scene/components.h` 的文件 | **恰好 2 个**（自身 + `tests/test_core.cpp`） |
+| `Light` 除定义处外的使用次数 | **0** |
+| 使用 ECS 的示例（共 22 个） | **0 个** |
+
+所以可以一次完整迁完，立即获得真实的撞名消除，而不是只做准备工作。
+
+#### 新增
+
+| 文件 | 内容 |
+|---|---|
+| `docs/adr/README.md` | ADR 索引 + 5 个待立 ADR 的已知决策点 |
+| `docs/adr/ADR-001-namespace-convergence.md` | 4 个备选方案对比、选定理由、失效条件 |
+| `src/core/namespace.h` | `namespace sr` 的约定锚点与迁移进度文档 |
+
+#### 回归防护：编译期哨兵
+
+`tests/test_core.cpp` 在**全局作用域**声明了 8 个同名哨兵类型：
+
+```cpp
+struct Position { int canary = 0; };
+struct Light    { int canary = 0; };
+// … 共 8 个
+```
+
+这能编译通过本身就证明了目标达成：下游使用者现在**可以**定义自己的
+`Position` / `Light` 而不与本库冲突。若将来有人加回 `using sr::Position;`，
+测试文件会直接报**重定义编译错误** —— 把 ADR-001 的核心结论用编译器锁定，
+而不只写在文档里。
+
+另新增用例 `ECS.globalCanaryTypesAreDistinctFromSrComponents`，用
+`std::is_same` 断言哨兵类型与 `sr::` 组件确实是不同类型。
+
+#### 验证
+
+| 验证项 | 结果 |
+|---|---|
+| 全局类型数扫描 | **60 → 52**，8 个 ECS 名字均已不在全局作用域 |
+| Release 全量构建 | 零错误零警告，退出码 0 |
+| 单元测试 | 120 → **121 全绿** |
+| 像素回归 | 3 个场景仍匹配基准图（证明迁移未改变任何渲染输出） |
+| 抽样 11 个示例 | 全部正常退出 |
+| exe 清单 | **25 个**，与基线一致 |
+
+#### 版本号处理
+
+本次已构成 API Break，但**暂不升 2.0.0**。理由：项目从未发布过任何 tag、
+无外部使用者、`VERSION 1.0.0` 仅用于生成版本头。待 52 个类型全部迁完、
+真正对外发布时一次性升版，避免为每批迁移反复改版本号。已在 ADR-001 记录。
+
+---
+
 ## 2026-09-05
 
 ### 覆盖率接入与测试规则例外（TASK-006 部分完成）
