@@ -30,7 +30,7 @@
 
 | 概念 | 代码 |
 |---|---|
-| G-Buffer 结构 | `core/gbuffer.h`：`GBuffer` |
+| G-Buffer 结构 | `core/gbuffer.h`：`sr::GBuffer` |
 | 写入 | `gbuf.write(x, y, z, pos, normal, rough, albedo, metal)` |
 | 光照 Pass | `lightingPass(gbuf, lightDir, lightColor, camPos, ambient, out)` |
 

@@ -28,12 +28,14 @@
 
 ## 四、代码入口
 
+> ⚠️ `SSAO` 与 `SSAOConfig` 位于 **`namespace sr`**（ADR-001 第 2 批）。
+
 ```cpp
 #include "core/ssao.h"
 
-SSAO ssao;
+sr::SSAO ssao;
 ssao.compute(viewPositions, viewNormals, depthBuffer, W, H, viewProj, aoMap);
-SSAO::blur(aoMap, W, H, smoothAo, 2); // 降噪
+sr::SSAO::blur(aoMap, W, H, smoothAo, 2); // 降噪
 
 // 合成：ambient *= aoFactor，在片元着色器中
 ```

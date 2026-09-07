@@ -51,9 +51,9 @@
 | `color.h` | `Color`（RGBA8）、`Color::fromFloat`、`namespace colors` 常量 | 叶子模块 |
 | `framebuffer.h` | `Framebuffer`：`clear` / `setPixel` / `getPixel` / `row(y)` / `data()` | **核心渲染目标**。坐标约定见 `math/` |
 | `depthbuffer.h` | `DepthBuffer`：`testAndSet` / `get` / `row(y)` / `clear`，`kFar = 1e9f` | 深度约定 `z ∈ [0,1]`，0 = 近平面 |
-| `float_framebuffer.h` | `FloatFramebuffer` | HDR 渲染中间目标 |
-| `msaa_framebuffer.h` | `MSAAFramebuffer` | 4x MSAA 多重采样 |
-| `gbuffer.h` | `GBuffer` | 延迟渲染的多渲染目标 |
+| `float_framebuffer.h` | `sr::FloatFramebuffer` | HDR 渲染中间目标 |
+| `msaa_framebuffer.h` | `sr::MSAAFramebuffer`、`sr::kMSAA4Offsets` | 4x MSAA 多重采样 |
+| `gbuffer.h` | `sr::GBuffer` | 延迟渲染的多渲染目标 |
 
 > ⚠️ **边界检查契约**：`setPixel` 做运行时边界检查（越界静默忽略，因为光栅化时
 > 三角形常部分在屏幕外）；`getPixel` 与 `row(y)` 仅有 `assert`，Release 构建下
@@ -69,14 +69,14 @@
 | `image_write.h` | `namespace imagewriter`：`writeImage`（PNG/JPG/BMP/TGA，基于 stb_image_write） |
 | `fxaa.h` | `namespace fxaa`：FXAA 后处理抗锯齿 |
 | `post_effects.h` | `namespace postprocess`：Bloom、ACES 色调映射、景深、运动模糊、暗角、色差 |
-| `ssao.h` | `SSAOConfig` / `SSAO`：屏幕空间环境光遮蔽 |
+| `ssao.h` | `sr::SSAOConfig` / `sr::SSAO`：屏幕空间环境光遮蔽 |
 
 ### 通用设施
 
 | 文件 | 关键内容 |
 |---|---|
 | `arena.h` | `sr::ArenaAllocator`：线性分配器，**热路径禁止动态分配**的解决方案 |
-| `command_buffer.h` | `CommandBuffer` / `ThreadPool`：多线程光栅化的任务分发 |
+| `command_buffer.h` | `sr::CommandBuffer` / `sr::ThreadPool`：多线程光栅化的任务分发 |
 | `profiler.h` | `sr::Profiler`（Meyers 单例）、`SR_PROFILE_SCOPE` 宏，输出 Chrome Tracing JSON |
 | `resource_manager.h` | `sr::ResourceManager`：引用计数缓存，用 C++20 `concepts`（`has_loadFromFile`）约束资源类型 |
 | `benchmark.h` | `sr::` 基准测试工具，用于对比标量 / SSE2 光栅化吞吐 |
@@ -223,7 +223,7 @@ struct Shader {
 
 | 文件 | 内容 |
 |---|---|
-| `clip.h` | `ClipVertex`（裁剪空间坐标 + `Varyings`）、`enum ClipPlane`、`clipTriangleFullFrustum`：完整 6 面 Sutherland-Hodgman，含顺时针绕序修复 |
+| `clip.h` | `ClipVertex`（裁剪空间坐标 + `Varyings`）、`enum class ClipPlane : uint8_t`、`kClipPlaneCount`、`clipTriangleFullFrustum`：完整 6 面 Sutherland-Hodgman，含顺时针绕序修复 |
 | `renderer.h` | `Renderer`：`clear` / `drawMesh` / `depth()`，开关 `cullBackface` / `nearClip` |
 | `rasterizer_fast.h` | `namespace raster_fast`：增量边函数 + SSE2 四像素并行。**实验性，未接入主链路**，见 `architecture.md` §6.1 |
 

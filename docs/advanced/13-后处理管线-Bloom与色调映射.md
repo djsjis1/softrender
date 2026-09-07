@@ -6,7 +6,7 @@
 
 8 位 `Framebuffer` 每通道 [0,255]，对应 [0,1]。但 PBR 高光、自发光、太阳直射可以轻易到 10、100。直接 clamp 到 1 会丢失所有亮度层次——一片死白。
 
-解法：渲染到**浮点帧缓冲**（`FloatFramebuffer`，每像素 `Vec3f`），暂存 HDR 值，最后一步再压回 [0,1]。
+解法：渲染到**浮点帧缓冲**（`sr::FloatFramebuffer`，每像素 `Vec3f`），暂存 HDR 值，最后一步再压回 [0,1]。
 
 ## 二、色调映射（Tone Mapping）
 
@@ -14,7 +14,7 @@
 
 $$\text{ACES}(x) = \frac{x(2.51x+0.03)}{x(2.43x+0.59)+0.14}$$
 
-它有漂亮的**肩部滚降**：亮区逐渐饱和而非硬截断，暗区保持对比度。代码 `FloatFramebuffer::acesToneMap`。
+它有漂亮的**肩部滚降**：亮区逐渐饱和而非硬截断，暗区保持对比度。代码 `sr::FloatFramebuffer::acesToneMap`。
 
 色调映射后还需 **gamma 校正**（线性→sRGB，`pow(c, 1/2.2)`），否则画面偏暗。
 
@@ -26,7 +26,7 @@ $$\text{ACES}(x) = \frac{x(2.51x+0.03)}{x(2.43x+0.59)+0.14}$$
 2. **高斯模糊**：对亮部图做可分离两遍模糊（水平+垂直），得到扩散的光晕。
 3. **加法合成**：原图 + 模糊图 × 强度。
 
-代码 `FloatFramebuffer::brightPass`、`gaussianBlur`、`addBlend`。
+代码 `sr::FloatFramebuffer::brightPass`、`gaussianBlur`、`addBlend`。
 
 > 为什么可分离？2D 高斯核 = 1D 水平 × 1D 垂直，两遍 1D 卷积等价于一遍 2D，但开销从 O(r²) 降到 O(2r)。
 
@@ -35,8 +35,8 @@ $$\text{ACES}(x) = \frac{x(2.51x+0.03)}{x(2.43x+0.59)+0.14}$$
 | 概念 | 代码 |
 |---|---|
 | HDR 浮点缓冲 | `src/core/float_framebuffer.h` |
-| ACES 色调映射 | `FloatFramebuffer::acesToneMap` |
-| Gamma 校正 | `FloatFramebuffer::gammaCorrect` |
+| ACES 色调映射 | `sr::FloatFramebuffer::acesToneMap` |
+| Gamma 校正 | `sr::FloatFramebuffer::gammaCorrect` |
 | 亮部提取 | `brightPass` |
 | 可分离高斯模糊 | `gaussianBlur` |
 | 对比示例 | `examples/stage11_postprocess.cpp` |
