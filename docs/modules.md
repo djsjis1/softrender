@@ -138,14 +138,25 @@
 
 | 文件 | 内容 |
 |---|---|
-| `components.h` | `Position` / `Velocity` / `Rotation` / `Scale` / `MeshRef` / `MaterialRef` / `Light` / `CameraTag` |
+| `components.h` | `namespace sr`：`sr::Position` / `sr::Velocity` / `sr::Rotation` / `sr::Scale` / `sr::MeshRef` / `sr::MaterialRef` / `sr::Light` / `sr::CameraTag` |
 | `render_queue.h` | `DrawItem` / `RenderQueue` / `enum class RenderLayer : uint16_t`：透明排序 |
 
 ECS 容器本身来自 EnTT（`third/entt`），`components.h` 只定义组件数据结构。
 
-> ⚠️ **这 8 个组件名全部位于全局命名空间**，且都是 ECS 领域的通用名。
-> 下游用户 `#include "scene/components.h"` 极易撞名。这是命名空间收敛的
-> **最高优先级目标**。
+> ✅ **这 8 个组件已迁入 `namespace sr`，且未保留全局别名**（ADR-001 第 1 批）。
+> 它们曾是命名空间收敛的最高优先级目标：名字均为 ECS 领域通用名，
+> 而本项目是 header-only 库，全局定义会让下游用户
+> `#include "scene/components.h"` 时直接撞上重定义硬错误。
+>
+> 能不留别名直接迁完，是因为实测引用面极小：本文件只被 2 个文件引用
+> （自身 + `tests/test_core.cpp`），`Light` 除定义处外全仓零使用，
+> 22 个示例无一使用 ECS。
+>
+> 调用时必须写 `sr::` 前缀：`registry.emplace<sr::Position>(e, Vec3f{...})`。
+> 注意 `Vec3f` 本身仍在全局命名空间（属后续批次）。
+>
+> 回归防护：`tests/test_core.cpp` 在全局作用域声明了 8 个同名哨兵类型。
+> 若将来有人加回 `using sr::Position;`，测试文件会直接报重定义错误。
 
 ---
 

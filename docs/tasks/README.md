@@ -11,7 +11,7 @@
 | TASK-004 | 代码完成 / 待远端验收 | CI 跨平台修复与测试基础设施 | CMake、.github、tests | 2026-09-05 |
 | TASK-005 | 部分完成 / 部分阻塞 | 构建系统现代化（target-based ✓ / Sanitizer ✓ / clang-tidy ✗ / 格式化 ✗） | CMake、全仓 | 2026-09-05 |
 | TASK-006 | 部分完成 / 拆分推迟 | 覆盖率接入 ✓；测试目录拆分已推迟 | tests、CMake、.github | 2026-09-05 |
-| TASK-007 | 待开始 | 全局命名空间收敛（架构级，需 ADR） | 全部 src/、examples、tests | 2026-09-05 |
+| TASK-007 | 第 1 批已完成 | 全局命名空间收敛（ADR-001：按引用面分类） | 全部 src/、examples、tests | 2026-09-05 |
 
 ## 依赖关系
 
@@ -28,6 +28,14 @@ TASK-001 ──┬─→ TASK-004 ─→ TASK-005 ─→ TASK-006 ─┐
 - TASK-007 必须最后做：它触及每一个源文件，与任何并行任务都会冲突
 
 ## 已完成任务
+
+- **TASK-007**（第 1 批）— 全局命名空间收敛：ECS 组件 — 2026-09-07
+  立 [ADR-001](../adr/ADR-001-namespace-convergence.md)，**推翻原「全量别名桥」方案**
+  （`using sr::Position;` 仍把名字注入全局，不解决撞名），改为按引用面分类。
+  8 个 ECS 组件迁入 `namespace sr` 且不留别名，全局类型 **60 → 52**。
+  新增编译期哨兵（测试文件全局作用域声明 8 个同名类型）锁定成果。
+  **API Break**，迁移指引见 `docs/changelog.md`。121 测试全绿。
+  档案：[`TASK-007-全局命名空间收敛.md`](TASK-007-全局命名空间收敛.md)
 
 - **TASK-006**（部分）— 覆盖率接入 — 2026-09-05
   `ci.yml` 新增独立 `coverage` job（ubuntu + gcov + lcov + genhtml），只统计 `src/`；

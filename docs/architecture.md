@@ -283,12 +283,12 @@ graph LR
 
 ## 五、命名空间现状
 
-`src/` 的命名空间使用**不统一**，这是当前最主要的架构债：
+`src/` 的命名空间使用**不统一**，这是当前最主要的架构债（收敛中，见 ADR-001）：
 
 | 命名空间 | 所在文件 | 内容 |
 |---|---|---|
-| （全局） | `framebuffer.h`、`depthbuffer.h`、`color.h`、`blend.h`、`renderer.h`、`renderer2d.h`、`triangle.h`、`line.h`、`clip.h`、`camera.h`、`components.h`、`mesh.h`、`texture.h`、`skeleton.h`、`shader.h` 等约 30 个文件 | `Framebuffer`、`Color`、`Renderer`、`Camera`、`Position`、`Light`、`Texture`、`Mesh` 等核心类型 |
-| `sr` | `arena.h`、`benchmark.h`、`log.h`、`profiler.h`、`resource_manager.h` | `ArenaAllocator`、`Profiler`、`ResourceManager`、`Log` |
+| （全局） | `framebuffer.h`、`depthbuffer.h`、`color.h`、`blend.h`、`renderer.h`、`renderer2d.h`、`triangle.h`、`line.h`、`clip.h`、`camera.h`、`mesh.h`、`texture.h`、`skeleton.h`、`shader.h` 等 29 个文件 | `Framebuffer`、`Color`、`Renderer`、`Camera`、`Texture`、`Mesh` 等 **52 个**核心类型 |
+| `sr` | `arena.h`、`benchmark.h`、`log.h`、`profiler.h`、`resource_manager.h`、**`components.h`** | `ArenaAllocator`、`Profiler`、`ResourceManager`、`Log`、`formatLog`；**8 个 ECS 组件**（`Position`/`Velocity`/`Rotation`/`Scale`/`MeshRef`/`MaterialRef`/`Light`/`CameraTag`） |
 | `sr2d` | `shape2d.h`、`blit2d.h` | 全部 2D 图元与合成函数 |
 | `colors` | `color.h` | 颜色常量 |
 | `transform` | `transform.h`、`transform2d.h` | 投影与视口变换 |
@@ -297,15 +297,35 @@ graph LR
 | `raster_fast` | `rasterizer_fast.h` | 实验性 SIMD 光栅化器 |
 | `fxaa` / `postprocess` / `regression` | `fxaa.h` / `post_effects.h` / `test/pixel_regression.h` | 后处理与测试 |
 
-**已经造成实际冲突**：`sr2d` 命名空间的引入原因，就是 2D 图元函数名
+### 收敛进度（ADR-001）
+
+| 批次 | 范围 | 状态 |
+|---|---|---|
+| 1 | `components.h` 的 8 个 ECS 组件 | ✅ **已完成**（全局类型 60 → 52） |
+| 2 | `skeleton.h` / `texture.h` / `mesh.h` / `camera.h` | 待做 |
+| 3 | `color.h` / `math/` 全部 | 待做 |
+| 4 | `shader/` / `core/` 其余 / `raster/` | 待做 |
+
+第 1 批能**不留全局别名**直接完成，因为实测其引用面极小：
+`scene/components.h` 只被 2 个文件引用（自身 + `tests/test_core.cpp`），
+`Light` 除定义处外全仓零使用，22 个示例无一使用 ECS。
+
+> **为何不对高冲突名字用别名桥**：`using sr::Position;` 仍然把 `Position`
+> 注入全局命名空间，下游照样撞名。别名桥只是让大改动可以分批提交的工具，
+> **不是对下游的兼容承诺**。完整论证见 `docs/adr/ADR-001-namespace-convergence.md`。
+>
+> 该结论已用**编译期哨兵**锁定：`tests/test_core.cpp` 在全局作用域声明了
+> 8 个同名哨兵类型（`struct Position { int canary; };` 等）。若将来有人加回
+> `using sr::Position;`，测试文件会直接报重定义错误。
+
+**已经造成过实际冲突**：`sr2d` 命名空间的引入原因，就是 2D 图元函数名
 （`fillRect` / `fillCircle` / `SpritePalette`）与 `examples/` 中已有的全局同名符号
 冲突。这不是理论风险。
 
-**对下游集成方的影响**：本项目是 header-only 库，`Position`、`Scale`、`Rotation`、
-`Light`、`Animation`、`Texture`、`Mesh`、`Vertex`、`Color`、`Camera` 这些全局名字
-几乎必然与用户自己的代码冲突。
-
-收敛计划见 `docs/tasks/` 中的对应 TASK 与 `docs/adr/`。
+**对下游集成方的影响**：本项目是 header-only 库。第 1 批完成后，
+`Animation`、`Texture`、`Mesh`、`Vertex`、`Color`、`Camera`、`Shader`、`Renderer`
+等 **52 个**类型仍在全局命名空间，依然会与用户代码冲突。
+完整名单与分批计划见 `docs/tasks/TASK-007-全局命名空间收敛.md`。
 
 ## 六、已知架构权衡
 
