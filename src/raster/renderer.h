@@ -1,5 +1,6 @@
 #pragma once
-#include <algorithm>
+#include <algorithm>  // std::min / std::max / std::abs
+#include <cmath>      // std::floor / std::ceil（包围盒取整）
 
 #include "core/depthbuffer.h"
 #include "core/framebuffer.h"

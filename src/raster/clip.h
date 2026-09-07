@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <utility>  // std::swap（clipTriangleFullFrustum 里交换 src/dst 缓冲）
 
 #include "shader/shader.h"
 
