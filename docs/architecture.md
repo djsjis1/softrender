@@ -287,8 +287,8 @@ graph LR
 
 | 命名空间 | 所在文件 | 内容 |
 |---|---|---|
-| （全局） | `framebuffer.h`、`depthbuffer.h`、`color.h`、`blend.h`、`renderer.h`、`renderer2d.h`、`triangle.h`、`line.h`、`clip.h`、`camera.h`、`mesh.h`、`texture.h`、`skeleton.h`、`shader.h` 等 29 个文件 | `Framebuffer`、`Color`、`Renderer`、`Camera`、`Texture`、`Mesh` 等 **52 个**核心类型 |
-| `sr` | `arena.h`、`benchmark.h`、`log.h`、`profiler.h`、`resource_manager.h`、**`components.h`** | `ArenaAllocator`、`Profiler`、`ResourceManager`、`Log`、`formatLog`；**8 个 ECS 组件**（`Position`/`Velocity`/`Rotation`/`Scale`/`MeshRef`/`MaterialRef`/`Light`/`CameraTag`） |
+| （全局） | `framebuffer.h`、`depthbuffer.h`、`color.h`、`blend.h`、`renderer.h`、`renderer2d.h`、`triangle.h`、`line.h`、`clip.h`、`camera.h`、`mesh.h`、`texture.h`、`skeleton.h`、`shader.h` 等 | `Framebuffer`、`Color`、`Renderer`、`Camera`、`Texture`、`Mesh` 等 **45 个**核心类型 |
+| `sr` | `arena.h`、`benchmark.h`、`log.h`、`profiler.h`、`resource_manager.h`、**`components.h`**、**`ssao.h`**、**`gbuffer.h`**、**`float_framebuffer.h`**、**`msaa_framebuffer.h`**、**`command_buffer.h`** | `ArenaAllocator`、`Profiler`、`ResourceManager`、`Log`、`formatLog`；**8 个 ECS 组件**；**`SSAO`/`SSAOConfig`/`GBuffer`/`FloatFramebuffer`/`MSAAFramebuffer`/`kMSAA4Offsets`/`CommandBuffer`/`ThreadPool`** |
 | `sr2d` | `shape2d.h`、`blit2d.h` | 全部 2D 图元与合成函数 |
 | `colors` | `color.h` | 颜色常量 |
 | `transform` | `transform.h`、`transform2d.h` | 投影与视口变换 |
@@ -299,16 +299,44 @@ graph LR
 
 ### 收敛进度（ADR-001）
 
-| 批次 | 范围 | 状态 |
-|---|---|---|
-| 1 | `components.h` 的 8 个 ECS 组件 | ✅ **已完成**（全局类型 60 → 52） |
-| 2 | `skeleton.h` / `texture.h` / `mesh.h` / `camera.h` | 待做 |
-| 3 | `color.h` / `math/` 全部 | 待做 |
-| 4 | `shader/` / `core/` 其余 / `raster/` | 待做 |
+| 批次 | 范围 | 全局类型数 | 状态 |
+|---|---|---|---|
+| — | 起点 | 60 | — |
+| 1 | `components.h` 的 8 个 ECS 组件 | 60 → 52 | ✅ 已完成 |
+| 2 | `ssao.h`、`gbuffer.h`、`float_framebuffer.h`、`msaa_framebuffer.h`、`command_buffer.h`（7 个类型 + `kMSAA4Offsets`） | 52 → **45** | ✅ 已完成 |
+| 3 | `skeleton.h`（6）、`particle_system.h`（3）、`render_queue.h`（2）、`gltf_types.h`（6）、`shader/` 具体着色器（5） | — | 待做（均低引用面，可不留别名） |
+| 4 | `color.h`、`math/`、`framebuffer.h`、`depthbuffer.h`、`mesh.h`、`texture.h`、`shader.h`、`renderer.h`、`raster/` | — | 待做（高引用面，需全仓扰动） |
+| 5 | 14 个全局子命名空间（`tga`/`colors`/`transform`/`sr2d`/`fxaa`/`postprocess` 等） | — | 待做（它们本身也是易撞名的全局符号） |
 
-第 1 批能**不留全局别名**直接完成，因为实测其引用面极小：
-`scene/components.h` 只被 2 个文件引用（自身 + `tests/test_core.cpp`），
-`Light` 除定义处外全仓零使用，22 个示例无一使用 ECS。
+两批均**不留全局别名**直接完成，因为实测引用面极小。
+
+#### 已验证的迁移手法
+
+1. **把头文件内容包进 `namespace sr`**。内部对尚未迁移的全局类型
+   （`Vec3f` / `Mat4` / `Color` / `DepthBuffer`）的引用**无需改动** ——
+   `namespace sr` 内的名字查找会回落到全局作用域。这是逐文件增量迁移可行的关键。
+2. **跨命名空间引用需显式引入**。例：`post_effects.h` 的 `namespace postprocess`
+   仍在全局，其内部查找只回落到全局、**不会进入 `sr`**，所以需
+   `using sr::FloatFramebuffer;`。用 using-**声明**而非 directive，只引入确实需要的名字。
+3. **`.cpp` 应用代码可加 `using namespace sr;`**（已用于 `demo_stars.cpp`、
+   `stage11_postprocess.cpp`、`stage9_msaa.cpp`）。
+
+#### ⚠ 测试文件不能用 `using namespace sr;`（实测发现）
+
+`tests/test_core.cpp` **故意不用** using-directive，原因是实测撞上了两个冲突：
+
+1. 全局作用域的 `struct Position` 哨兵与 using-directive 引入的 `sr::Position`
+   构成 **二义性（MSVC C2872）**，而不是预期的「全局声明遮蔽 directive 名字」。
+   using-directive 会把 `sr` 的成员当作**最近公共外围命名空间**（此处即全局）
+   的成员参与查找，两者同级。
+2. gtest 的 `TEST(GBuffer, WriteAndRead)` 会创建名为 `GBuffer` 的**命名空间**，
+   与 using-directive 引入的 `sr::GBuffer` 类同名也冲突。
+
+因此测试文件统一写显式 `sr::` 限定。
+
+> **对后续批次的影响**：若想恢复测试文件的 using-directive 便利，应先把
+> 编译期哨兵拆到单独文件（该文件不用 directive）—— 这也正好是 TASK-006
+> 测试目录拆分的一部分。两者宜合并执行。
 
 > **为何不对高冲突名字用别名桥**：`using sr::Position;` 仍然把 `Position`
 > 注入全局命名空间，下游照样撞名。别名桥只是让大改动可以分批提交的工具，
@@ -322,10 +350,11 @@ graph LR
 （`fillRect` / `fillCircle` / `SpritePalette`）与 `examples/` 中已有的全局同名符号
 冲突。这不是理论风险。
 
-**对下游集成方的影响**：本项目是 header-only 库。第 1 批完成后，
-`Animation`、`Texture`、`Mesh`、`Vertex`、`Color`、`Camera`、`Shader`、`Renderer`
-等 **52 个**类型仍在全局命名空间，依然会与用户代码冲突。
-完整名单与分批计划见 `docs/tasks/TASK-007-全局命名空间收敛.md`。
+**对下游集成方的影响**：本项目是 header-only 库。前两批完成后，
+`Color`（400 处引用 / 49 文件）、`Mat4`（231 / 33）、`Framebuffer`（160 / 45）、
+`Mesh`（63 / 24）、`Texture`（56 / 20）、`Animation`、`Vertex`、`Camera`、`Shader`、
+`Renderer` 等 **45 个**类型仍在全局命名空间，依然会与用户代码冲突。
+完整实测引用面数据与分批计划见 `docs/tasks/TASK-007-全局命名空间收敛.md`。
 
 ## 六、已知架构权衡
 

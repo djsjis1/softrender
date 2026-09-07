@@ -7,6 +7,72 @@
 
 ## 2026-09-07
 
+### 零警告强制与 clang-tidy 配置（TASK-005c 部分）
+
+| 变更 | 影响范围 |
+|---|---|
+| `sr_dev_flags` 加 `/WX`（MSVC）与 `-Werror`（GCC/Clang） | `CMakeLists.txt` |
+| 新增 `.clang-tidy`：启用五组检查，对 12 项已知会在本代码库误报的逐条写明禁用理由 | `.clang-tidy` |
+| 新增 `third/.clang-tidy`（`Checks: '-*'`）屏蔽 720 个 vendored 文件 | `third/.clang-tidy` |
+| `cpp_project_rules.md` 增加 snake_case 文件命名例外条款 | `.qoder/rules/` |
+
+开启 `/WX` 的依据是实测：多次全量构建在 `/W4` 下已是零警告，所以它只是把
+已有约定变成构建期强制。实测确认 `unit_tests.vcxproj` 的 Debug 与 Release
+两套配置均含 `<TreatWarningAsError>true</TreatWarningAsError>` +
+`<WarningLevel>Level4</WarningLevel>`，且开启后全量重编零错误。
+
+作用范围限缩：`sr_dev_flags` 只被本仓示例 / 练习 / 测试目标链接，因此
+`third_party_impl`、googletest、spdlog 与**下游集成方均不受影响**。
+
+> `clang-tidy` 本身仍未安装，配置**未经实跑调参**，已在文件头显式标注。
+> 全仓 `clang-format` 同样待工具就位后单独 commit 执行。
+
+### 全局命名空间收敛第 2 批：core 高级缓冲（TASK-007 / ADR-001）
+
+**不兼容变更（API Break）**：以下符号需加 `sr::` 前缀：
+`SSAO`、`SSAOConfig`、`GBuffer`、`FloatFramebuffer`、`MSAAFramebuffer`、
+`kMSAA4Offsets`、`CommandBuffer`、`ThreadPool`。
+
+全局类型数 **52 → 45**（TASK-007 累计 60 → 45）。均**不留全局别名**。
+
+顺带修复两个真实缺陷：
+
+| 缺陷 | 说明 |
+|---|---|
+| `msaa_framebuffer.h` 用 `std::pair` 却未 include `<utility>` | 与 TASK-004 发现的 `clip.h`/`renderer.h` 同类：MSVC 靠传递包含侥幸通过，libstdc++/libc++ 不保证 |
+| `command_buffer.h` 的 `ThreadPool::stop_` **未初始化** | 它是线程池退出标志，工作线程构造后立即读取。未初始化值叠加多线程 → **难重现的偶发挂死或提前退出**，是最难查的一类缺陷 |
+
+### 实测发现：测试文件不能用 `using namespace sr;`
+
+原以为全局哨兵声明会遮蔽 using-directive 引入的名字，实测错误：
+
+```
+tests\test_core.cpp(1181,5): error C2872: “Position”: 不明确的符号
+```
+
+1. using-directive 把 `sr` 的成员当作**最近公共外围命名空间**（此处即全局）
+   的成员参与查找，与真正的全局声明**同级** → 二义性，而非遮蔽
+2. gtest 的 `TEST(GBuffer, ...)` 会创建名为 `GBuffer` 的**命名空间**，
+   与 `sr::GBuffer` 类同名也冲突
+
+因此 `tests/test_core.cpp` 统一写显式 `sr::` 限定；示例（无哨兵、无 gtest 宏）
+则可用 `using namespace sr;`，已用于 `demo_stars.cpp` /
+`stage11_postprocess.cpp` / `stage9_msaa.cpp`。
+
+> 后续若想恢复测试文件的 using-directive 便利，应先把编译期哨兵拆到单独文件。
+> 而这正好是 TASK-006 测试目录拆分的一部分，**两者宜合并执行**。
+
+### 全量引用面实测数据已入库
+
+52 个剩余类型的引用次数 / 文件数已逐项实测并记入
+`docs/tasks/TASK-007-全局命名空间收敛.md`，作为后续分批的直接依据。
+
+关键结论：**`math/` 的低文件数是假象** —— `Vec3` 只出现于 1 个文件，
+但全仓实际用的是别名 `Vec3f`（未被统计）。`Color` 已达 400 次 / 49 文件，
+`Vec3f` 只会更多。因此 `math/` 应归入高引用面、放到最后。
+
+---
+
 ### 全局命名空间收敛第 1 批：ECS 组件（TASK-007 / ADR-001）
 
 **不兼容变更（API Break）**：8 个 ECS 组件类型从全局命名空间消失，

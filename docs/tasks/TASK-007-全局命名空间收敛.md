@@ -165,6 +165,93 @@ namespace sr {}
       像素回归 3 场景仍匹配基准图；25 个 exe 与基线一致
 - [x] 同步 `docs/architecture.md` §5、`docs/modules.md`、`docs/changelog.md`
 
+### 第 2 批：core 高级缓冲 —— 已完成（2026-09-07）
+
+- [x] 实测全部 52 个剩余类型的引用面（见下表）
+- [x] `ssao.h`：`SSAO` / `SSAOConfig` 迁入 `sr`（全仓仅自身引用，零使用者）
+- [x] `gbuffer.h`：`GBuffer` + 延迟光照自由函数迁入 `sr`
+- [x] `float_framebuffer.h`：`FloatFramebuffer` 迁入 `sr`
+- [x] `msaa_framebuffer.h`：`MSAAFramebuffer` + `kMSAA4Offsets` 迁入 `sr`
+- [x] `command_buffer.h`：`CommandBuffer` / `ThreadPool` 迁入 `sr`
+- [x] `post_effects.h`：`namespace postprocess` 内加 `using sr::FloatFramebuffer;`
+- [x] `test_core.cpp`：`sr::GBuffer` / `sr::CommandBuffer` / `sr::ThreadPool` 显式限定
+- [x] `demo_stars.cpp` / `stage11_postprocess.cpp` / `stage9_msaa.cpp`：加 `using namespace sr;`
+- [x] 顺带修复：`msaa_framebuffer.h` 用 `std::pair` 却未 include `<utility>`；
+      `command_buffer.h` 的 `ThreadPool::stop_` **未初始化**（线程池退出标志，
+      工作线程构造后立即读取 → 难重现的偶发挂死）
+- [x] 验证：全局类型 **52 → 45**；构建零警告（`/WX` 已开）；121 测试全绿；
+      像素回归 3 场景仍匹配基准图；3 个受影响示例正常退出
+
+### ⚠ 实测发现：测试文件不能用 `using namespace sr;`
+
+原以为全局哨兵声明会遮蔽 using-directive 引入的名字，**实测是错的**：
+
+```
+tests\test_core.cpp(1181,5): error C2872: “Position”: 不明确的符号
+```
+
+两个原因：
+
+1. using-directive 会把 `sr` 的成员当作**最近公共外围命名空间**（此处即全局）
+   的成员参与查找，与真正的全局声明**同级** → 二义性，而非遮蔽
+2. gtest 的 `TEST(GBuffer, WriteAndRead)` 会创建名为 `GBuffer` 的**命名空间**，
+   与 using-directive 引入的 `sr::GBuffer` 类同名也冲突
+
+结论：`tests/test_core.cpp` 统一写显式 `sr::` 限定（理由已写入文件头注释）。
+
+**对后续批次的影响**：若想恢复测试文件的 using-directive 便利，应先把编译期
+哨兵拆到单独文件（该文件不用 directive）。而这正好是 TASK-006 测试目录拆分
+的一部分 —— **两者宜合并执行**。
+
+### 全量引用面实测数据（2026-09-07，继续推进的核心输入）
+
+统计范围：`src/` + `examples/` + `tests/` + `practice/` + `platform/` 共 79 个文件，
+大小写敏感、排除 `::` 前缀（避免把嵌套枚举项当成全局类型）。
+
+**高引用面（需全仓扰动，建议最后做）**
+
+| 类型 | 引用次数 | 文件数 |
+|---|---|---|
+| `Color` | 400 | 49 |
+| `Mat4` | 231 | 33 |
+| `Framebuffer` | 160 | 45 |
+| `Mat3` | 105 | 7 |
+| `Mesh` | 63 | 24 |
+| `Texture` | 56 | 20 |
+| `Quat` | 43 | 3 |
+| `Varyings` | 39 | 7 |
+| `DepthBuffer` | 39 | 10 |
+| `ClipVertex` | 32 | 3 |
+| `Renderer` | 29 | 17 |
+| `Vertex` | 28 | 9 |
+| `Renderer2D` | 22 | 5 |
+| `Shader` | 20 | 9 |
+| `Camera` | 17 | 14 |
+| `GltfAnimation` | 17 | 3 |
+| `DrawItem` | 16 | 2 |
+
+**低引用面（可不留别名直接迁，建议优先）**
+
+| 类型 | 引用 | 文件 | 类型 | 引用 | 文件 |
+|---|---|---|---|---|---|
+| `AnimSample` | 7 | 1 | `Particle` | 7 | 2 |
+| `EmitterConfig` | 7 | 2 | `Skeleton` | 6 | 2 |
+| `GltfMaterial` | 5 | 2 | `Keyframe` | 4 | 1 |
+| `VertexBoneWeights` | 4 | 2 | `ParticleSystem` | 4 | 2 |
+| `PBRShader` | 4 | 4 | `Bone` | 3 | 2 |
+| `AnimationChannel` | 3 | 1 | `FlatShader` | 3 | 3 |
+| `GouraudShader` | 3 | 3 | `DepthShader` | 3 | 3 |
+| `FinalShader` | 3 | 3 | `Animation` | 2 | 2 |
+| `GltfNode` | 3 | 2 | `GltfTexture` | 2 | 1 |
+| `GltfImage` | 1 | 1 | `GltfSkin` | 1 | 1 |
+| `Cubemap` | 10 | 4 | `Camera2D` | 10 | 3 |
+| `RenderQueue` | 9 | 2 | `PhongShader` | 10 | 9 |
+
+> ⚠ **`math/` 的低文件数是假象**：`Vec2`(2 文件) / `Vec3`(1) / `Vec4`(1) / `Rect2`(1)
+> 看起来极易迁，但全仓实际用的是**别名** `Vec2f` / `Vec3f` / `Vec4f` / `Rectf` / `Recti`，
+> 上表未统计别名。`Color` 的 400 次 / 49 文件已经说明它无处不在，而 `Vec3f` 只会更多。
+> **`math/` 应归入高引用面，放到最后。**
+
 ### 后续批次（待做）
 
 按 ADR-001，先用同样方法**实测每个类型的引用面**，再决定是否需要别名桥：
@@ -216,3 +303,5 @@ namespace sr {}
 | 2026-09-07 | 立 ADR-001，推翻原「全量别名桥」方案，改为按引用面分类（方案 D） |
 | 2026-09-07 | 完成第 1 批：8 个 ECS 组件迁入 `sr` 且不留别名；全局类型 60 → 52；
               新增编译期哨兵 + 1 个用例；121 测试全绿 |
+| 2026-09-07 | 完成第 2 批：7 个 core 类型迁入 `sr`；全局类型 52 → **45** |
+| 2026-09-07 | 实测全量引用面数据入库；发现并记录 C2872（测试文件不能用 using-directive） |
