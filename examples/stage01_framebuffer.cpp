@@ -1,10 +1,16 @@
 // ============================================================
-// 阶段 1：Framebuffer + TGA 出图 + Bresenham 画线
+// 阶段 01：Framebuffer + Bresenham 画线
 //
-// 运行后在 output/ 生成 stage1_lines.tga：
-//   - 米字型放射线：验证画线算法在所有斜率/方向下都不断线
-//   - 渐变线框五角星：验证颜色插值
-//   - 边框：验证坐标系（左下角为原点）
+// 【源码阅读】先读这些文件，再来看本示例：
+//   core/framebuffer.h  — 帧缓冲：像素数组 + 坐标约定（y 向上，左下角原点）
+//   core/color.h        — 颜色：RGBA8 + lerp 线性插值
+//   raster/line.h       — Bresenham 画线：整数误差累积，陡峭线转置
+//   core/tga.h          — TGA 图像写出
+//
+// 【运行验证】生成 output/stage01_framebuffer.tga：
+//   - 32 方向放射线：验证所有斜率/方向下不断线
+//   - 渐变五角星：验证颜色插值
+//   - 底部色带 + 白色边框：验证坐标系
 // ============================================================
 #include <cmath>
 #include <cstdio>
@@ -74,7 +80,7 @@ int main()
     drawLine(fb, 0, H - 1, 0, 0, colors::white);
 
     std::filesystem::create_directories("output");
-    const char *path = "output/stage1_lines.tga";
+    const char *path = "output/stage01_framebuffer.tga";
     if (!tga::write(path, fb))
     {
         std::printf("写文件失败: %s\n", path);

@@ -1,11 +1,15 @@
 // ============================================================
-// 阶段 2：三角形光栅化
+// 阶段 04：三角形光栅化
 //
-// 生成 output/stage2_triangles.tga：
-//   - 左上：RGB 大三角形（重心坐标插值的标志性图案）
-//   - 右上：随机三角形扇（纯色填充 + 线框叠加）
-//   - 下方：用三角形拼一个"低多边形"太阳与山脉——
-//           证明三角形就是构图的原子
+// 【源码阅读】先读这些文件：
+//   raster/triangle.h  — 边函数填充 + 重心坐标插值
+//   core/framebuffer.h — setPixel / row() 直写
+//   core/color.h       — Color::lerp 顶点色插值
+//
+// 【运行验证】生成 output/stage04_triangle.tga：
+//   - 左上：RGB 大三角形（重心坐标的可视化）
+//   - 右上：随机三角形扇 + 线框叠加
+//   - 下方：三角形拼出"低多边形"风景
 // ============================================================
 #include <cmath>
 #include <cstdio>
@@ -69,7 +73,7 @@ int main()
     }
 
     std::filesystem::create_directories("output");
-    const char *path = "output/stage2_triangles.tga";
+    const char *path = "output/stage04_triangle.tga";
     if (!tga::write(path, fb))
     {
         std::printf("写文件失败: %s\n", path);

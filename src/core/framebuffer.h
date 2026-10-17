@@ -1,7 +1,6 @@
 #pragma once
-#include <algorithm>
 #include <cassert>
-#include <vector>
+#include <cstddef>
 
 #include "core/color.h"
 
@@ -18,19 +17,41 @@ class Framebuffer
 {
    public:
     Framebuffer(int width, int height, Color fill = colors::black)
-        : width_(width), height_(height), pixels_(size_t(width) * height, fill)
+        : width_(width), height_(height), pixels_(new Color[size_t(width) * height])
     {
         assert(width > 0 && height > 0);
+        clear(fill);
+    }
+
+    ~Framebuffer() { delete[] pixels_; }
+
+    // 禁止拷贝，允许移动
+    Framebuffer(const Framebuffer&) = delete;
+    Framebuffer& operator=(const Framebuffer&) = delete;
+    Framebuffer(Framebuffer&& other) noexcept
+        : pixels_(other.pixels_), width_(other.width_), height_(other.height_)
+    {
+        other.pixels_ = nullptr;
+        other.width_ = other.height_ = 0;
+    }
+    Framebuffer& operator=(Framebuffer&& other) noexcept
+    {
+        if (this != &other) { delete[] pixels_; pixels_ = other.pixels_; width_ = other.width_; height_ = other.height_; other.pixels_ = nullptr; other.width_ = other.height_ = 0; }
+        return *this;
     }
 
     int width() const { return width_; }
     int height() const { return height_; }
 
     // 全屏清为某个颜色（实时渲染每帧开头都要做）
-    void clear(Color c = colors::black) { std::fill(pixels_.begin(), pixels_.end(), c); }
+    void clear(Color c = colors::black)
+    {
+        const size_t n = size_t(width_) * height_;
+        for (size_t i = 0; i < n; ++i)
+            pixels_[i] = c;
+    }
 
-    // 写一个像素。越界直接忽略——光栅化时三角形可能部分在屏幕外，
-    // 这里兜底最简单（更高效的做法是先做裁剪，阶段 7 会讲）。
+    // 写一个像素。越界直接忽略
     void setPixel(int x, int y, Color c)
     {
         if (x < 0 || x >= width_ || y < 0 || y >= height_)
@@ -39,17 +60,6 @@ class Framebuffer
     }
 
     // 读一个像素。越界返回 colors::black。
-    //
-    // 【为什么读路径也要兜底】setPixel 的注释已说明越界是预期会发生的正常情况
-    // （光栅化时三角形常部分在屏幕外）。既然写路径会越界，读路径同样会。
-    // 而 assert 在 Release（NDEBUG）下被编译掉，届时越界读是**未定义行为**。
-    // 保留 assert 供 Debug 期发现逻辑错误，同时用运行时兜底消除 Release 下的 UB。
-    //
-    // 【为什么不抛异常】cpp_project_rules.md 要求「项目统一选择一种错误处理
-    // 策略，禁止混用」。本项目现有代码全是「返回 bool / 静默兜底」风格，无异常使用。
-    //
-    // 【性能】getPixel 不在光栅化热路径上（热路径走 row(y) 直写），
-    // 多一次分支的代价可忽略。
     Color getPixel(int x, int y) const
     {
         assert(x >= 0 && x < width_ && y >= 0 && y < height_);
@@ -59,22 +69,17 @@ class Framebuffer
     }
 
     // 整行原始指针：供光栅化内层循环免边界检查直写。
-    //
-    // 【调用契约】Release 下**不做任何检查**，调用方必须保证 0 <= y < height()，
-    // 且对返回指针的横向访问必须限制在 [0, width()) 内。违反则越界写内存。
-    // renderer.h 第 102-108 行通过把包围盒 clamp 到帧缓冲尺寸来满足此契约；
-    // 修改包围盒计算或行指针用法时必须重新确认 clamp 仍然生效
-    // （已录入 engineering_rules.md 红线约束）。
     Color* row(int y)
     {
         assert(y >= 0 && y < height_);
-        return pixels_.data() + size_t(y) * width_;
+        return pixels_ + size_t(y) * width_;
     }
 
-    const Color* data() const { return pixels_.data(); }
+    Color* data() { return pixels_; }
+    const Color* data() const { return pixels_; }
 
    private:
+    Color* pixels_;
     int width_;
     int height_;
-    std::vector<Color> pixels_;
 };

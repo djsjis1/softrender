@@ -1,13 +1,14 @@
 // ============================================================
-// 像素勇者 · 动态版：Win32 实时窗口动画
+// 阶段 03：像素勇者 · 实时动画（仅 Windows）
 //
-// 运行后弹出一个 800x600 窗口：
-//   - 勇者在黄昏草原上来回行走（2 帧走路动画）
-//   - SPACE 跳跃，ESC 退出
-//   - 太阳缓缓落下又升起、云朵飘动、天空颜色随时间变化
+// 【源码阅读】先读这些文件：
+//   platform/win32_window.h  — Win32 GDI 窗口：present(fb) 显示帧缓冲
+//   core/framebuffer.h       — 帧缓冲 + clear()
+//   raster/line.h            — 画线（地面轮廓等）
 //
-// 同时每 0.5 秒把当前帧存为 output/anim/frame_xxx.png（最多 40 帧），
-// 把这些 PNG 用任意工具合成 GIF，就得到"动态图片"文件。
+// 【运行验证】弹出 800×600 窗口：
+//   勇者在黄昏草原上来回行走（2 帧动画），SPACE 跳跃，ESC 退出
+//   太阳落下/升起、云朵飘动、天空颜色随时间变化
 // ============================================================
 #include <chrono>
 #include <cmath>
@@ -48,14 +49,6 @@ const std::vector<std::vector<std::string>> kHeroFrames = {
     },
 };
 
-// 填充矩形：画云、地面、影子这类大色块
-void fillRect(Framebuffer& fb, int x0, int y0, int w, int h, Color c)
-{
-    for (int y = y0; y < y0 + h; ++y)
-        for (int x = x0; x < x0 + w; ++x)
-            fb.setPixel(x, y, c);
-}
-
 // 把一个 sprite 画到 fb 上：左下角 (ox,oy)，每个像素放大 scale×scale 块
 void drawSprite(Framebuffer& fb, const std::vector<std::string>& sprite, const std::vector<SpritePalette>& palette,
                 int ox, int oy, int scale)
@@ -88,15 +81,6 @@ void drawSprite(Framebuffer& fb, const std::vector<std::string>& sprite, const s
                     fb.setPixel(px + dx, py + dy, c);
         }
     }
-}
-
-// 画一个"像素圆"（用勾股距离判断范围），画太阳用
-void fillCircle(Framebuffer& fb, int cx, int cy, int r, Color c)
-{
-    for (int dy = -r; dy <= r; ++dy)
-        for (int dx = -r; dx <= r; ++dx)
-            if (dx * dx + dy * dy <= r * r)
-                fb.setPixel(cx + dx, cy + dy, c);
 }
 
 int main()

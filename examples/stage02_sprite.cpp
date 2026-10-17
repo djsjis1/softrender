@@ -1,13 +1,15 @@
 // ============================================================
-// 像素勇者：字符模板 sprite → 整数倍放大渲染 → 黄昏场景 → 导出 PNG
+// 阶段 02：字符模板精灵 — 像素画放大渲染
 //
-// 运行后在 output/ 生成 stage1_sprite.png：
-//   - 黄昏天空渐变（逐行 lerp 插值）+ 像素方块太阳 + 云
-//   - 持剑红斗篷勇者（16x20 字符画，12 倍放大）
-//   - 地面 + 影子
+// 【源码阅读】先读这些文件：
+//   core/framebuffer.h  — 帧缓冲坐标约定（y 向上）
+//   core/color.h        — Color::lerp 逐行渐变
+//   raster/line.h       — drawLine 画轮廓
 //
-// 说明：Framebuffer 坐标 y 向上、(0,0) 在左下角，
-//       而字符画习惯从上往下读，渲染 sprite 时做了 y 翻转。
+// 【运行验证】生成 output/stage02_sprite.png：
+//   黄昏天空渐变 + 像素勇者（16x20 字符画，12 倍放大）+ 地面影子
+//
+// 注意：字符画从上往下读，Framebuffer y 向上，渲染 sprite 时做了 y 翻转。
 // ============================================================
 #include <cstdio>
 #include <string>
@@ -48,14 +50,6 @@ const std::vector<std::string> kHero = {
     "..BB....BB...I..",  //
     "..BB....BB......",  //
 };
-
-// 填充矩形：画云、地面、影子这类大色块
-void fillRect(Framebuffer& fb, int x0, int y0, int w, int h, Color c)
-{
-    for (int y = y0; y < y0 + h; ++y)
-        for (int x = x0; x < x0 + w; ++x)
-            fb.setPixel(x, y, c);
-}
 
 // 把一个 sprite 画到 fb 上：左下角 (ox,oy)，每个像素放大 scale×scale 块
 void drawSprite(Framebuffer& fb, const std::vector<std::string>& sprite, const std::vector<SpritePalette>& palette,
@@ -162,7 +156,7 @@ int main()
     drawSprite(fb, kHero, palette, hx, hy, scale);
 
     // ---------- 6. 导出 PNG ----------
-    const std::string path = "output/stage1_sprite.png";
+    const std::string path = "output/stage02_sprite.png";
     if (!imagewriter::writeImage(path, fb))
     {
         std::printf("写文件失败: %s\n", path.c_str());

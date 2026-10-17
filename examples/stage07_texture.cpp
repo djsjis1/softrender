@@ -1,21 +1,14 @@
 // ============================================================
-// 阶段 5：纹理映射 + 透视校正插值
+// 阶段 07：纹理映射 + 透视校正插值
 //
-// 生成 output/stage5_texture.tga（左右对比）：
-//   左半屏：仿射插值（屏幕空间直接插值 UV）—— 错误！地面纹理
-//           会沿三角形对角线折断、扭曲
-//   右半屏：透视校正插值 —— 正确，格子随距离均匀缩小
+// 【源码阅读】先读这些文件：
+//   scene/texture.h        — Texture：2D 纹理采样 + 双线性过滤
+//   raster/renderer.h      — Renderer 中的透视校正插值逻辑
+//   raster/triangle.h      — 重心坐标 + varyings 插值
+//   shader/shaders.h       — TextureShader：UV 采样 + 光照
 //
-// 【透视校正原理】
-// 屏幕空间是"透视除法(÷w)之后"的空间，它对 x,y 是线性的，
-// 但对纹理坐标 u,v 不是线性的（近处纹理拉伸、远处压缩）。
-// 若直接在屏幕空间线性插值 u,v，就会出现扭曲。
-//
-// 正确做法：u/w、v/w、以及 1/w 这三个量对屏幕空间才是线性的。
-// 于是：
-//   1. 用重心坐标线性插值 u/w, v/w, 1/w
-//   2. 真正的 u = (插值得到的 u/w) / (插值得到的 1/w)
-// 这就是 GPU 里 varying 变量默认的插值方式。
+// 【运行验证】生成 output/stage07_texture.tga（左右对比）：
+//   左：仿射插值（纹理扭曲）vs 右：透视校正插值（纹理均匀）
 // ============================================================
 #include <cmath>
 #include <cstdio>
@@ -125,7 +118,7 @@ int main()
         fb.setPixel(W / 2, y, Color(255, 200, 60));
 
     std::filesystem::create_directories("output");
-    const char *path = "output/stage5_texture.tga";
+    const char *path = "output/stage07_texture.tga";
     if (!tga::write(path, fb))
     {
         std::printf("写文件失败: %s\n", path);

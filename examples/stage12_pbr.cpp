@@ -1,12 +1,13 @@
 // ============================================================
-// 阶段 10：PBR 光照（Cook-Torrance BRDF）
+// 阶段 12：PBR 光照（Cook-Torrance BRDF）
 //
-// 生成 output/stage10_pbr.tga：
-//   5x5 球体阵列，行 = 粗糙度递增（0.05~1.0），列 = 金属度递增（0~1）
-//   颜色从红到金渐变，展示 PBR 金属度工作流的视觉差异。
+// 【源码阅读】先读这些文件：
+//   shader/pbr_shader.h  — PBR 着色器：微表面模型 + 金属度/粗糙度
+//   scene/mesh.h          — 球体网格生成
+//   scene/camera.h        — Camera
 //
-// 对比 Blinn-Phong：PBR 的金属球有有色反射（F0=albedo），
-// 粗糙度控制高光从针尖到弥散的过渡，掠射角有菲涅尔增强。
+// 【运行验证】生成 output/stage12_pbr.tga：
+//   5×5 球体阵列：行=粗糙度递增，列=金属度递增
 // ============================================================
 #include <cmath>
 #include <cstdio>
@@ -64,7 +65,7 @@ int main() {
     }
 
     std::filesystem::create_directories("output");
-    tga::write("output/stage10_pbr.tga", fb);
-    std::printf("已生成 output/stage10_pbr.tga（行=粗糙度, 列=金属度）\n");
+    tga::write("output/stage12_pbr.tga", fb);
+    std::printf("已生成 output/stage12_pbr.tga（行=粗糙度, 列=金属度）\n");
     return 0;
 }

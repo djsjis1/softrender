@@ -186,16 +186,17 @@ int main()
         const auto& skin = model.skins[0];
         if (skin.inverseBindMatrices >= 0)
         {
-            const auto& acc = model.accessors[skin.inverseBindMatrices];
-            const auto& bv = model.bufferViews[acc.bufferView];
-            const auto& buf = model.buffers[bv.buffer];
-            const float* matData = reinterpret_cast<const float*>(buf.data.data() + bv.byteOffset + acc.byteOffset);
-            for (int j = 0; j < int(acc.count); ++j)
+            const auto matrices = sr::gltf::AccessorView::create(model, skin.inverseBindMatrices);
+            if (!matrices || matrices->type() != TINYGLTF_TYPE_MAT4 || matrices->hasStride() ||
+                matrices->count() != skin.joints.size())
+                return 1;
+            for (size_t j = 0; j < matrices->count(); ++j)
             {
                 Mat4 m;
-                for (int r = 0; r < 4; ++r)
-                    for (int c = 0; c < 4; ++c)
-                        m.m[r][c] = matData[j * 16 + r * 4 + c];
+                for (size_t r = 0; r < 4; ++r)
+                    for (size_t c = 0; c < 4; ++c)
+                        if (!matrices->readFloat(j, c * 4 + r, m.m[r][c]))
+                            return 1;
                 inverseBindMatrices.push_back(m);
             }
         }

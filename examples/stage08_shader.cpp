@@ -1,9 +1,14 @@
 // ============================================================
-// 阶段 6 离屏验证：用与实时窗口完全相同的 Renderer + Shader，
-// 渲染同一个场景的一帧到 TGA。三种着色器各出一张，方便对比：
-//   output/stage6_flat.tga / _gouraud.tga / _phong.tga
+// 阶段 08：着色器管线（Flat / Gouraud / Phong 对比）
 //
-// 目的：实时窗口无法在此环境截图，用离屏图确认管线正确。
+// 【源码阅读】先读这些文件：
+//   shader/shaders.h        — FlatShader / GouraudShader / PhongShader
+//   raster/renderer.h       — Renderer::drawMesh + Shader 回调
+//   scene/mesh.h            — Mesh：顶点/法线/UV
+//   scene/camera.h          — Camera
+//
+// 【运行验证】生成三张图对比：
+//   output/stage08_shader_flat.tga / _gouraud.tga / _phong.tga
 // ============================================================
 #include <cstdio>
 #include <filesystem>
@@ -106,7 +111,7 @@ int main()
         }
 
         char path[128];
-        std::snprintf(path, sizeof(path), "output/stage6_%s.tga", pass.name);
+        std::snprintf(path, sizeof(path), "output/stage08_shader_%s.tga", pass.name);
         tga::write(path, fb);
         std::printf("已生成 %s\n", path);
     }

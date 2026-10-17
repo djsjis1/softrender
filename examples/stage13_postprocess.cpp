@@ -1,11 +1,13 @@
 // ============================================================
-// 阶段 11：后处理管线（Bloom + ACES 色调映射）
+// 阶段 13：后处理管线（Bloom + ACES 色调映射）
 //
-// 生成 output/stage11_postprocess.tga（左右对比）：
-//   左半屏：HDR 渲染 → 直接 clamp 到 [0,1]（无后处理）
-//   右半屏：HDR 渲染 → Bloom（亮部提取+高斯模糊+合成）→ ACES 色调映射
+// 【源码阅读】先读这些文件：
+//   core/float_framebuffer.h  — HDR 浮点帧缓冲
+//   core/post_effects.h       — Bloom：亮部提取 + 高斯模糊 + 合成
+//   core/color.h              — ACES 色调映射：HDR → LDR
 //
-// 场景：暗环境 + 几个高亮自发光球体，Bloom 让它们产生光晕。
+// 【运行验证】生成 output/stage13_postprocess.tga（左右对比）：
+//   左：HDR → clamp（无后处理）vs 右：HDR → Bloom → ACES
 // ============================================================
 #include <cmath>
 #include <cstdio>
@@ -148,7 +150,7 @@ int main()
         fb.setPixel(W / 2, y, Color(255, 200, 0));
 
     std::filesystem::create_directories("output");
-    tga::write("output/stage11_postprocess.tga", fb);
-    std::printf("已生成 output/stage11_postprocess.tga（左=clamp, 右=Bloom+ACES）\n");
+    tga::write("output/stage13_postprocess.tga", fb);
+    std::printf("已生成 output/stage13_postprocess.tga（左=clamp, 右=Bloom+ACES）\n");
     return 0;
 }

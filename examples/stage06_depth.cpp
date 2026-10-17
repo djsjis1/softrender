@@ -1,15 +1,16 @@
 // ============================================================
-// 阶段 4：深度缓冲 + 背面剔除
+// 阶段 06：深度缓冲 + 背面剔除
 //
-// 生成两张图对比：
-//   output/stage4_depth.tga  —— 正确遮挡的彩色场景（含简单光照）
-//   output/stage4_zbuffer.tga —— 深度缓冲可视化（越亮越近）
+// 【源码阅读】先读这些文件：
+//   core/depthbuffer.h     — DepthBuffer：每像素一个 float 深度
+//   raster/renderer.h      — Renderer::drawMesh：深度测试 + 背面剔除
+//   math/transform.h       — MVP 变换链
+//   scene/mesh.h           — Mesh 数据结构
+//   scene/camera.h         — Camera：lookAt + perspective
 //
-// 关键新增：
-//   1. 深度测试：三角形内插值出每像素的 z，只有更近才绘制
-//   2. 背面剔除：屏幕空间三角形绕序为顺时针（面积为负）则丢弃，
-//      省掉约一半永远看不到的三角形
-//   3. 场景里放多个互相穿插/遮挡的物体，验证遮挡关系正确
+// 【运行验证】生成两张图对比：
+//   output/stage06_depth.tga  — 正确遮挡的彩色场景
+//   output/stage06_depth_zbuf.tga — 深度缓冲可视化（越亮越近）
 // ============================================================
 #include <cmath>
 #include <cstdio>
@@ -135,7 +136,7 @@ int main()
     }
 
     std::filesystem::create_directories("output");
-    tga::write("output/stage4_depth.tga", fb);
+    tga::write("output/stage06_depth.tga", fb);
 
     // 深度可视化：把 zbuffer 映射成灰度图（近亮远暗）
     // 注意：透视深度是"非线性"的，数值几乎全部挤在接近 1 的远端，
@@ -161,8 +162,8 @@ int main()
             float g = 1.0f - (z - zmin) / range; // 拉伸到 [0,1]，近=1 亮
             zvis.setPixel(x, y, Color::fromFloat(g, g, g));
         }
-    tga::write("output/stage4_zbuffer.tga", zvis);
+    tga::write("output/stage06_depth_zbuf.tga", zvis);
 
-    std::printf("已生成 output/stage4_depth.tga 与 output/stage4_zbuffer.tga\n");
+    std::printf("已生成 output/stage06_depth.tga 与 output/stage06_depth_zbuf.tga\n");
     return 0;
 }

@@ -1,16 +1,14 @@
 // ============================================================
-// 阶段 12：多线程并行光栅化
+// 阶段 14：多线程并行光栅化
 //
-// 生成 output/stage12_threaded.tga：
-//   用 std::thread 把屏幕分成 N 条水平带，每条带一个线程
-//   独立光栅化（各自拥有局部深度缓冲），最后合并深度。
+// 【源码阅读】先读这些文件：
+//   core/command_buffer.h    — 命令缓冲录制与回放
+//   core/profiler.h          — RAII 计时
+//   raster/renderer.h        — Renderer::rasterTriangle（单线程版）
 //
-// 同时输出单线程耗时 vs 多线程耗时，直观感受并行加速。
-//
-// 原理：光栅化是"embarrassingly parallel"的——每个像素的
-// 着色互不依赖。唯一的竞争点是深度缓冲：两个线程可能同时
-// 写同一像素的深度。解法：每条带维护自己的局部深度缓冲，
-// 渲染完后按像素取深度最小者合并（类似 GPU 的 tile-based 合并）。
+// 【运行验证】生成 output/stage14_threaded.tga：
+//   屏幕分 N 条水平带，每条带一个线程独立光栅化
+//   输出单线程 vs 多线程耗时对比
 // ============================================================
 #include <chrono>
 #include <cstdio>
@@ -182,8 +180,8 @@ int main()
     float msSingle = std::chrono::duration<float, std::milli>(t3 - t2).count();
 
     std::filesystem::create_directories("output");
-    tga::write("output/stage12_threaded.tga", fb);
-    std::printf("已生成 output/stage12_threaded.tga\n");
+    tga::write("output/stage14_threaded.tga", fb);
+    std::printf("已生成 output/stage14_threaded.tga\n");
     std::printf("  线程数: %d\n", numThreads);
     std::printf("  单线程: %.1f ms\n", msSingle);
     std::printf("  多线程: %.1f ms\n", msMulti);

@@ -1,14 +1,16 @@
 // ============================================================
-// 阶段 3：数学库 + MVP 变换 + OBJ 加载
+// 阶段 05：MVP 变换链 + OBJ 加载
 //
-// 生成 output/stage3_cube.tga：把一个 3D 立方体经过
-// Model -> View -> Projection -> 透视除法 -> Viewport
-// 投影到 2D 屏幕。分两块画：
-//   左：随机色实心面（还没有深度测试，会看到穿插——这正是
-//       阶段 4 要解决的问题，先留个悬念）
-//   右：白色线框，直观看清透视的"近大远小"
+// 【源码阅读】先读这些文件：
+//   math/vec.h            — Vec3 向量运算
+//   math/mat4.h           — Mat4 矩阵乘法、逆矩阵
+//   math/transform.h      — modelMatrix / viewMatrix / perspectiveProjection
+//   scene/obj_loader.h    — OBJ 模型解析
+//   raster/triangle.h     — 三角形填充（本阶段还没有深度测试）
 //
-// 若 assets/model.obj 存在则加载它，否则用程序化立方体。
+// 【运行验证】生成 output/stage05_transform.tga：
+//   左：随机色实心面（无深度测试，穿插可见——阶段 06 解决）
+//   右：白色线框，看清透视"近大远小"
 // ============================================================
 #include <cmath>
 #include <cstdio>
@@ -81,7 +83,7 @@ int main() {
     drawLine(fb, W / 2, 0, W / 2, H - 1, Color(80, 80, 90));
 
     std::filesystem::create_directories("output");
-    const char* path = "output/stage3_cube.tga";
+    const char* path = "output/stage05_transform.tga";
     if (!tga::write(path, fb)) {
         std::printf("写文件失败: %s\n", path);
         return 1;

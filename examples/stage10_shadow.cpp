@@ -1,14 +1,15 @@
 // ============================================================
-// 阶段 8 离屏验证：Shadow Mapping + 法线贴图 的两趟渲染
+// 阶段 10：Shadow Mapping + 法线贴图
 //
-// Pass 1（阴影图）：从光源视角用正交投影渲染场景深度到一张
-//   1024x1024 的深度图。
-// Pass 2（主渲染）：从相机视角渲染，每个片元换算到光源空间比较
-//   深度，判断是否在阴影中；同时用法线贴图增加表面凹凸细节。
+// 【源码阅读】先读这些文件：
+//   shader/advanced_shaders.h — ShadowShader / NormalMapShader
+//   raster/renderer.h         — 两趟渲染：阴影图 Pass + 主 Pass
+//   core/depthbuffer.h        — 深度图作为阴影图
+//   scene/texture.h           — 法线贴图采样
 //
-// 生成：
-//   output/stage8_final.tga    完整效果（阴影 + 法线贴图）
-//   output/stage8_noshadow.tga  关闭阴影对比
+// 【运行验证】生成两张图对比：
+//   output/stage10_shadow_final.tga    — 阴影 + 法线贴图
+//   output/stage10_shadow_noshadow.tga — 无阴影对比
 // ============================================================
 #include <cstdio>
 #include <filesystem>
@@ -130,8 +131,8 @@ int main()
     Framebuffer fbFinal(W, H), fbNoShadow(W, H);
     renderScene(fbFinal, true);
     renderScene(fbNoShadow, false);
-    tga::write("output/stage8_final.tga", fbFinal);
-    tga::write("output/stage8_noshadow.tga", fbNoShadow);
-    std::printf("已生成 output/stage8_final.tga 与 output/stage8_noshadow.tga\n");
+    tga::write("output/stage10_shadow_final.tga", fbFinal);
+    tga::write("output/stage10_shadow_noshadow.tga", fbNoShadow);
+    std::printf("已生成 output/stage10_shadow_final.tga 与 output/stage10_shadow_noshadow.tga\n");
     return 0;
 }

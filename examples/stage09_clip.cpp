@@ -1,13 +1,14 @@
 // ============================================================
-// 阶段 7：近平面裁剪对比
+// 阶段 09：近平面裁剪
 //
-// 生成 output/stage7_clip.tga（左右对比）：
-//   左半屏：nearClip=false —— 旧做法，横跨近平面的三角形被整块
-//           丢弃，地面/墙面出现大片空洞
-//   右半屏：nearClip=true  —— 沿近平面正确切开，画面完整无洞
+// 【源码阅读】先读这些文件：
+//   raster/clip.h           — Sutherland-Hodgman 裁剪算法
+//   raster/renderer.h       — Renderer 中的裁剪调用点
+//   math/vec.h              — 齐次坐标与透视除法
 //
-// 场景刻意让相机很低、很贴近地面与一堵大墙，使大量三角形跨越
-// 近平面——这正是裁剪算法大显身手的场合。
+// 【运行验证】生成 output/stage09_clip.tga（左右对比）：
+//   左：无裁剪（横跨近平面的三角形被丢弃，出现空洞）
+//   右：有裁剪（沿近平面正确切开，画面完整）
 // ============================================================
 #include <cstdio>
 #include <filesystem>
@@ -92,7 +93,7 @@ int main()
         fb.setPixel(W / 2, y, Color(255, 200, 60));
 
     std::filesystem::create_directories("output");
-    const char *path = "output/stage7_clip.tga";
+    const char *path = "output/stage09_clip.tga";
     if (!tga::write(path, fb))
     {
         std::printf("写文件失败: %s\n", path);
