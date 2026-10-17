@@ -9,37 +9,44 @@ include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
 # 安装头文件（渲染器本体 = src/ 下所有 .h）
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/src/
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/src/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/softrenderer
     FILES_MATCHING PATTERN "*.h"
 )
 
 # 安装生成的版本头
-install(DIRECTORY ${CMAKE_BINARY_DIR}/generated/softrenderer/
+install(DIRECTORY ${PROJECT_BINARY_DIR}/generated/softrenderer/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/softrenderer
     FILES_MATCHING PATTERN "*.h"
 )
 
 # 安装 stb_image 头文件
 install(FILES
-    ${CMAKE_SOURCE_DIR}/third/stb/stb_image.h
-    ${CMAKE_SOURCE_DIR}/third/stb/stb_image_write.h
+    ${PROJECT_SOURCE_DIR}/third/stb/stb_image.h
+    ${PROJECT_SOURCE_DIR}/third/stb/stb_image_write.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/softrenderer/stb
 )
 
 # 安装 tinyobjloader 头文件
-install(FILES ${CMAKE_SOURCE_DIR}/third/tiny_obj_loader.h
+install(FILES ${PROJECT_SOURCE_DIR}/third/tiny_obj_loader.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/softrenderer
+)
+
+# 公共 glTF/动画头直接引用 tinygltf，安装包必须包含它及 JSON 依赖。
+install(FILES ${PROJECT_SOURCE_DIR}/third/tinygltf/tiny_gltf.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/softrenderer/tinygltf
+)
+install(FILES ${PROJECT_SOURCE_DIR}/third/nlohmann/json.hpp
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/softrenderer/nlohmann
 )
 
 # 安装 EnTT 头文件
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/third/entt/src/entt
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/third/entt/src/entt
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/softrenderer
 )
 
-# 导出目标（如果将来有 .lib/.a 的话；当前是 header-only，
-# 但仍导出 INTERFACE 目标以便 find_package 设置 include 路径）
-install(TARGETS softrenderer third_party_impl entt EXPORT SoftRendererTargets
+# 核心是 INTERFACE 目标，资源解析由 third_party_impl 静态库提供符号。
+install(TARGETS softrenderer third_party_impl sr_entt EXPORT SoftRendererTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )

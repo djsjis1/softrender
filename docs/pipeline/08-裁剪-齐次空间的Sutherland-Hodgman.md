@@ -73,7 +73,7 @@ $$t = \frac{d_{cur}}{d_{cur} - d_{nxt}}, \qquad P_{hit} = \text{lerp}(cur, nxt, 
 | 近平面裁剪主算法 | `clipTriangleNearPlane`（返回 0/3/4） |
 | 接入管线 | `src/raster/renderer.h`：`nearClip` 分支 + 三角扇循环 |
 | 粗暴剔除（对比用） | `renderer.h`：`nearClip=false` 分支 |
-| 对比图 | `examples/stage7_clip.cpp` → `output/stage7_clip.tga` |
+| 对比图 | `examples/stage09_clip.cpp` → `output/stage09_clip.tga` |
 
 `stage7` 把相机压得极低、贴近地面与墙，左半屏 `nearClip=false`（粗暴剔除，有空洞），右半屏 `nearClip=true`（裁剪，完整）。一张图讲完裁剪的价值。
 

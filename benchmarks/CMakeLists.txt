@@ -1,0 +1,2 @@
+add_executable(renderer_benchmark renderer_benchmark.cpp)
+target_link_libraries(renderer_benchmark PRIVATE softrenderer sr_dev_flags)

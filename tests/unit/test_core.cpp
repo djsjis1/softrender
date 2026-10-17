@@ -378,7 +378,7 @@ TEST(DepthBuffer, depthBuffer_get_outOfBounds_returnsFar)
 {
 #ifndef NDEBUG
     GTEST_SKIP() << "越界哨兵仅在 Release（NDEBUG）下可测：Debug 下 assert 会先中止进程";
-#endif
+#else
     DepthBuffer db(4, 4);
     // 四个方向都要测：只测一侧会漏掉「x 检查误用了 height_」这类笔误
     EXPECT_FLOAT_EQ(db.get(-1, 0), DepthBuffer::kFar);
@@ -388,6 +388,7 @@ TEST(DepthBuffer, depthBuffer_get_outOfBounds_returnsFar)
     // 合法位置仍返回真实值：确认兜底没有把正常路径也短路掉
     db.testAndSet(1, 1, 0.25f);
     EXPECT_FLOAT_EQ(db.get(1, 1), 0.25f);
+#endif
 }
 
 // ==================== 帧缓冲边界 ====================
@@ -398,7 +399,7 @@ TEST(Framebuffer, framebuffer_getPixel_outOfBounds_returnsSentinel)
 {
 #ifndef NDEBUG
     GTEST_SKIP() << "越界哨兵仅在 Release（NDEBUG）下可测：Debug 下 assert 会先中止进程";
-#endif
+#else
     // 用一个非黑的填充色，这样「读到 colors::black 哨兵」与「读到真实像素」可区分
     Framebuffer fb(4, 4, Color(10, 20, 30, 255));
 
@@ -417,6 +418,7 @@ TEST(Framebuffer, framebuffer_getPixel_outOfBounds_returnsSentinel)
     fb.setPixel(-1, -1, Color(255, 255, 255));
     fb.setPixel(4, 4, Color(255, 255, 255));
     EXPECT_EQ(fb.getPixel(0, 0).r, 10);
+#endif
 }
 
 // ==================== 纹理 ====================

@@ -8,7 +8,7 @@ trigger: always_on
 ## 规则索引与加载方式
 
 | 规则文件 | 职责 | 加载方式 |
-|----------|------|----------|
+| ---------- | ------ | ---------- |
 | `ai_workflow_rules.md` | 七步工作流 + S/M/L 变更分级 | 常驻 |
 | `project_structure_rules.md` | 目录结构与文件命名 | 项目初始化 / 重构目录时 |
 | `task_management_rules.md` | 任务建档与状态流转 | 多步骤任务、触及建档阈值时 |
@@ -150,7 +150,7 @@ AI 修改代码前必须先读目标文件的头注释，快速理解模块职�
 
 * **禁止提交 `build/`、`output/` 下的任何产物**（`output/.gitkeep` 除外）
   `build/` 实测 590 MB；`output/` 全部为示例运行产物，可重新生成。
-  唯一允许入库的图像是 `tests/golden/*.tga`（像素回归基准图）与
+  唯一允许入库的图像是 `tests/fixtures/golden/*.tga`（像素回归基准图）与
   `tests/fixtures/`（测试输入资产）。
 
 * **禁止提交 `.env`、密钥、个人配置**
@@ -176,7 +176,7 @@ cmake --build build --config Release --target unit_tests
 **测试**
 
 ```powershell
-# 开发迭代首选：单进程跑完 120 个用例，约 20 毫秒
+# 开发迭代首选：单进程跑完 169 个用例，约 20 毫秒
 .\build\bin\Release\unit_tests.exe
 
 # 全量 ctest（CI 用的命令；串行约 40 秒，并行约 13 秒）
@@ -193,8 +193,8 @@ ctest --test-dir build -C Release -L fast
 ```
 
 > ⚠️ `ctest` 慢的原因：`gtest_discover_tests` 把每个用例注册为独立 ctest 项，
-> 120 用例 = 120 次进程启动，开销全在进程创建而非测试本身。
-> `-LE fast` 排除 `unit_tests_all`，避免与 120 个 discover 项重复跑。
+> 169 用例 = 169 次进程启动，开销全在进程创建而非测试本身。
+> `-LE fast` 排除 `unit_tests_all`，避免与 169 个 discover 项重复跑。
 > 详见 `docs/troubleshooting.md`。
 
 **Sanitizer**（默认关闭，需显式开启）
@@ -218,9 +218,9 @@ $env:PATH = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MS
 **运行示例**
 
 ```powershell
-.\build\bin\Release\stage4_zbuffer.exe     # 离屏，写 output/*.tga
+.\build\bin\Release\stage06_depth.exe     # 离屏，写 output/*.tga
 .\build\bin\Release\demo_2d.exe            # 离屏，写 output/*.png + .tga
-.\build\bin\Release\stage8_realtime.exe    # 实时窗口，仅 Windows
+.\build\bin\Release\stage10_shadow_live.exe    # 实时窗口，仅 Windows
 ```
 
 **格式化与静态检查**
@@ -245,11 +245,11 @@ clang-tidy <files>               # 配置见根目录 .clang-tidy（待建立）
 
 ```powershell
 cmake --build build --config Release --parallel   # 零错误零警告
-.\build\bin\Release\unit_tests.exe                # 120 用例全绿
+.\build\bin\Release\unit_tests.exe                # 169 用例全绿
 .\build\bin\Release\render_regression.exe         # 3 个像素回归全绿
 ```
 
-涉及渲染输出的改动额外要求：跑一遍 20 个离屏示例，确认均正常退出。
+涉及渲染输出的改动额外要求：跑一遍 19 个离屏示例，确认均正常退出。
 涉及 `CMakeLists.txt` 的改动额外要求：比对可执行目标清单与改动前一致
 （当前基线：Windows 上 **25 个 exe**）。
 

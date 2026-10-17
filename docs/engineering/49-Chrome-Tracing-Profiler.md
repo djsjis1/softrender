@@ -29,7 +29,7 @@ int main() {
 ## 三、API
 
 | 函数 | 说明 |
-|---|---|
+| --- | --- |
 | `SR_PROFILE_SCOPE(name)` | RAII scope，自动记录进入/退出时间 |
 | `SR_PROFILE_FUNCTION()` | 用 `__FUNCTION__` 作为名称 |
 | `Profiler::instance().flush(path)` | 输出 JSON |
@@ -38,7 +38,7 @@ int main() {
 
 ## 四、设计要点
 
-- **零依赖**：纯 C++17 标准库
+- **零依赖**：纯 C++23 标准库
 - **线程安全**：mutex 保护事件列表
 - **可选开销**：`setEnabled(false)` 后 beginScope/endScope 为空操作
 - **Chrome Trace Format**：工业标准，所有主流 profiler UI 都支持

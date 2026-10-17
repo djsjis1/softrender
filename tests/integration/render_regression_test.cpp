@@ -15,10 +15,10 @@
 //   blend2d_alphaComposition     → alpha 混合 + sr2d 图元 + 变换栈 + scissor
 //
 // 【确定性要求】场景必须无随机、无时间依赖、无多线程顺序依赖。
-// 因此刻意**不**回归 demo_stars（含随机星点）与 stage12_threaded（线程顺序不定）。
+// 因此刻意**不**回归 demo_stars（含随机星点）与 stage14_threaded（线程顺序不定）。
 //
 // 【基准图维护】
-//   基准图在 tests/golden/<场景名>.tga，已纳入版本控制。
+//   基准图在 tests/fixtures/golden/<场景名>.tga，已纳入版本控制。
 //   有意变更视觉输出时：配置加 -DSR_UPDATE_GOLDEN=ON → 跑一次测试 → 提交新基准图，
 //   并在 commit 信息中说明视觉变更原因。
 //   基准图缺失时测试**直接失败**（而非静默创建），避免 CI 假通过。
@@ -39,32 +39,30 @@
 #include "shader/shaders.h"
 #include "test/pixel_regression.h"
 
-namespace
+namespace {
+
+// 把 CompareResult 转成可读的失败信息。
+// 独立成函数而非在每个用例里重复：三处断言逻辑完全相同，
+// 且失败信息必须带上基准图路径与更新方式，否则排查时无从下手。
+void expectMatchesGolden(const char* sceneName, const Framebuffer& fb)
 {
+    const regression::CompareResult r = regression::compareWithGolden(sceneName, fb);
+    EXPECT_TRUE(r.passed) << "场景 [" << sceneName << "] 与基准图不符\n"
+                          << "  不匹配像素: " << r.mismatchedPixels << " / " << r.totalPixels << "（占比 "
+                          << r.mismatchRatio << "，阈值 0.001）\n"
+                          << "  最大单通道差: " << r.maxDelta << "（像素阈值 2.0）\n"
+                          << "  平均差: " << r.avgDelta << "（阈值 0.5）\n"
+                          << "  基准图: " << regression::goldenPath(sceneName) << "\n"
+                          << "  若为有意的视觉变更：配置加 -DSR_UPDATE_GOLDEN=ON 重跑一次以更新基准，"
+                          << "并在 commit 信息中说明变更原因。";
+}
 
-    // 把 CompareResult 转成可读的失败信息。
-    // 独立成函数而非在每个用例里重复：三处断言逻辑完全相同，
-    // 且失败信息必须带上基准图路径与更新方式，否则排查时无从下手。
-    void expectMatchesGolden(const char *sceneName, const Framebuffer &fb)
-    {
-        const regression::CompareResult r = regression::compareWithGolden(sceneName, fb);
-        EXPECT_TRUE(r.passed)
-            << "场景 [" << sceneName << "] 与基准图不符\n"
-            << "  不匹配像素: " << r.mismatchedPixels << " / " << r.totalPixels
-            << "（占比 " << r.mismatchRatio << "，阈值 0.001）\n"
-            << "  最大单通道差: " << r.maxDelta << "（像素阈值 2.0）\n"
-            << "  平均差: " << r.avgDelta << "（阈值 0.5）\n"
-            << "  基准图: " << regression::goldenPath(sceneName) << "\n"
-            << "  若为有意的视觉变更：配置加 -DSR_UPDATE_GOLDEN=ON 重跑一次以更新基准，"
-            << "并在 commit 信息中说明变更原因。";
-    }
+// 回归场景统一用小分辨率：基准图体积小（每张约 49 KB）、渲染快，
+// 且 128x96 已足够暴露深度/裁剪/插值/混合类回归。
+constexpr int kRegressionWidth = 128;
+constexpr int kRegressionHeight = 96;
 
-    // 回归场景统一用小分辨率：基准图体积小（每张约 49 KB）、渲染快，
-    // 且 128x96 已足够暴露深度/裁剪/插值/混合类回归。
-    constexpr int kRegressionWidth = 128;
-    constexpr int kRegressionHeight = 96;
-
-} // namespace
+}  // namespace
 
 // 深度测试 + 背面剔除 + 视锥裁剪。
 // 近处立方体与远处立方体在屏幕上重叠，且远处那个更大 —— 若深度测试失效，
@@ -120,7 +118,7 @@ TEST(RenderRegression, pipeline_phongTexturedSphere)
     Camera cam;
     cam.position = {0.0f, 0.8f, 4.2f};
     cam.pitch = -0.1f;
-    cam.yaw = -1.8f; // 非默认朝向，让球体落在画面偏侧位置
+    cam.yaw = -1.8f;  // 非默认朝向，让球体落在画面偏侧位置
     cam.aspect = float(kRegressionWidth) / kRegressionHeight;
 
     const Texture uvgrid(texgen::uvGrid(128, 8));

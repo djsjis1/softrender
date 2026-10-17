@@ -17,14 +17,14 @@
 //
 // 【增量式边函数原理】
 // 边函数 E(x,y) = cross2(edge, p - v) 对 x,y 是线性的：
-//   E(x+1, y) = E(x,y) + dy_edge    （dy_edge = edge.y 为常数）
-//   E(x, y+1) = E(x,y) - dx_edge    （dx_edge = edge.x 为常数）
+//   E(x+1, y) = E(x,y) - dy_edge    （dy_edge = edge.y 为常数）
+//   E(x, y+1) = E(x,y) + dx_edge    （dx_edge = edge.x 为常数）
 // 所以只需在包围盒左上角算一次 E，之后逐像素加常数——
 // 把每像素 3 次叉积（6 次乘法+6 次减法）降为 3 次加法。
 //
 // 【SSE2 四像素并行】
-// 一次处理 4 个连续 x 像素：用 __m128 同时维护 3 条边的 E 值，
-// 比较是否全 >= 0（_mm_movemask_ps），一次判断 4 像素内外。
+// 一次处理 4 个连续 x 像素：用 __m128i 维护 3 条边的整数 E 值，
+// 用 int64 子像素边和符号位掩码，一次判断 4 像素内外。
 // 对内部像素批量插值深度/属性。
 //
 // 参考：Mesa llvmpipe 的 tile 光栅化、Fabian Giesen 的系列博客。
@@ -37,6 +37,7 @@
 #include "core/depthbuffer.h"
 #include "core/framebuffer.h"
 #include "math/vec.h"
+#include "raster/coverage.h"
 
 #if defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
 #    define SR_HAS_SSE2 1
@@ -105,11 +106,14 @@ inline EdgeSetup setupEdges(const Vec2f& v0, const Vec2f& v1, const Vec2f& v2, i
 inline void fillTriangleIncremental(Framebuffer& fb, DepthBuffer& zb, const Vec2f& v0, const Vec2f& v1, const Vec2f& v2,
                                     float z0, float z1, float z2, Color color)
 {
-    int minX = std::max(0, (int)std::floor(std::min({v0.x, v1.x, v2.x})));
-    int maxX = std::min(fb.width() - 1, (int)std::ceil(std::max({v0.x, v1.x, v2.x})));
-    int minY = std::max(0, (int)std::floor(std::min({v0.y, v1.y, v2.y})));
-    int maxY = std::min(fb.height() - 1, (int)std::ceil(std::max({v0.y, v1.y, v2.y})));
-
+    const auto coverage = sr::TriangleCoverage::create(v0, v1, v2);
+    if (!coverage || !std::isfinite(z0) || !std::isfinite(z1) || !std::isfinite(z2))
+        return;
+    const auto bounds = coverage->bounds(std::min(fb.width(), zb.width()), std::min(fb.height(), zb.height()));
+    if (bounds.empty())
+        return;
+    const int minX = bounds.minX, maxX = bounds.maxX, minY = bounds.minY, maxY = bounds.maxY;
+    auto coverageRow = coverage->atPixel(minX, minY);
     EdgeSetup es = setupEdges(v0, v1, v2, minX, minY);
     if (std::abs(es.invArea) < 1e-20f)
         return;
@@ -130,130 +134,92 @@ inline void fillTriangleIncremental(Framebuffer& fb, DepthBuffer& zb, const Vec2
     float dz_dx = (es.de1_dx * z0 + es.de2_dx * z1 + es.de0_dx * z2) * es.invArea;
     float dz_dy = (es.de1_dy * z0 + es.de2_dy * z1 + es.de0_dy * z2) * es.invArea;
 
-    float e0_row = es.e0, e1_row = es.e1, e2_row = es.e2;
+
     float z_row = (es.e1 * z0 + es.e2 * z1 + es.e0 * z2) * es.invArea;
 
     for (int y = minY; y <= maxY; ++y)
     {
-        float e0 = e0_row, e1 = e1_row, e2 = e2_row;
+        auto coveragePixel = coverageRow;
         float z = z_row;
         for (int x = minX; x <= maxX; ++x)
         {
-            if (e0 >= 0 && e1 >= 0 && e2 >= 0)
+            if (sr::TriangleCoverage::contains(coveragePixel))
             {
                 if (zb.testAndSet(x, y, z))
                     fb.setPixel(x, y, color);
             }
-            e0 += es.de0_dx;
-            e1 += es.de1_dx;
-            e2 += es.de2_dx;
+            coverage->advanceX(coveragePixel);
             z += dz_dx;
         }
-        e0_row += es.de0_dy;
-        e1_row += es.de1_dy;
-        e2_row += es.de2_dy;
+        coverage->advanceY(coverageRow);
         z_row += dz_dy;
     }
 }
 
 #if SR_HAS_SSE2
-// SSE2 版：每次处理 4 个 x 像素
+// SSE2 每组四像素，以两个 int64 二元组计算确定性的覆盖掩码。
 inline void fillTriangleSSE2(Framebuffer& fb, DepthBuffer& zb, const Vec2f& v0, const Vec2f& v1, const Vec2f& v2,
                              float z0, float z1, float z2, Color color)
 {
-    int minX = std::max(0, (int)std::floor(std::min({v0.x, v1.x, v2.x})));
-    int maxX = std::min(fb.width() - 1, (int)std::ceil(std::max({v0.x, v1.x, v2.x})));
-    int minY = std::max(0, (int)std::floor(std::min({v0.y, v1.y, v2.y})));
-    int maxY = std::min(fb.height() - 1, (int)std::ceil(std::max({v0.y, v1.y, v2.y})));
-
-    EdgeSetup es = setupEdges(v0, v1, v2, minX, minY);
+    const auto coverage = sr::TriangleCoverage::create(v0, v1, v2);
+    if (!coverage || !std::isfinite(z0) || !std::isfinite(z1) || !std::isfinite(z2))
+        return;
+    const auto bounds = coverage->bounds(std::min(fb.width(), zb.width()), std::min(fb.height(), zb.height()));
+    if (bounds.empty())
+        return;
+    const int minX = bounds.minX, maxX = bounds.maxX, minY = bounds.minY, maxY = bounds.maxY;
+    const EdgeSetup es = setupEdges(v0, v1, v2, minX, minY);
     if (std::abs(es.invArea) < 1e-20f)
         return;
-
-    // 权重错位映射的理由见标量版 fillTriangleIncremental 中的注释
-    float dz_dx = (es.de1_dx * z0 + es.de2_dx * z1 + es.de0_dx * z2) * es.invArea;
-    float dz_dy = (es.de1_dy * z0 + es.de2_dy * z1 + es.de0_dy * z2) * es.invArea;
-
-    // SSE 常数
-    __m128 de0x4 = _mm_set1_ps(es.de0_dx * 4.0f);
-    __m128 de1x4 = _mm_set1_ps(es.de1_dx * 4.0f);
-    __m128 de2x4 = _mm_set1_ps(es.de2_dx * 4.0f);
-    __m128 de0x1 = _mm_set1_ps(es.de0_dx);
-    __m128 de1x1 = _mm_set1_ps(es.de1_dx);
-    __m128 de2x1 = _mm_set1_ps(es.de2_dx);
-    __m128 zero = _mm_setzero_ps();
-
-    float e0_row = es.e0, e1_row = es.e1, e2_row = es.e2;
-    float z_row = (es.e1 * z0 + es.e2 * z1 + es.e0 * z2) * es.invArea;
-
+    const float dzdx = (es.de1_dx * z0 + es.de2_dx * z1 + es.de0_dx * z2) * es.invArea;
+    const float dzdy = (es.de1_dy * z0 + es.de2_dy * z1 + es.de0_dy * z2) * es.invArea;
+    float zRow = (es.e1 * z0 + es.e2 * z1 + es.e0 * z2) * es.invArea;
+    auto row = coverage->atPixel(minX, minY);
+    const auto& edges = coverage->edges();
+    __m128i step[3];
+    for (size_t i = 0; i < 3; ++i)
+        step[i] = _mm_set1_epi64x(edges[i].stepX() * 4);
     for (int y = minY; y <= maxY; ++y)
     {
-        // 行首 4 像素的边函数值
-        __m128 e0 = _mm_set_ps(e0_row + es.de0_dx * 3, e0_row + es.de0_dx * 2, e0_row + es.de0_dx, e0_row);
-        __m128 e1 = _mm_set_ps(e1_row + es.de1_dx * 3, e1_row + es.de1_dx * 2, e1_row + es.de1_dx, e1_row);
-        __m128 e2 = _mm_set_ps(e2_row + es.de2_dx * 3, e2_row + es.de2_dx * 2, e2_row + es.de2_dx, e2_row);
-        float z = z_row;
-
+        __m128i low[3], high[3];
+        for (size_t i = 0; i < 3; ++i)
+        {
+            const int64_t dx = edges[i].stepX();
+            low[i] = _mm_set_epi64x(row[i] + dx, row[i]);
+            high[i] = _mm_set_epi64x(row[i] + dx * 3, row[i] + dx * 2);
+        }
         int x = minX;
-        // 4 像素一组
+        float z = zRow;
         for (; x + 3 <= maxX; x += 4)
         {
-            // 三条边全 >= 0 的像素 mask
-            __m128 m0 = _mm_cmpge_ps(e0, zero);
-            __m128 m1 = _mm_cmpge_ps(e1, zero);
-            __m128 m2 = _mm_cmpge_ps(e2, zero);
-            int mask = _mm_movemask_ps(_mm_and_ps(_mm_and_ps(m0, m1), m2));
-
-            if (mask == 0xF)
+            // OR 保留任意负边的符号位；movemask_pd 只提取位，不执行浮点运算。
+            const int lo = _mm_movemask_pd(_mm_castsi128_pd(_mm_or_si128(_mm_or_si128(low[0], low[1]), low[2])));
+            const int hi = _mm_movemask_pd(_mm_castsi128_pd(_mm_or_si128(_mm_or_si128(high[0], high[1]), high[2])));
+            const int mask = (~(lo | (hi << 2))) & 15;
+            for (int lane = 0; lane < 4; ++lane)
+                if ((mask & (1 << lane)) && zb.testAndSet(x + lane, y, z + dzdx * lane))
+                    fb.setPixel(x + lane, y, color);
+            for (size_t i = 0; i < 3; ++i)
             {
-                // 4 像素全在内部
-                for (int i = 0; i < 4; ++i)
-                {
-                    if (zb.testAndSet(x + i, y, z + dz_dx * i))
-                        fb.setPixel(x + i, y, color);
-                }
+                low[i] = _mm_add_epi64(low[i], step[i]);
+                high[i] = _mm_add_epi64(high[i], step[i]);
             }
-            else if (mask != 0)
-            {
-                // 部分在内部
-                for (int i = 0; i < 4; ++i)
-                {
-                    if (mask & (1 << i))
-                    {
-                        if (zb.testAndSet(x + i, y, z + dz_dx * i))
-                            fb.setPixel(x + i, y, color);
-                    }
-                }
-            }
-            // 增量 +4
-            e0 = _mm_add_ps(e0, de0x4);
-            e1 = _mm_add_ps(e1, de1x4);
-            e2 = _mm_add_ps(e2, de2x4);
-            z += dz_dx * 4.0f;
+            z += dzdx * 4;
         }
-        // 尾部不足 4 像素
-        float e0s = e0_row + es.de0_dx * (x - minX);
-        float e1s = e1_row + es.de1_dx * (x - minX);
-        float e2s = e2_row + es.de2_dx * (x - minX);
-        float zs = z_row + dz_dx * (x - minX);
+        auto pixel = coverage->atPixel(x, y);
+        z = zRow + dzdx * (x - minX);
         for (; x <= maxX; ++x)
         {
-            if (e0s >= 0 && e1s >= 0 && e2s >= 0)
-            {
-                if (zb.testAndSet(x, y, zs))
-                    fb.setPixel(x, y, color);
-            }
-            e0s += es.de0_dx;
-            e1s += es.de1_dx;
-            e2s += es.de2_dx;
-            zs += dz_dx;
+            if (sr::TriangleCoverage::contains(pixel) && zb.testAndSet(x, y, z))
+                fb.setPixel(x, y, color);
+            coverage->advanceX(pixel);
+            z += dzdx;
         }
-        e0_row += es.de0_dy;
-        e1_row += es.de1_dy;
-        e2_row += es.de2_dy;
-        z_row += dz_dy;
+        coverage->advanceY(row);
+        zRow += dzdy;
     }
 }
+
 #endif  // SR_HAS_SSE2
 
 // 统一入口：有 SSE2 用 SSE2，否则用标量增量

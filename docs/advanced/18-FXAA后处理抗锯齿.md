@@ -38,7 +38,7 @@ fxaa::apply(srcFramebuffer, aaResult);
 
 ## 五、动手实验
 
-1. 对 `stage8_offline` 输出跑一遍 FXAA，对比边缘平滑度（特别是在斜线和球体边缘）
+1. 对 `stage10_shadow` 输出跑一遍 FXAA，对比边缘平滑度（特别是在斜线和球体边缘）
 2. 把 `FXAA_SEARCH_STEPS` 从 8 改到 2——长边缘处理不完整，出现残余锯齿
 3. 把 `FXAA_EDGE_THRESHOLD` 改大——更多区域被误判为边缘而模糊
 

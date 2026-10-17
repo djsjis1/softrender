@@ -1,6 +1,6 @@
 # 31 · ECS 场景管理（EnTT）
 
-> 本项目使用 **EnTT**（header-only，C++17，游戏行业广泛使用）作为 ECS 框架。自己写的 ECS 已删除——有成熟开源库就直接用。
+> 本项目使用 **EnTT**（header-only，C++20，游戏行业广泛使用）作为 ECS 框架。自己写的 ECS 已删除——有成熟开源库就直接用。
 
 ## 一、为什么选 EnTT
 
@@ -61,12 +61,12 @@ registry.destroy(player);
 ```
 
 写完整程序时可在 include 之后加一行 `using namespace sr;`，就不需逐处写前缀
-（`examples/` 中的 `demo_stars.cpp`、`stage9_msaa.cpp`、`stage11_postprocess.cpp`
+（`examples/` 中的 `demo_stars.cpp`、`stage11_msaa.cpp`、`stage13_postprocess.cpp`
 就是这么做的）。
 
 > ⚠️ **单元测试文件里不能用 `using namespace sr;`**：gtest 的 `TEST(GBuffer, ...)`
 > 会创建名为 `GBuffer` 的命名空间，与 using-directive 引入的 `sr::GBuffer` 冲突；
-> 且 `tests/test_core.cpp` 故意在全局作用域声明了 8 个同名哨兵类型用来
+> 且 `tests/unit/test_core.cpp` 故意在全局作用域声明了 8 个同名哨兵类型用来
 > 验证迁移成果，与 directive 构成二义性（MSVC C2872）。测试统一写显式 `sr::`。
 
 ## 四、组件定义
@@ -94,7 +94,7 @@ struct CameraTag    {};                        // 空标记组件，仅用于 vi
 
 ### 回归防护：编译期哨兵
 
-`tests/test_core.cpp` 在**全局作用域**声明了 8 个同名哨兵类型：
+`tests/unit/test_core.cpp` 在**全局作用域**声明了 8 个同名哨兵类型：
 
 ```cpp
 struct Position { int canary = 0; };
@@ -109,10 +109,10 @@ struct Light    { int canary = 0; };
 ## 五、对应文件
 
 | 文件 | 作用 |
-|---|---|
+| --- | --- |
 | `third/entt/src/entt/` | EnTT 源码（76 个头文件） |
 | `src/scene/components.h` | 渲染器组件定义 |
-| `tests/test_core.cpp` | ECS 测试（EnTT API） |
+| `tests/unit/test_core.cpp` | ECS 测试（EnTT API） |
 
 ## 六、EnTT 进阶用法
 

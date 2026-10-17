@@ -1,5 +1,7 @@
 # TASK-006：测试目录重构与覆盖率接入
 
+> 2026-10-05 更新：unit/integration/fixtures 目录分层已完成，tests/CMakeLists.txt 已建立，新增 Arena/Renderer 独立测试和下游消费测试。旧 test_core.cpp 仍待按依赖拆分，覆盖率待实测。下文“删除工具阻塞”是历史环境记录，不是当前已验证阻塞。
+
 ## 基本信息
 
 - 创建日期：2026-09-05

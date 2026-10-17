@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "math/mat4.h"
 #include "math/vec.h"
 #include "scene/texture.h"
 
@@ -125,8 +126,8 @@ struct GltfAnimation
     };
     struct Sampler
     {
-        int input = -1;  // accessor（时间戳）；-1 = 未设置，理由同 Channel
-        int output = -1; // accessor（关键帧值）
+        int input = -1;   // accessor（时间戳）；-1 = 未设置，理由同 Channel
+        int output = -1;  // accessor（关键帧值）
         enum class Interpolation : uint8_t
         {
             Linear,

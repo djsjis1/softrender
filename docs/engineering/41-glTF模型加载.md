@@ -25,6 +25,8 @@ Mesh mesh;
 gltfloader::loadFirstMesh("model.glb", mesh);
 ```
 
+支持范围和数据错误处理以[加载管线](50-glTF加载管线.md)为准。glTF 格式能够表达完整场景，不代表本项目已经实现全部特性。
+
 ## 三、依赖
 
 tinygltf 依赖 nlohmann/json（JSON 解析）和 stb_image（纹理加载）。三者统一编译在 `third_party_impl` 库中。
@@ -35,7 +37,8 @@ tinygltf 依赖 nlohmann/json（JSON 解析）和 stb_image（纹理加载）。
 |---|---|
 | `third/tinygltf/tiny_gltf.h` | tinygltf 头文件 |
 | `third/nlohmann/json.hpp` | JSON 解析器 |
-| `third/tinygltf/tiny_gltf_impl.cpp` | 统一实现 |
+| `third/tinygltf/tiny_gltf_impl.cpp` | stb_image / stb_image_write 实现 |
+| `src/scene/gltf_loader_impl.cpp` | tinygltf 实现 |
 | `src/scene/gltf_loader.h` | 加载器包装 |
 
 ---

@@ -1,7 +1,9 @@
 #pragma once
 #include <algorithm>
+
 #include "core/framebuffer.h"
 #include "math/vec.h"
+#include "raster/coverage.h"
 #include "raster/line.h"
 
 // ============================================================
@@ -29,16 +31,15 @@
 
 // 计算 p 关于三角形 (v0,v1,v2) 的重心坐标。
 // 返回 (α, β, γ)；若三角形退化（面积为 0）返回负值标记。
-inline Vec3f barycentric(const Vec2f &v0, const Vec2f &v1, const Vec2f &v2,
-                         const Vec2f &p)
+inline Vec3f barycentric(const Vec2f &v0, const Vec2f &v1, const Vec2f &v2, const Vec2f &p)
 {
-    float area2 = cross2(v1 - v0, v2 - v0); // 整个三角形的 2 倍有向面积
+    float area2 = cross2(v1 - v0, v2 - v0);  // 整个三角形的 2 倍有向面积
     if (std::abs(area2) < 1e-8f)
-        return {-1, -1, -1}; // 退化三角形
+        return {-1, -1, -1};  // 退化三角形
     // 每个分量 = 对边与 p 构成的子三角形面积 / 总面积
-    float alpha = cross2(v2 - v1, p - v1) / area2; // 对应 v0
-    float beta = cross2(v0 - v2, p - v2) / area2;  // 对应 v1
-    float gamma = 1.0f - alpha - beta;             // 三者和恒为 1
+    float alpha = cross2(v2 - v1, p - v1) / area2;  // 对应 v0
+    float beta = cross2(v0 - v2, p - v2) / area2;   // 对应 v1
+    float gamma = 1.0f - alpha - beta;              // 三者和恒为 1
     return {alpha, beta, gamma};
 }
 
@@ -46,48 +47,61 @@ inline Vec3f barycentric(const Vec2f &v0, const Vec2f &v1, const Vec2f &v2,
 inline void fillTriangle(Framebuffer &fb, Vec2f v0, Vec2f v1, Vec2f v2, Color color)
 {
     // 1. 求包围盒并夹取到屏幕范围（只遍历可能覆盖的像素）
-    int minX = std::max(0, (int)std::floor(std::min({v0.x, v1.x, v2.x})));
-    int maxX = std::min(fb.width() - 1, (int)std::ceil(std::max({v0.x, v1.x, v2.x})));
-    int minY = std::max(0, (int)std::floor(std::min({v0.y, v1.y, v2.y})));
-    int maxY = std::min(fb.height() - 1, (int)std::ceil(std::max({v0.y, v1.y, v2.y})));
+    const auto coverage = sr::TriangleCoverage::create(v0, v1, v2);
+    if (!coverage)
+        return;
+    const auto bounds = coverage->bounds(fb.width(), fb.height());
+    if (bounds.empty())
+        return;
+    const int minX = bounds.minX, maxX = bounds.maxX, minY = bounds.minY, maxY = bounds.maxY;
+    auto coverageRow = coverage->atPixel(minX, minY);
 
-    // 2. 逐像素：采样点取像素中心 (+0.5)，重心坐标全非负则着色
+    // 2. 逐像素：采样点取像素中心 (+0.5)，共享边由 top-left 规则唯一归属。
     for (int y = minY; y <= maxY; ++y)
     {
+        auto coveragePixel = coverageRow;
         for (int x = minX; x <= maxX; ++x)
         {
-            Vec3f bc = barycentric(v0, v1, v2, {x + 0.5f, y + 0.5f});
-            if (bc.x < 0 || bc.y < 0 || bc.z < 0)
-                continue; // 在三角形外
+            const bool covered = sr::TriangleCoverage::contains(coveragePixel);
+            coverage->advanceX(coveragePixel);
+            if (!covered)
+                continue;
             fb.setPixel(x, y, color);
         }
+        coverage->advanceY(coverageRow);
     }
 }
 
 // 顶点色插值版本：三个顶点各带颜色，内部像素用重心坐标混合。
 // OpenGL 里 varying 变量的插值就是同一件事。
-inline void fillTriangleGradient(Framebuffer &fb, Vec2f v0, Vec2f v1, Vec2f v2,
-                                 Color c0, Color c1, Color c2)
-{   
-
-    int minX = std::max(0, (int)std::floor(std::min({v0.x, v1.x, v2.x})));
-    int maxX = std::min(fb.width() - 1, (int)std::ceil(std::max({v0.x, v1.x, v2.x})));
-    int minY = std::max(0, (int)std::floor(std::min({v0.y, v1.y, v2.y})));
-    int maxY = std::min(fb.height() - 1, (int)std::ceil(std::max({v0.y, v1.y, v2.y})));
+inline void fillTriangleGradient(Framebuffer &fb, Vec2f v0, Vec2f v1, Vec2f v2, Color c0, Color c1, Color c2)
+{
+    const auto coverage = sr::TriangleCoverage::create(v0, v1, v2);
+    if (!coverage)
+        return;
+    const auto bounds = coverage->bounds(fb.width(), fb.height());
+    if (bounds.empty())
+        return;
+    const int minX = bounds.minX, maxX = bounds.maxX, minY = bounds.minY, maxY = bounds.maxY;
+    auto coverageRow = coverage->atPixel(minX, minY);
 
     for (int y = minY; y <= maxY; ++y)
     {
+        auto coveragePixel = coverageRow;
         for (int x = minX; x <= maxX; ++x)
         {
             Vec3f bc = barycentric(v0, v1, v2, {x + 0.5f, y + 0.5f});
-            if (bc.x < 0 || bc.y < 0 || bc.z < 0)
+            const bool covered = sr::TriangleCoverage::contains(coveragePixel);
+            coverage->advanceX(coveragePixel);
+            if (!covered)
                 continue;
             // attr(p) = α*attr0 + β*attr1 + γ*attr2 —— 对颜色的三路混合
-            Color c(uint8_t(bc.x * c0.r + bc.y * c1.r + bc.z * c2.r),
-                    uint8_t(bc.x * c0.g + bc.y * c1.g + bc.z * c2.g),
-                    uint8_t(bc.x * c0.b + bc.y * c1.b + bc.z * c2.b));
+            Color c(uint8_t(std::clamp(bc.x * c0.r + bc.y * c1.r + bc.z * c2.r, 0.0f, 255.0f)),
+                    uint8_t(std::clamp(bc.x * c0.g + bc.y * c1.g + bc.z * c2.g, 0.0f, 255.0f)),
+                    uint8_t(std::clamp(bc.x * c0.b + bc.y * c1.b + bc.z * c2.b, 0.0f, 255.0f)));
             fb.setPixel(x, y, c);
         }
+        coverage->advanceY(coverageRow);
     }
 }
 

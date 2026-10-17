@@ -3,8 +3,9 @@
 #include <vector>
 
 #include "math/vec.h"
+#include "scene/animation_player.h"
+#include "scene/gltf_mesh.h"
 #include "scene/gltf_types.h"
-#include "scene/mesh.h"
 
 // ============================================================
 // glTF 模型加载器 —— 使用 tinygltf
@@ -14,19 +15,12 @@
 // tinygltf 是单头文件的 C++ 解析器，性能极好。
 //
 // 源码：third/tinygltf/tiny_gltf.h
-// 实现：third/tinygltf/tiny_gltf_impl.cpp
+// 实现：src/scene/gltf_loader_impl.cpp
 // ============================================================
 
-// tinygltf 头文件（实现在 third/tinygltf/tiny_gltf_impl.cpp）
+// tinygltf 头文件（实现在 src/scene/gltf_loader_impl.cpp）
 // 不定义任何 TINYGLTF_NO_* 宏，让头文件正常声明所有函数
 #include "tiny_gltf.h"
-
-// stb_image 函数声明（实现在 third_party_impl 中）
-extern "C" {
-unsigned char* stbi_load_from_memory(const unsigned char* buffer, int len, int* x, int* y, int* channels_in_file,
-                                     int desired_channels);
-void stbi_image_free(void* retval_from_stbi_load);
-}
 
 namespace gltfloader {
 
@@ -51,146 +45,30 @@ struct LoadResult
     LoadResult& operator=(const LoadResult&) = delete;
 };
 
-// 加载 glTF/glb 文件
-inline LoadResult load(const std::string& path)
+}  // namespace gltfloader
+
+namespace sr::gltf {
+// Convert an already parsed model. Failure never exposes partially converted resources.
+inline gltfloader::LoadResult convertModel(const tinygltf::Model& model)
 {
-    LoadResult result;
-    tinygltf::Model model;
-    tinygltf::TinyGLTF loader;
-    std::string err, warn;
-
-    bool ret = false;
-    // 根据扩展名判断 .glb 还是 .gltf
-    if (path.size() >= 4 && path.substr(path.size() - 4) == ".glb")
+    gltfloader::LoadResult result;
+    auto fail = [](std::string message) {
+        gltfloader::LoadResult failed;
+        failed.error = std::move(message);
+        return failed;
+    };
+    for (const auto& source : model.meshes)
     {
-        ret = loader.LoadBinaryFromFile(&model, &err, &warn, path);
-    }
-    else
-    {
-        ret = loader.LoadASCIIFromFile(&model, &err, &warn, path);
-    }
-
-    if (!ret)
-    {
-        result.error = err;
-        return result;
-    }
-
-    // 遍历所有 mesh
-    for (const auto& gltfMesh : model.meshes)
-    {
-        for (const auto& primitive : gltfMesh.primitives)
+        for (const auto& primitive : source.primitives)
         {
             Mesh mesh;
-
-            // 获取 position accessor
-            auto posIt = primitive.attributes.find("POSITION");
-            if (posIt == primitive.attributes.end())
-                continue;
-            const auto& posAccessor = model.accessors[posIt->second];
-            const auto& posBufferView = model.bufferViews[posAccessor.bufferView];
-            const auto& posBuffer = model.buffers[posBufferView.buffer];
-            const float* posData = reinterpret_cast<const float*>(posBuffer.data.data() + posBufferView.byteOffset +
-                                                                  posAccessor.byteOffset);
-            int vertexCount = static_cast<int>(posAccessor.count);
-
-            // 获取 normal accessor（可选）
-            const float* normData = nullptr;
-            auto normIt = primitive.attributes.find("NORMAL");
-            if (normIt != primitive.attributes.end())
-            {
-                const auto& nAcc = model.accessors[normIt->second];
-                const auto& nBV = model.bufferViews[nAcc.bufferView];
-                const auto& nBuf = model.buffers[nBV.buffer];
-                normData = reinterpret_cast<const float*>(nBuf.data.data() + nBV.byteOffset + nAcc.byteOffset);
-            }
-
-            // 获取 texcoord accessor（可选）
-            const float* uvData = nullptr;
-            auto uvIt = primitive.attributes.find("TEXCOORD_0");
-            if (uvIt != primitive.attributes.end())
-            {
-                const auto& uvAcc = model.accessors[uvIt->second];
-                const auto& uvBV = model.bufferViews[uvAcc.bufferView];
-                const auto& uvBuf = model.buffers[uvBV.buffer];
-                uvData = reinterpret_cast<const float*>(uvBuf.data.data() + uvBV.byteOffset + uvAcc.byteOffset);
-            }
-
-            // 构建顶点
-            mesh.vertices.resize(vertexCount);
-            for (int i = 0; i < vertexCount; ++i)
-            {
-                mesh.vertices[i].position = {posData[i * 3 + 0], posData[i * 3 + 1], posData[i * 3 + 2]};
-                if (normData)
-                    mesh.vertices[i].normal = {normData[i * 3 + 0], normData[i * 3 + 1], normData[i * 3 + 2]};
-                if (uvData)
-                    mesh.vertices[i].uv = {uvData[i * 2 + 0], uvData[i * 2 + 1]};
-            }
-
-            // 索引
-            if (primitive.indices >= 0)
-            {
-                const auto& idxAccessor = model.accessors[primitive.indices];
-                const auto& idxBV = model.bufferViews[idxAccessor.bufferView];
-                const auto& idxBuf = model.buffers[idxBV.buffer];
-                const uint8_t* idxBase = idxBuf.data.data() + idxBV.byteOffset + idxAccessor.byteOffset;
-
-                int indexCount = static_cast<int>(idxAccessor.count);
-                mesh.indices.resize(indexCount);
-                if (idxAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT)
-                {
-                    const uint16_t* idx16 = reinterpret_cast<const uint16_t*>(idxBase);
-                    for (int i = 0; i < indexCount; ++i)
-                        mesh.indices[i] = idx16[i];
-                }
-                else if (idxAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT)
-                {
-                    const uint32_t* idx32 = reinterpret_cast<const uint32_t*>(idxBase);
-                    for (int i = 0; i < indexCount; ++i)
-                        mesh.indices[i] = static_cast<int>(idx32[i]);
-                }
-                else
-                {
-                    const uint8_t* idx8 = idxBase;
-                    for (int i = 0; i < indexCount; ++i)
-                        mesh.indices[i] = idx8[i];
-                }
-            }
-            else
-            {
-                // 无索引：每 3 个顶点一个三角形
-                mesh.indices.resize(vertexCount);
-                for (int i = 0; i < vertexCount; ++i)
-                    mesh.indices[i] = i;
-            }
-
-            // 如果没有法线，计算
-            if (!normData && !mesh.vertices.empty())
-            {
-                for (auto& v : mesh.vertices)
-                    v.normal = {0, 0, 0};
-                for (size_t i = 0; i + 2 < mesh.indices.size(); i += 3)
-                {
-                    auto& a = mesh.vertices[mesh.indices[i]];
-                    auto& b = mesh.vertices[mesh.indices[i + 1]];
-                    auto& c = mesh.vertices[mesh.indices[i + 2]];
-                    Vec3f n = cross(b.position - a.position, c.position - a.position);
-                    a.normal = a.normal + n;
-                    b.normal = b.normal + n;
-                    c.normal = c.normal + n;
-                }
-                for (auto& v : mesh.vertices)
-                    if (v.normal.lengthSq() > 1e-12f)
-                        v.normal = v.normal.normalized();
-            }
-
-            // 材质索引
+            std::string error;
+            if (!readMeshPrimitive(model, primitive, mesh, error))
+                return fail("mesh: " + error);
             result.meshMaterialIndices.push_back(primitive.material);
-
             result.meshes.push_back(std::move(mesh));
         }
     }
-
     // 解析材质
     for (const auto& mat : model.materials)
     {
@@ -270,42 +148,44 @@ inline LoadResult load(const std::string& path)
     for (size_t ti = 0; ti < model.textures.size(); ++ti)
     {
         const auto& tex = model.textures[ti];
-        if (tex.source < 0 || tex.source >= (int)model.images.size())
-            continue;
+        if (tex.source < 0 || size_t(tex.source) >= model.images.size())
+            return fail("texture: invalid source image");
         const auto& img = model.images[tex.source];
 
-        tga::Image tgaImg;
-        bool ok = false;
-
-        // 尝试从 buffer 加载（内嵌 base64 或外部 bin）
-        if (!img.image.empty())
+        // TinyGLTF has already decoded image.image into pixels.
+        if (img.as_is || img.width <= 0 || img.height <= 0 || img.component < 1 || img.component > 4 || img.bits != 8 ||
+            img.pixel_type != TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE)
+            return fail("texture: only decoded 8-bit images are supported");
+        const size_t width = size_t(img.width), height = size_t(img.height), channels = size_t(img.component);
+        if (width > std::numeric_limits<size_t>::max() / height)
+            return fail("texture size overflow");
+        const size_t count = width * height;
+        if (count > size_t(std::numeric_limits<int>::max()))
+            return fail("texture exceeds renderer pixel limit");
+        if (count > img.image.size() / channels)
+            return fail("truncated decoded texture");
+        tga::Image image;
+        image.width = img.width;
+        image.height = img.height;
+        image.pixels.resize(count);
+        for (size_t i = 0; i < count; ++i)
         {
-            // 用 stb_image 从内存加载
-            int w, h, ch;
-            unsigned char* data = stbi_load_from_memory(img.image.data(), (int)img.image.size(), &w, &h, &ch, 4);
-            if (data)
-            {
-                tgaImg.width = w;
-                tgaImg.height = h;
-                tgaImg.pixels.resize(size_t(w) * h);
-                for (int i = 0; i < w * h; ++i)
-                {
-                    tgaImg.pixels[i] = Color(data[i * 4 + 0], data[i * 4 + 1], data[i * 4 + 2], data[i * 4 + 3]);
-                }
-                stbi_image_free(data);
-                ok = true;
-            }
+            const auto* pixel = img.image.data() + i * channels;
+            const auto r = pixel[0];
+            const auto g = channels < 3 ? r : pixel[1];
+            const auto b = channels < 3 ? r : pixel[2];
+            const auto alpha = channels == 2 ? pixel[1] : channels == 4 ? pixel[3] : static_cast<unsigned char>(255);
+            image.pixels[i] = Color(r, g, b, alpha);
         }
-
-        if (ok)
-        {
-            result.textures[ti] = Texture(std::move(tgaImg));
-        }
+        result.textures[ti] = Texture(std::move(image));
     }
-
     // 填充材质纹理指针
     for (auto& mat : result.materials)
     {
+        for (int index : {mat.baseColorTextureIndex, mat.metallicRoughnessTextureIndex, mat.normalTextureIndex,
+                          mat.emissiveTextureIndex})
+            if (index < -1 || (index >= 0 && size_t(index) >= result.textures.size()))
+                return fail("material: invalid texture index");
         if (mat.baseColorTextureIndex >= 0 && mat.baseColorTextureIndex < (int)result.textures.size())
             mat.baseColorTexture = &result.textures[mat.baseColorTextureIndex];
         if (mat.metallicRoughnessTextureIndex >= 0 && mat.metallicRoughnessTextureIndex < (int)result.textures.size())
@@ -330,6 +210,8 @@ inline LoadResult load(const std::string& path)
                 gc.path = GltfAnimation::Channel::Path::Rotation;
             else if (ch.target_path == "scale")
                 gc.path = GltfAnimation::Channel::Path::Scale;
+            else
+                return fail("unsupported animation path: " + ch.target_path);
             ga.channels.push_back(gc);
         }
         for (const auto& s : anim.samplers)
@@ -341,15 +223,61 @@ inline LoadResult load(const std::string& path)
                 gs.interpolation = GltfAnimation::Sampler::Interpolation::Step;
             else if (s.interpolation == "CUBICSPLINE")
                 gs.interpolation = GltfAnimation::Sampler::Interpolation::CubicSpline;
+            else if (s.interpolation != "LINEAR" && !s.interpolation.empty())
+                return fail("unsupported interpolation");
             ga.samplers.push_back(gs);
+        }
+        for (const auto& channel : ga.channels)
+        {
+            AnimSample sample;
+            if (!sampleChannel(model, ga, channel, 0, sample))
+                return fail("invalid animation channel");
+            const auto& sampler = ga.samplers[size_t(channel.samplerIndex)];
+            const auto values = AccessorView::create(model, sampler.output);
+            const bool rotation = channel.path == GltfAnimation::Channel::Path::Rotation;
+            const bool cubic = sampler.interpolation == GltfAnimation::Sampler::Interpolation::CubicSpline;
+            for (size_t i = 0; i < values->count(); ++i)
+            {
+                double lengthSquared = 0;
+                for (size_t c = 0; c < (rotation ? 4u : 3u); ++c)
+                {
+                    float value = 0;
+                    if (!values->readFloat(i, c, value))
+                        return fail("nonfinite animation output");
+                    lengthSquared += double(value) * value;
+                }
+                if (rotation && (!cubic || i % 3 == 1) && lengthSquared == 0)
+                    return fail("zero animation quaternion");
+            }
         }
         result.animations.push_back(std::move(ga));
     }
 
-    result.success = !result.meshes.empty();
+    if (result.meshes.empty())
+        return fail("model contains no supported meshes");
+    result.success = true;
     return result;
 }
 
+}  // namespace sr::gltf
+
+namespace gltfloader {
+inline LoadResult load(const std::string& path)
+{
+    tinygltf::Model model;
+    tinygltf::TinyGLTF loader;
+    std::string error, warning;
+    const bool binary = path.size() >= 4 && path.substr(path.size() - 4) == ".glb";
+    const bool loaded = binary ? loader.LoadBinaryFromFile(&model, &error, &warning, path)
+                               : loader.LoadASCIIFromFile(&model, &error, &warning, path);
+    if (!loaded)
+    {
+        LoadResult result;
+        result.error = error.empty() ? "unable to parse glTF file" : error;
+        return result;
+    }
+    return sr::gltf::convertModel(model);
+}
 // 便捷接口：加载第一个 mesh
 inline bool loadFirstMesh(const std::string& path, Mesh& out)
 {

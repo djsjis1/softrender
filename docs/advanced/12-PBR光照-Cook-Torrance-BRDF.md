@@ -31,7 +31,7 @@ $$f_r = \frac{D \cdot G \cdot F}{4 (N \cdot V)(N \cdot L)}$$
 | GGX D 项 | `fragment` 中 `a2 / (π * denom²)` |
 | Smith G 项 | `G1V * G1L` |
 | Schlick F 项 | `F0 + (1-F0) * pow(1-VdotH, 5)` |
-| 5×5 球阵列 | `examples/stage10_pbr.cpp` |
+| 5×5 球阵列 | `examples/stage12_pbr.cpp` |
 
 ## 五、动手实验
 

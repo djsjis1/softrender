@@ -1,5 +1,7 @@
 # TASK-005：构建系统现代化
 
+> 2026-10-05 更新：target-based、/WX、构建职责拆分、可选目标、安装消费测试和本地 Debug ASAN 已验证；clang-format/clang-tidy 仍未实跑。下文保留早期计划和当时环境信息，当前进度以 ACTIVE.md 与 TASK-008 为准。
+
 ## 基本信息
 
 - 创建日期：2026-09-05

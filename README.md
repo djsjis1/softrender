@@ -1,165 +1,92 @@
 # SoftRenderer
 
-> 基于 C++23 的教学型软件渲染器：不依赖任何图形 API，从 Bresenham 画线一路实现到 Cook-Torrance PBR、IBL、骨骼动画与后处理管线，全部跑在 CPU 上。
+基于 C++23 的教学型 CPU 软件渲染器：从画线、三角形光栅化，到可编程着色、PBR、IBL、骨骼动画和后处理。不依赖 OpenGL、DirectX 或 Vulkan。
 
-## 功能特性
+核心算法以头文件为主；图像、模型和 ECS 使用仓库内置的第三方库，glTF/OBJ/stb 实现通过静态库链接。实时窗口示例使用 Windows GDI，离屏渲染与数学模块不依赖窗口系统。
 
-**渲染管线**
+## 能力与边界
 
-| 类别 | 能力 |
-|---|---|
-| 光栅化 | Bresenham 画线、边函数 + 重心坐标、增量式边函数 |
-| 裁剪 | 完整 6 面 Sutherland-Hodgman 视锥裁剪（含顺时针绕序修复） |
-| 深度 | Z-buffer、背面剔除（可关闭以渲染双面片） |
-| 纹理 | 最近邻 / 双线性 / 三线性过滤、mipmap 链、Repeat 环绕 |
-| 插值 | 透视校正（1/w） |
-| 着色 | Flat / Gouraud / Phong / Cook-Torrance PBR |
-| 阴影 | Shadow Mapping + PCF 3×3 |
-| 法线贴图 | TBN 切线空间 |
-| 抗锯齿 | 4x MSAA、FXAA |
-| 后处理 | Bloom、ACES 色调映射、景深、运动模糊、暗角、色差 |
-| 全局光照 | SSAO |
-| 环境光 | Cubemap + IBL 辐照度 |
+| 模块 | 已实现能力 |
+| --- | --- |
+| 3D 管线 | 六面视锥裁剪、背面剔除、深度测试、透视校正插值、可编程 Shader、discard |
+| 光照 | Flat / Gouraud / Phong / Cook-Torrance PBR、阴影映射、法线贴图、IBL |
+| 图像处理 | mipmap、双线性/三线性采样、4x MSAA、FXAA、Bloom、SSAO、色调映射及其他后处理 |
+| 2D | 图元、渐变、混合、图像变换、点阵文字、相机、scissor 与 HUD |
+| 场景与资源 | OBJ、glTF/glb、材质、骨骼/动画、粒子、EnTT 组件与资源缓存 |
+| 工程设施 | 分条并行示例、命令缓冲/线程池、可复用 Arena、Profiler、单元/像素/安装集成测试 |
 
-**2D 渲染子系统**（`namespace sr2d`）
+这些能力分布在不同示例和模块中，并非都已整合进同一个 Renderer。SSE2 光栅化仍是独立实验路径；动画已支持 Linear/Step/CubicSpline，但完整场景层级与通用 skin 导入仍待完善。覆盖规则已统一到整数子像素；MSAA 示例按样本提交颜色。可选性能目标及实测结果见[性能基线](docs/engineering/58-覆盖规则与性能基线.md)。完整限制与优先级见[项目分析与优化记录](docs/project_review.md)。
 
-矩形 / 圆 / 椭圆 / 圆角矩形 / 多边形 / 渐变 / 粗线、alpha 混合五种模式、
-图像 blit 与变换、5×7 点阵字体文字渲染、`Mat3` 变换栈、`Camera2D`、scissor 裁剪。
-可与 3D 场景共用同一 `Framebuffer`，直接做 HUD 叠加。
+## 构建和测试
 
-**资源与场景**
+需要 CMake 3.20+ 与支持项目所用 C++23 特性的工具链。Windows 本轮实测 MSVC 19.44；Linux/macOS 的执行结果需以远端 CI 为准。第三方源码已内置，无需在线下载依赖。
 
-- 模型加载：OBJ（tinyobjloader）、glTF 2.0 / glb（tinygltf）
-- glTF PBR metallic-roughness 材质全字段解析
-- 骨骼蒙皮动画 + 四元数 SLERP / NLERP 插值
-- 粒子系统（Billboard 发射器 + 重力 + 颜色渐变）
-- EnTT ECS 场景管理、引用计数资源管理器
-
-**工程设施**
-
-- 多线程分条光栅化、命令缓冲、线程池
-- Arena 线性分配器
-- Chrome Tracing Profiler（输出可直接拖进 Perfetto UI）
-- 像素级回归测试工具
-- GoogleTest 单元测试：**94 个用例 / 29 个套件**
-- GitHub Actions 三平台 CI
-
-## 依赖环境
-
-| 项 | 要求 |
-|---|---|
-| CMake | **3.20+**（`CMAKE_CXX_STANDARD 23` 需要） |
-| 编译器 | 需完整支持 **C++23**：MSVC 2022 17.10+ / GCC 13+ / Clang 17+ |
-| 平台 | 渲染核心 100% 平台无关；实时窗口示例仅 Windows（Win32 GDI） |
-
-**无需安装任何第三方库**。全部依赖以源码形式内嵌在 `third/`，清单与版本见
-[`third/README.md`](third/README.md)。
-
-可选：`SR_ENABLE_SPDLOG`（默认 ON）控制 spdlog 日志集成。
-
-## 构建
-
-```bash
-# 配置
+```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-
-# 编译（MSVC 需指定 --config）
 cmake --build build --config Release --parallel
 
-# 运行全部单元测试
-ctest --test-dir build --output-on-failure -j
+# 快速迭代：所有单元测试一次执行，加三场景像素回归
+ctest --test-dir build -C Release -L "fast|regression" --output-on-failure
+
+# 完整验证：逐用例报告，包含真实下游源码/安装集成测试
+ctest --test-dir build -C Release --parallel 4 -LE fast --output-on-failure
 ```
 
-产物输出到 `build/bin/<Config>/`（MSVC 多配置生成器）或 `build/bin/`（Makefile / Ninja）。
+Visual Studio 使用多配置生成器，测试和安装也要指定 `-C Release` / `--config Release`。Ninja/Makefile 的配置在首次配置时由 `CMAKE_BUILD_TYPE` 决定。工程移动目录后请创建新的构建目录，不能沿用指向旧路径的 CMakeCache。
 
-> **开发迭代时更快的测试方式**：`ctest` 会把 94 个用例注册为 94 个独立进程，
-> 进程启动开销远大于测试本身。直接跑测试二进制只需约 30 毫秒：
-> ```powershell
-> .\build\bin\Release\unit_tests.exe
-> ```
+详细步骤、Sanitizer、配置开关与安装说明见[构建与使用指南](docs/engineering/46-构建与使用指南.md)。
 
-## 快速启动
+## 运行示例与练习
 
-**跑一个示例看效果**（所有示例把结果写到 `output/`，需从**仓库根目录**运行）：
+从仓库根目录运行；离屏示例输出到 `output/`：
 
 ```powershell
-cd <仓库根目录>
-.\build\bin\Release\stage4_zbuffer.exe      # 深度缓冲：左右对比遮挡关系
-.\build\bin\Release\stage10_pbr.exe         # PBR 金属度/粗糙度球阵
-.\build\bin\Release\demo_2d.exe             # 2D 场景 + 2D HUD 叠加 3D
-.\build\bin\Release\stage8_realtime.exe     # 实时窗口（仅 Windows，WASD 移动）
+.\build\bin\Release\stage4_zbuffer.exe
+.\build\bin\Release\stage10_pbr.exe
+.\build\bin\Release\demo_2d.exe
+.\build\bin\Release\stage8_realtime.exe  # Windows 实时窗口
 ```
 
-**从零写一个渲染程序**：把 `.cpp` 放进 `practice/` 目录，重新构建即自动生成
-可执行程序，目标名为 `practice_<文件名>`，无需修改 `CMakeLists.txt`：
+Ninja/Makefile 的可执行文件位于 `build/bin/`。将练习源码放入 `practice/my_first.cpp` 后，重新构建即可生成 `practice_my_first` 目标，无需手动修改 CMake。
 
-```powershell
-# 1. 新建 practice/my_first.cpp（可参考 practice/hello_2d.cpp）
-# 2. 重新构建
-cmake --build build --config Release --target practice_my_first
-# 3. 运行
-.\build\bin\Release\practice_my_first.exe
-```
+## 作为库集成
 
-**作为库集成到自己的项目**：
+源码集成：
 
 ```cmake
-add_subdirectory(path/to/softrender)
+add_subdirectory(path/to/softrender softrender-build)
 target_link_libraries(your_target PRIVATE SoftRenderer::softrenderer)
 ```
 
-或安装后 `find_package(SoftRenderer)`，见 `cmake/install.cmake`。
+作为子项目时，示例、练习、测试默认关闭；公共目标自动提供 C++23、头文件路径、资源实现库及线程依赖。
 
-## 目录结构
+安装后集成：
 
-```
-softrender/
-├── src/                    渲染器本体：100% 平台无关，纯头文件（52 个 .h + 1 个 .cpp）
-│   ├── core/               帧缓冲、深度缓冲、颜色、混合、后处理、Profiler、内存池
-│   ├── math/               Vec2/3/4、Mat3、Mat4、Quat、Rect2、变换与投影
-│   ├── raster/             光栅化：triangle / line / clip / renderer(3D) / renderer2d(2D)
-│   ├── scene/              网格、纹理、相机、骨骼、动画、粒子、glTF/OBJ 加载、ECS 组件
-│   ├── shader/             可编程着色管线：Flat / Gouraud / Phong / PBR
-│   └── test/               像素回归测试工具
-├── examples/               22 个示例：stage1~12 分阶段递进 + demo_* 综合演示
-├── practice/               练习目录：每个 .cpp 自动成为一个可执行程序
-├── platform/               平台后端（win32_window.h）——仅示例层使用，src/ 永不引用
-├── tests/                  GoogleTest 单元测试（test_core.cpp）
-├── third/                  第三方库源码（见 third/README.md）
-├── docs/                   教程与工程文档（70+ 篇）
-│   ├── math/               数学基础：向量 → 矩阵 → 齐次坐标 → 四元数
-│   ├── pipeline/           渲染管线：光栅化 → 投影 → 深度 → 纹理 → 光照 → 裁剪
-│   ├── advanced/           进阶：抗锯齿、PBR、后处理、多线程、延迟渲染、IBL、骨骼动画
-│   ├── engineering/        工程化：测试、CMake、日志、CI、性能、代码规范
-│   └── 00-学习路线与项目导读.md   ← 建议从这里开始
-├── cmake/                  版本生成、安装导出规则
-└── .qoder/rules/           本项目遵循的 AI 开发工作流规范
+```sh
+cmake --install build --config Release --prefix ./build/install
 ```
 
-## 架构原则
-
-1. **渲染器本体零平台依赖**：`src/` 只用 C++ 标准库；`platform/` 的 Win32 代码
-   只对需要开窗的示例可见，从编译层面保证隔离
-2. **header-only 为主**：减少编译单元，方便集成
-3. **开源优先**：外围功能（图像 I/O、模型解析、ECS、日志、测试）用成熟开源库
-4. **条件编译隔离**：spdlog / Win32 / SSE2 通过宏开关，不影响核心
-5. **每个阶段可独立编译运行**：stage1~12 + demo 各自是独立可执行程序
-
-详见 [`docs/architecture.md`](docs/architecture.md) 与 [`docs/modules.md`](docs/modules.md)。
-
-## 学习路径
-
-`docs/` 下的文档与 `examples/` 的 stage 编号一一对应，建议按
-[`docs/00-学习路线与项目导读.md`](docs/00-学习路线与项目导读.md) 的顺序推进：
-
-```
-数学基础(docs/math) → 光栅化(stage1-3) → 深度(stage4) → 纹理(stage5)
-→ 着色(stage6) → 裁剪(stage7) → 阴影/法线贴图(stage8) → 抗锯齿(stage9)
-→ PBR(stage10) → 后处理(stage11) → 多线程(stage12) → 综合 demo
+```cmake
+find_package(SoftRenderer 1.0 CONFIG REQUIRED)
+target_link_libraries(your_target PRIVATE SoftRenderer::softrenderer)
 ```
 
-## 当前状态
+配置下游工程时通过 `-DCMAKE_PREFIX_PATH=<安装前缀>` 指定路径。安装树可整体移动；源码和安装模式统一使用 `#include <softrenderer/version.h>`。
 
-见 [`docs/changelog.md`](docs/changelog.md) 与 `docs/tasks/`。
+## 目录与文档
 
-已知待办与架构欠债集中记录在 [`docs/tasks/README.md`](docs/tasks/README.md)。
+| 路径 | 职责 |
+| --- | --- |
+| `src/math`, `core`, `raster`, `shader`, `scene` | 数学、缓冲、光栅化、着色、场景与资源 |
+| `platform/` | Windows 显示与输入后端 |
+| `examples/`, `practice/` | 示例与练习，各自维护 CMake 目标 |
+| `tests/unit/` | GoogleTest 单元测试；新增 Arena/Renderer 测试独立成文件 |
+| `tests/integration/` | 像素回归、真实下游工程和安装迁移测试 |
+| `tests/fixtures/golden/` | 纳入版本控制的图像基准 |
+| `third/`, `cmake/` | 第三方源码、版本与安装导出 |
+
+- 学习：[学习路线](docs/00-学习路线与项目导读.md)、[模块职责](docs/modules.md)、[架构](docs/architecture.md)
+- 使用：[构建指南](docs/engineering/46-构建与使用指南.md)、[问题排查](docs/troubleshooting.md)
+- 维护：[当前状态](docs/project_context.md)、[分析与验证记录](docs/project_review.md)、[任务](docs/tasks/README.md)、[变更日志](docs/changelog.md)
+
+动态的测试数量和验收状态统一维护在项目状态页；历史 TASK 保留当时的事实，不作为当前状态依据。

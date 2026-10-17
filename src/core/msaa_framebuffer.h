@@ -1,5 +1,9 @@
 #pragma once
+#include <algorithm>
 #include <array>
+#include <cmath>
+#include <limits>
+#include <stdexcept>
 #include <utility>  // std::pair（kMSAA4Offsets 的元素类型）
 #include <vector>
 
@@ -29,18 +33,19 @@
 // （ADR-001 第 2 批）。引用方：仅 stage9_msaa.cpp。
 // ============================================================
 
-namespace sr
-{
+namespace sr {
 
 template <int N>
 class MSAAFramebuffer
 {
+    static_assert(N > 0 && N <= (std::numeric_limits<int>::max() - N / 2) / 255);
+
    public:
     MSAAFramebuffer(int width, int height)
         : width_(width),
           height_(height),
-          samples_(size_t(width) * height * N),
-          depth_(size_t(width) * height * N, DepthBuffer::kFar)
+          samples_(checkedSize(width, height)),
+          depth_(samples_.size(), DepthBuffer::kFar)
     {
     }
 
@@ -59,7 +64,7 @@ class MSAAFramebuffer
     // 对第 i 个样本做深度测试
     bool testDepth(int x, int y, int sampleIdx, float z)
     {
-        if (x < 0 || x >= width_ || y < 0 || y >= height_)
+        if (x < 0 || x >= width_ || y < 0 || y >= height_ || sampleIdx < 0 || sampleIdx >= N || !std::isfinite(z))
             return false;
         float& slot = depth_[(size_t(y) * width_ + x) * N + sampleIdx];
         if (z < slot)
@@ -73,7 +78,7 @@ class MSAAFramebuffer
     // 写入第 i 个样本的颜色
     void setSample(int x, int y, int sampleIdx, Color c)
     {
-        if (x < 0 || x >= width_ || y < 0 || y >= height_)
+        if (x < 0 || x >= width_ || y < 0 || y >= height_ || sampleIdx < 0 || sampleIdx >= N)
             return;
         samples_[(size_t(y) * width_ + x) * N + sampleIdx] = c;
     }
@@ -81,6 +86,8 @@ class MSAAFramebuffer
     // 统计某像素被覆盖的样本数
     int coverageCount(int x, int y) const
     {
+        if (x < 0 || x >= width_ || y < 0 || y >= height_)
+            return 0;
         int count = 0;
         for (int i = 0; i < N; ++i)
             if (depth_[(size_t(y) * width_ + x) * N + i] < DepthBuffer::kFar)
@@ -115,6 +122,15 @@ class MSAAFramebuffer
     }
 
    private:
+    static size_t checkedSize(int width, int height)
+    {
+        if (width <= 0 || height <= 0)
+            throw std::invalid_argument("MSAA dimensions must be positive");
+        const size_t limit = std::min(std::vector<Color>().max_size(), std::vector<float>().max_size());
+        if (size_t(width) > limit / size_t(height) / N)
+            throw std::length_error("MSAA buffer is too large");
+        return size_t(width) * size_t(height) * N;
+    }
     int width_, height_;
     std::vector<Color> samples_;
     std::vector<float> depth_;
@@ -124,4 +140,4 @@ class MSAAFramebuffer
 inline constexpr std::array<std::pair<float, float>, 4> kMSAA4Offsets = {
     {{0.375f, 0.125f}, {0.125f, 0.375f}, {-0.125f, -0.375f}, {-0.375f, -0.125f}}};
 
-} // namespace sr
+}  // namespace sr

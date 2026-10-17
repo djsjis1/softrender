@@ -45,11 +45,10 @@ tests/
 
 测试文件命名：`<类名>_test.cpp`（如 `MotionController_test.cpp`）。
 
-> **SoftRenderer 现状**：单元测试仍集中在单个 `tests/test_core.cpp`
-> （1300+ 行 / 120 用例 / 33 套件），尚未按上述结构拆分；
-> `tests/integration/`（像素回归）与 `tests/golden/`（基准图）已建立。
-> 拆分计划见 `docs/tasks/TASK-006-测试目录重构与覆盖率.md`。
-> 拆分前后必须机械核对用例总数不变，不靠人工检查。
+> **SoftRenderer 现状**：单元测试已按模块拆分为 8 个文件
+> （`tests/unit/`），共 169 用例 / 43 套件；
+> `tests/integration/`（像素回归 + 下游消费工程）与 `tests/fixtures/golden/`（基准图）已建立。
+> 目录分层（unit/integration/fixtures）已完成。
 
 依赖测试钩子的用例（验证 UI / 硬件 / 时序等不可自动化路径）与常规单测同目录、同命名；因其依赖钩子构建开关，必须在 `docs/test_hooks.md` 清单中登记对应关系（见下节）。
 
@@ -58,7 +57,7 @@ tests/
 # 四类必测场景
 
 | 类别 | 测什么 | 触发条件 |
-|------|--------|----------|
+| ------ | -------- | ---------- |
 | 单元测试 | 单个类/单个函数的逻辑 | 所有新增公共逻辑 |
 | 集成测试 | 多模块协作、协议收发闭环 | 新增模块或协议 |
 | 压力测试 | 高负载下的性能与稳定性 | 性能关键路径 |
@@ -89,7 +88,7 @@ TEST(CommandQueueTest, undoBeyondDepth_keepsInitialState);
 
 ## SoftRenderer 项目例外：存量用例不批量重命名
 
-存量 120 个用例采用 `TEST(模块名, 场景描述)` 的 PascalCase 命名
+存量 169 个用例采用 `TEST(模块名, 场景描述)` 的 PascalCase 命名
 （如 `TEST(Vec, DotOrthogonal)`、`TEST(Shape2D, ClipRestrictsDrawing)`），
 不符合上述 `被测方法_场景_预期结果` 格式，但**不属于禁止的无意义命名**，
 可读性不低于规定格式。
@@ -178,4 +177,3 @@ TEST(CommandQueueTest, undoBeyondDepth_keepsInitialState);
 
 * 钩子测试与钩子本体共用同一开关（如 `PROJECT_ENABLE_TEST_HOOKS`）：Debug / 测试构建开启，Release 构建必须关闭（见 `cpp_project_rules.md` 构建类型表）
 * 开关关闭时，依赖钩子的用例目标不得参与编译（CMake 条件编译），避免发布构建因钩子不可见而编译失败；常规单测不受开关影响，任何构建都必须通过
-

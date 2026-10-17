@@ -1,39 +1,31 @@
 # 56 · glTF 纹理加载
 
-> glTF 的纹理通过 images → textures → material 三级引用。本项目用 stb_image 从内存解码图像数据。
+引用链是 material → texture → image。默认 tinygltf 图像回调已经通过 stb_image 解码 image.image，
+其中是像素而不是 PNG/JPEG 文件字节，不能再次传入 stbi_load_from_memory。
 
-## 一、加载流程
+## 转换与所有权
 
-```
-glTF JSON
-  └── images[]     → 原始字节（base64 或外部文件）
-  └── textures[]   → 指向 image + sampler
-  └── materials[]  → 指向 texture indices
+1. tinygltf 从文件或内嵌内容解码图像。
+2. convertModel 校验 source、尺寸、通道、分量位数及像素长度。
+3. 将 8-bit 灰度、灰度+alpha、RGB 或 RGBA 转为内部 Color；Texture 创建 mipmap。
+4. 在完整纹理数组建立后，将材质指针连接到 LoadResult 自有纹理。
 
-加载时：
-  1. tinygltf 解析 JSON，填充 model.images[i].image（字节数组）
-  2. 用 stbi_load_from_memory 解码为 RGBA 像素
-  3. 创建 Texture 对象（自动生成 mipmap）
-  4. 填充 GltfMaterial 的纹理指针
-```
+目前不支持 16-bit/HDR 图像输入到该 glTF 路径，也没有应用 glTF sampler 的 wrap/filter 配置。
+损坏或不支持的纹理使整体转换失败并提供 error，不返回带无效纹理的成功模型。
+LoadResult 可移动、不可拷贝；材质引用和结果对象同寿命，调用方不能重分配它的 textures。
 
-## 二、支持的纹理槽
+## 材质纹理槽
 
-| 槽位 | glTF 字段 | 用途 |
-|---|---|---|
-| baseColor | `pbrMetallicRoughness.baseColorTexture` | 基色/漫反射 |
-| metallicRoughness | `pbrMetallicRoughness.metallicRoughnessTexture` | G 通道=roughness, B 通道=metallic |
-| normal | `normalTexture` | 切线空间法线扰动 |
-| emissive | `emissiveTexture` | 自发光颜色 |
+| 字段 | 当前连接 |
+| --- | --- |
+| baseColorTexture | 保存索引并设置 baseColorTexture 指针 |
+| metallicRoughnessTexture | 保存索引并设置 metallicRoughnessTexture 指针 |
+| normalTexture | 保存索引并设置 normalTexture 指针 |
+| emissiveTexture | 仅保存索引，尚未接入纹理指针/着色链路 |
 
-## 三、对应代码
+参数解析不代表 shader 自动应用全部材质特性；透明度、颜色空间及完整 PBR 材质整合仍需逐项验证。
 
-| 文件 | 作用 |
-|---|---|
-| `src/scene/gltf_loader.h` | 纹理解析 + stb_image 解码 |
-| `src/scene/gltf_types.h` | GltfTexture / GltfImage 类型 |
-
----
+实现见 `src/scene/gltf_loader.h`，回归测试 `GltfTextureSafety` 验证解码像素数值、截断拒绝和移动后材质指针。
 
 上一篇：[55 · IBL 环境反射](55-IBL环境反射.md)
 下一篇：[57 · 骨骼动画播放](57-骨骼动画播放.md)

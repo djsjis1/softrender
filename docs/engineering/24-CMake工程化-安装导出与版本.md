@@ -1,51 +1,57 @@
 # 24 · CMake 工程化：安装、导出与版本
 
-> 企业级库必须能被其他项目 `find_package` 使用。本篇讲清本项目的 CMake 工程化：INTERFACE 库目标、版本头生成、安装规则、Config 文件导出。
+本项目提供 `SoftRenderer::softrenderer` 公共目标。渲染算法主要是 inline/模板；资源加载需要编译 `third_party_impl` 静态库，因此完整库不等于“复制头文件即可使用”。
 
-## 一、Header-only INTERFACE 库
+## 一、构建职责
 
-渲染器本体全是 `inline` / 模板，无需编译 `.cpp`。CMake 用 `add_library(softrenderer INTERFACE)` 声明一个纯头文件目标，下游只需：
+| 文件 | 职责 |
+| --- | --- |
+| 根 `CMakeLists.txt` | 选项、公共库、接口依赖、开发标志和子目录接线 |
+| `examples/CMakeLists.txt` | 阶段示例及完整的 Windows 目标守卫 |
+| `practice/CMakeLists.txt` | 练习源码自动发现 |
+| `tests/CMakeLists.txt` | 单元、像素与下游消费测试 |
+| `cmake/version.cmake` | 从 `project(VERSION)` 生成版本头 |
+| `cmake/install.cmake` | 头文件、实现库、依赖头和 CMake package |
 
-```cmake
-find_package(SoftRenderer REQUIRED)
-target_link_libraries(myapp PRIVATE SoftRenderer::softrenderer)
+项目内部路径使用 `PROJECT_SOURCE_DIR` / `PROJECT_BINARY_DIR`，不读取父工程根目录作为自己的源目录。库自身携带 C++23、线程和 include 要求；`sr_dev_flags` 中的 `/W4 /WX` 或 `-Wall -Wextra -Werror` 只作用于本仓目标。
+
+Sanitizer 是目录级配置的有意例外：必须在创建第三方目标前设置，避免 MSVC STL 容器注解不一致。仅 Debug 启用，不导出为普通下游的编译要求。
+
+## 二、版本头
+
+版本唯一来源是根工程 `project(SoftRenderer VERSION ...)`。源码与安装消费者均使用：
+
+```cpp
+#include <softrenderer/version.h>
+static_assert(SOFTRENDERER_VERSION_MAJOR >= 1);
 ```
 
-即可自动获得 include 路径和 C++17 要求。
+`SOFTRENDERER_VERSION` 为字符串，`_MAJOR` / `_MINOR` / `_PATCH` 为整数宏。
 
-## 二、版本管理
+## 三、安装闭包
 
-`cmake/version.cmake` 定义 `SOFTRENDERER_VERSION_MAJOR/MINOR/PATCH`，通过 `configure_file` 生成 `version.h`，代码中可用 `SOFTRENDERER_VERSION` 宏。
+安装包括项目公共头、生成的版本头、stb、tinyobjloader、tinygltf、json、EnTT 头，以及 `third_party_impl` 静态库。导出的 `SoftRendererConfig.cmake` 使用 `find_dependency(Threads)` 恢复线程目标。
 
-## 三、安装规则
+所有 `INSTALL_INTERFACE` 目录与 `GNUInstallDirs` 一致，支持相对的自定义 `CMAKE_INSTALL_INCLUDEDIR` / `CMAKE_INSTALL_LIBDIR`。使用相对目录时，整个安装前缀可以迁移。非标准 libdir 需让下游的 `SoftRenderer_DIR` 指向其中的 `cmake/SoftRenderer`，不依赖默认包搜索规则。公共导出目标仍为：
 
-`cmake/install.cmake` 负责：
+- `SoftRenderer::softrenderer`
+- `SoftRenderer::third_party_impl`
+- `SoftRenderer::entt`（内部构建目标名为 `sr_entt`）
 
-- 安装 `src/**/*.h` 到 `<prefix>/include/softrenderer/`
-- 安装生成的 `version.h`
-- 导出 `SoftRendererTargets.cmake`
-- 生成 `SoftRendererConfig.cmake` + `SoftRendererConfigVersion.cmake`
+只需要链接第一个目标；其余由它传递。示例、练习、测试和日志示例依赖不安装。
 
-## 四、可选依赖
+## 四、回归验证
 
-| 选项 | 默认 | 说明 |
-|---|---|---|
-| `SR_ENABLE_SPDLOG` | ON | 启用 spdlog 日志（third/log） |
-| `SR_ENABLE_TESTS` | ON（enable_testing） | 编译 Google Test 单元测试 |
+`consumer_subdirectory` 以另一个 CMake 工程作为父工程，验证默认关闭示例/测试且能编译链接公共头。
+`consumer_installed` 安装后移动整个前缀，再由独立工程 `find_package`，验证版本宏、EnTT、glTF/JSON、OBJ、线程符号和程序运行。
 
-关闭 spdlog：`cmake -DSR_ENABLE_SPDLOG=OFF ...`，渲染器本体回退到内置极简日志。
+```sh
+ctest --test-dir build -C Release -L packaging --output-on-failure
+```
 
-## 五、对应文件
+这两个检查同时进入默认 Release CI。Debug Sanitizer 使用单元和像素测试，避免将带 ASAN 的实现库与未插桩下游混用。
 
-| 文件 | 作用 |
-|---|---|
-| `CMakeLists.txt` | 主构建脚本 |
-| `cmake/version.cmake` | 版本号定义 |
-| `cmake/version.h.in` | 版本头模板 |
-| `cmake/install.cmake` | 安装规则 |
-| `cmake/SoftRendererConfig.cmake.in` | find_package 配置模板 |
+配置命令及选项表统一见[构建与使用指南](46-构建与使用指南.md)。
 
----
-
-上一篇：[23 · Alpha 混合与透明渲染](../advanced/23-Alpha混合与透明渲染.md)
-下一篇：[25 · 日志系统：spdlog 集成](25-日志系统-spdlog集成.md)
+上一篇：[23 · Alpha 混合](../advanced/23-Alpha混合与透明渲染.md)
+下一篇：[25 · 日志系统](25-日志系统-spdlog集成.md)

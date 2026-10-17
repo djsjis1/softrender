@@ -5,6 +5,42 @@
 > 按 `documentation_rules.md` 要求，每次有意义的变更都必须在此登记。
 > 重大接口变更需同时在变更内容中标注版本号。
 
+## 2026-10-06
+
+### 子像素覆盖、MSAA 修复与主管线基线（TASK-013）
+
+- 共享 sr::TriangleCoverage：8 位子像素、int64 边式及 y 向上的 top-left 规则，消除相同共享边的重复覆盖；检查非有限、退化和坐标范围。
+- Renderer、基础三角形与标量/SSE2 共用覆盖规则，保持浮点属性插值；背面先剔除并优化取整/包围盒初始化。
+- 提取 sr::MSAAFlatRenderer<1/4>，仅向覆盖且深度通过的样本提交颜色。MSAAFramebuffer 拒绝无效尺寸、容量溢出与非法样本编号。
+- 新增可选 SR_BUILD_BENCHMARKS 与 renderer_benchmark，固定场景输出中位数、p95和哈希；不承诺所有场景加速。
+- 新增 14 项测试；Release 169 单测、3 像素场景和两个消费工程通过；Debug ASAN 通过（2 项既有用例跳过）。相关三个离屏示例通过，基准图未修改。
+- 更新 ADR-003、覆盖/MSAA/性能教程、架构、模块、构建开关、状态和任务档案。远端 Sanitizer 与跨平台验证仍待执行。
+
+## 2026-10-05
+
+### 19:30 第二轮：资源读取与任务失败（TASK-011/012）
+
+- 新增 sr::gltf::AccessorView / readMeshPrimitive / convertModel，统一字节范围、类型、stride、归一化和索引校验，加载失败不发布部分资源。
+- 动画实现正确 CubicSpline Hermite 插值，修复失败输出未初始化，保留 bind pose 并传递 channel 标志；移除不安全的 accessorFloats，sampleChannel 改为 bool。公共版本仍为 1.0.0，源码兼容迁移见 ADR-002。
+- 修复 tinygltf 已解码像素的二次解码错误；拒绝不支持的像素布局；蒙皮示例通过共享视图读取列主序逆绑定矩阵。
+- ThreadPool 增加 submitFuture；submit 异常由 waitAll 报告；回收部分启动线程、排空析构和防止 worker 自等待。并行命令收集错误并等待全部回调结束。
+- 新增独立 glTF、动画、线程测试，增加 25 项单测；Ubuntu 独立 TSAN 作业已配置、未远端执行。
+- 更新加载/纹理/动画/线程教程、架构依赖、支持范围、当前状态与任务档案。
+
+验证：Release 155 单测、3 像素场景和两个消费工程通过；Debug ASAN 153 单测通过、2 项按约定跳过；三个相关 demo 成功输出。线程创建失败只审查清理路径，未作 OS 故障注入；远端 TSAN/UBSAN 和覆盖率仍待执行。
+
+### 运行时正确性、内存复用与库集成（TASK-008/009/010）
+
+- Renderer 仅在 fragment 接受片元后写入深度，修复 discard 镂空区域错误遮挡；不改变既有图像基准。
+- Arena 增加对齐/长度/乘法校验、RAII 块所有权；reset 为 O(1) 并复用扩展块，新增 capacity() 观测保留容量。峰值内存保留到析构。
+- 根 CMake 拆出 examples/practice/tests；新增 SR_BUILD_EXAMPLES、SR_BUILD_PRACTICE、SR_BUILD_TESTS，作为依赖时默认关闭。
+- 修复子工程路径、版本宏、EnTT 安装 include 层级、tinygltf/json 漏装和线程传递依赖；支持相对自定义安装目录。
+- 新增独立 Arena/Renderer 单测和两种真实下游工程验证；修复 Debug /WX 的 GTEST_SKIP 不可达代码问题；新增 Ubuntu ASAN+UBSAN CI。
+- 覆盖率提取限定仓库根下的 src，排除第三方库内同名 src 目录。
+- 统一 README、当前状态、任务入口、架构及构建/分配器文档。
+
+本地验证：Release 全量 25 个程序；130 个单元测试与 3 个像素场景通过；源码引入、安装前缀迁移的消费工程通过。Debug MSVC ASAN 下 128 单测通过、2 个 Release-only 用例跳过，3 个像素场景通过。本轮没有远端 Linux/macOS、UBSAN、TSAN、覆盖率或静态分析的运行结论。
+
 ## 2026-09-07
 
 ### 零警告强制与 clang-tidy 配置（TASK-005c 部分）

@@ -19,7 +19,7 @@ PNG（无损）、BMP、TGA、JPG（有损）、HDR（浮点）。
 | 文件 | 作用 |
 |---|---|
 | `third/stb/stb_image_write.h` | 头文件 |
-| `third/stb/stb_image_write_impl.cpp` | 实现 |
+| `third/tinygltf/tiny_gltf_impl.cpp` | 实现（`#define STB_IMAGE_WRITE_IMPLEMENTATION` 在此处） |
 | `src/core/image_write.h` | 统一接口 |
 
 ---

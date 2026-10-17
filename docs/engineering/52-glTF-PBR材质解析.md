@@ -1,6 +1,6 @@
 # 52 · glTF PBR 材质解析
 
-> glTF 的 metallic-roughness 工作流是 PBR 的行业标准。本项目完整解析材质参数并传递给 PBR shader。
+> glTF 的 metallic-roughness 工作流是 PBR 的行业标准。本项目解析常用材质参数，由示例选择字段传递给 PBR shader；尚未整合全部透明度、纹理槽和颜色空间行为。
 
 ## 一、解析的字段
 
@@ -32,7 +32,9 @@
 auto result = gltfloader::load("model.glb");
 for (size_t i = 0; i < result.meshes.size(); ++i) {
     int matIdx = result.meshMaterialIndices[i];
-    auto& mat = result.materials[matIdx];
+    // -1 表示没有显式材质，应使用调用方默认材质。
+    GltfMaterial fallback;
+    const auto& mat = matIdx >= 0 ? result.materials[size_t(matIdx)] : fallback;
     pbrShader.baseColor = mat.baseColorFactor;
     pbrShader.metallic = mat.metallicFactor;
     pbrShader.roughness = mat.roughnessFactor;

@@ -1,58 +1,54 @@
 # 22 · 增量式边函数与 SIMD 光栅化
 
-> 朴素光栅化每像素算 3 次叉积（6 乘 6 减）。增量式边函数把它降为 3 次加法；SSE2 再让 4 像素同时判断内外。两者叠加，光栅化内循环提速 4-8 倍。
+边函数随 x/y 线性变化，所以逐像素遍历只需增量更新。当前实现将覆盖与插值分开：
+覆盖使用共享整数子像素规则，深度及属性继续使用浮点插值。
 
-## 一、增量式边函数
+## 覆盖规则
 
-边函数 $E(x,y) = \text{cross2}(\text{edge},\; p - v)$ 对 $x, y$ 是**线性**的：
+`sr::TriangleCoverage` 把屏幕位置四舍五入到 1/256 像素网格，中点远离零。
+以 y 向上的屏幕坐标为准，逆时针归一化后，顶边与左边包含边界，其余边不包含。
+通过在非包含边的整数边式中减一实现，不给浮点插值加偏置。
 
-$$E(x+1, y) = E(x,y) + \frac{\partial E}{\partial x}$$
-$$E(x, y+1) = E(x,y) + \frac{\partial E}{\partial y}$$
+相同端点构成的共享边只能属于一个三角形，遍历起点不同也不会因浮点累计产生重复覆盖或裂缝。
+坐标绝对值超过 2^20、非有限或量化后退化的几何不绘制；这个范围用于保证 int64 乘法和步进不溢出。
 
-偏导数是常数（只取决于边向量），所以：
+```cpp
+auto coverage = sr::TriangleCoverage::create(a, b, c);
+if (!coverage) return;
+auto bounds = coverage->bounds(width, height);
+if (bounds.empty()) return;
+auto row = coverage->atPixel(bounds.minX, bounds.minY);
+for (int y = bounds.minY; y <= bounds.maxY; ++y) {
+    auto pixel = row;
+    for (int x = bounds.minX; x <= bounds.maxX; ++x) {
+        if (sr::TriangleCoverage::contains(pixel)) { /* 深度与着色 */ }
+        coverage->advanceX(pixel);
+    }
+    coverage->advanceY(row);
+}
+```
 
-- 行首算一次 $E_0, E_1, E_2$
-- 行内逐像素加 $\partial E/\partial x$
-- 换行加 $\partial E/\partial y$
+`containsSample` 使用同一规则判定 MSAA 子样本。快速步进只用于 bounds 所限定的扫描区间，
+不能对任意构造的整数值无限次累计。裸 barycentric 仍是数学插值函数，不能用其全非负判断替代覆盖契约。
 
-**每像素从 6 乘 6 减 → 3 加**。深度 $z$ 同理增量递推。
+## SSE2 路径
 
-## 二、SSE2 四像素并行
+`raster_fast::fillTriangleSSE2` 用两个 `__m128i` 二元组表示四个像素的 int64 边值。
+对三条边按位 OR 后提取每个 64 位元素的符号位，得到覆盖掩码，再用 `_mm_add_epi64` 一次推进四像素。
+`_mm_castsi128_pd` 仅用于位解释和 movemask，不做浮点运算。尾部不足四像素使用同一整数覆盖规则。
 
-用 `__m128` 同时维护 4 个连续 x 像素的 3 条边函数值：
+`fillTriangleIncremental`、SSE2、基础三角形填充与 Renderer 共用 coverage.h。
+浮点 setupEdges 仍负责快速路径深度插值；边 01/12/20 分别对应顶点 2/0/1 的权重。
+快速路径只接受常量颜色，仍未接入 Renderer 的 Shader/Varyings 接口。
 
-1. `_mm_cmpge_ps(e, zero)` 得 4 个比较结果
-2. `_mm_and_ps` 三条边取交
-3. `_mm_movemask_ps` 提取 4-bit mask
-4. mask == 0xF → 4 像素全内，批量写
-5. mask != 0 → 逐 bit 处理
-6. 增量用 `_mm_add_ps(e, de4)` 一次 +4
+## 验证与性能
 
-尾部不足 4 像素回退标量。
+覆盖测试检查独立矩形期望、两种绕序、MSAA 子样本、裁剪后的共享边、极值和扫描起点。
+SSE2/标量对照覆盖宽度 1–17 的所有尾部情况与非对称深度，独立数值期望另由原深度测试保留。
 
-## 三、对应代码
-
-| 概念 | 代码 |
-|---|---|
-| 边函数增量预计算 | `raster/rasterizer_fast.h`：`setupEdges` |
-| 标量增量光栅化 | `fillTriangleIncremental` |
-| SSE2 并行光栅化 | `fillTriangleSSE2` |
-| 统一入口 | `fillTriangleFast`（自动选 SSE2/标量） |
-
-## 四、性能对比（参考值）
-
-| 方法 | 每像素操作 | 800×600 场景 |
-|---|---|---|
-| 朴素 barycentric | 6 乘 + 6 减 + 3 除 | ~120ms |
-| 增量标量 | 3 加 | ~35ms |
-| 增量 + SSE2 | 3 加 / 4 像素 | ~12ms |
-
-## 五、动手实验
-
-1. 在 `stage12_threaded` 里把光栅化换成 `raster_fast::fillTriangleFast`，对比帧时间。
-2. 把 SSE2 的 4 像素组改成 8 像素（AVX `_mm256`），看是否进一步提速。
-
----
+没有来源和复现实验的“4–8 倍加速”表格已移除。主管线基线见[渲染性能记录](../engineering/58-覆盖规则与性能基线.md)，
+SSE2 实验内核速度不能替代整帧性能结论。
 
 上一篇：[21 · 项目架构总览与进阶路线](../engineering/21-项目架构总览与进阶路线.md)
+
 下一篇：[23 · Alpha 混合与透明渲染](23-Alpha混合与透明渲染.md)

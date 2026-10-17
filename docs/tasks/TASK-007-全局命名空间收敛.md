@@ -25,7 +25,7 @@
 **60 个顶层类型位于全局命名空间，分布在 30 个头文件**：
 
 | 模块 | 文件 | 全局类型 |
-|---|---|---|
+| --- | --- | --- |
 | `core/` | `color.h` | `Color` |
 | | `framebuffer.h` | `Framebuffer` |
 | | `depthbuffer.h` | `DepthBuffer` |
@@ -113,7 +113,7 @@ namespace sr {}
 ### 阶段二：逐模块迁移，按冲突风险从高到低
 
 | 优先级 | 目标 | 理由 |
-|---|---|---|
+| --- | --- | --- |
 | 1（最高危） | `scene/components.h` 的 8 个 ECS 组件 | `Position`/`Velocity`/`Rotation`/`Scale`/`Light`/`CameraTag` 是 ECS 领域标准命名，几乎必然冲突 |
 | 2 | `scene/skeleton.h`（`Animation`/`Keyframe`/`Bone`/`Skeleton`）、`scene/texture.h`（`Texture`）、`scene/mesh.h`（`Mesh`/`Vertex`）、`scene/camera.h`（`Camera`/`Camera2D`） | 图形领域通用名 |
 | 3 | `core/color.h`（`Color`）、`math/`（`Vec2/3/4`、`Mat3`、`Mat4`、`Quat`、`Rect2`） | 数学库名，与 Eigen / glm 等易冲突 |
@@ -157,7 +157,7 @@ namespace sr {}
 - [x] **实测引用面**：`components.h` 仅被 2 个文件引用；`Light` 零使用；
       22 个示例无一使用 ECS → 判定可不留别名直接迁完
 - [x] `scene/components.h`：8 个组件迁入 `namespace sr`，**不留全局别名**
-- [x] `tests/test_core.cpp` ECS 套件改用 `sr::` 限定
+- [x] `tests/unit/test_core.cpp` ECS 套件改用 `sr::` 限定
 - [x] 新增**编译期哨兵**：在测试文件全局作用域声明 8 个同名类型。
       能编译通过本身就证明目标达成；若有人加回 `using sr::X;` 会直接报重定义
 - [x] 新增用例 `ECS.globalCanaryTypesAreDistinctFromSrComponents`（`std::is_same` 断言）
@@ -197,7 +197,7 @@ tests\test_core.cpp(1181,5): error C2872: “Position”: 不明确的符号
 2. gtest 的 `TEST(GBuffer, WriteAndRead)` 会创建名为 `GBuffer` 的**命名空间**，
    与 using-directive 引入的 `sr::GBuffer` 类同名也冲突
 
-结论：`tests/test_core.cpp` 统一写显式 `sr::` 限定（理由已写入文件头注释）。
+结论：`tests/unit/test_core.cpp` 统一写显式 `sr::` 限定（理由已写入文件头注释）。
 
 **对后续批次的影响**：若想恢复测试文件的 using-directive 便利，应先把编译期
 哨兵拆到单独文件（该文件不用 directive）。而这正好是 TASK-006 测试目录拆分
@@ -211,7 +211,7 @@ tests\test_core.cpp(1181,5): error C2872: “Position”: 不明确的符号
 **高引用面（需全仓扰动，建议最后做）**
 
 | 类型 | 引用次数 | 文件数 |
-|---|---|---|
+| --- | --- | --- |
 | `Color` | 400 | 49 |
 | `Mat4` | 231 | 33 |
 | `Framebuffer` | 160 | 45 |
@@ -233,7 +233,7 @@ tests\test_core.cpp(1181,5): error C2872: “Position”: 不明确的符号
 **低引用面（可不留别名直接迁，建议优先）**
 
 | 类型 | 引用 | 文件 | 类型 | 引用 | 文件 |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | `AnimSample` | 7 | 1 | `Particle` | 7 | 2 |
 | `EmitterConfig` | 7 | 2 | `Skeleton` | 6 | 2 |
 | `GltfMaterial` | 5 | 2 | `Keyframe` | 4 | 1 |
@@ -298,10 +298,11 @@ tests\test_core.cpp(1181,5): error C2872: “Position”: 不明确的符号
 ## 变更日志
 
 | 日期 | 变更 |
-|------|------|
+| ------ | ------ |
 | 2026-09-05 | 创建任务；实测扫描确认 60 个全局类型 / 30 个头文件，完成迁移优先级排序 |
 | 2026-09-07 | 立 ADR-001，推翻原「全量别名桥」方案，改为按引用面分类（方案 D） |
 | 2026-09-07 | 完成第 1 批：8 个 ECS 组件迁入 `sr` 且不留别名；全局类型 60 → 52；
+
               新增编译期哨兵 + 1 个用例；121 测试全绿 |
 | 2026-09-07 | 完成第 2 批：7 个 core 类型迁入 `sr`；全局类型 52 → **45** |
 | 2026-09-07 | 实测全量引用面数据入库；发现并记录 C2872（测试文件不能用 using-directive） |

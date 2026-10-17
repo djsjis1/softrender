@@ -11,10 +11,13 @@ SoftRenderer 是**教学型软件渲染器**，两条设计约束优先级最高
 
 1. **可读性优先于性能**：每个渲染阶段都要能被单独读懂，因此宁可用清晰的
    标量代码，也不做过度的模板元编程或激进的 SIMD 化。
-2. **渲染器本体零平台 / 零第三方依赖**：`src/` 默认只用 C++ 标准库，
-   任何 spdlog / Win32 / SSE2 依赖都通过条件编译隔离。
+2. **核心计算与平台后端隔离**：数学、光栅化不依赖窗口或图形 API；
+   资源加载依赖 stb/tinygltf/tinyobjloader，ECS 使用 EnTT。完整库以头文件为主，
+   同时链接资源实现静态库；不能将整个 `src/` 称作零第三方依赖。
 
 这两条约束解释了项目中若干看似「不够优化」的选择，详见「六、已知架构权衡」。
+
+覆盖与属性插值分离：`raster/coverage.h` 提供确定性的 top-left 子像素覆盖，供基础填充、Renderer、标量/SSE2 与 MSAA 共用；MSAA 示例算法提取到 `raster/msaa_renderer.h`。设计见 [ADR-003](adr/ADR-003-raster-coverage.md)，实测见[性能基线](engineering/58-覆盖规则与性能基线.md)。
 
 ## 二、分层结构
 
@@ -26,7 +29,7 @@ graph TD
         PLAT["platform/win32_window.h"]
     end
 
-    subgraph L3["src/ 渲染器本体（平台无关，纯头文件）"]
+    subgraph L3["src/ 渲染器与资源层（平台无关，以头文件为主）"]
         RASTER["raster/ 光栅化与渲染器"]
         SHADER["shader/ 可编程着色管线"]
         SCENE["scene/ 场景资源与加载"]
@@ -126,7 +129,7 @@ command_buffer.h     → （叶子，线程池）
 ```
 mesh.h             → math/vec.h
 texture.h          → core/tga.h, math/vec.h
-gltf_types.h       → math/vec.h, texture.h
+gltf_types.h       → math/vec.h, math/mat4.h, texture.h
 cubemap.h          → math/vec.h, texture.h
 camera.h           → math/mat3.h, math/rect.h, math/transform.h
 components.h       → math/vec.h
@@ -135,8 +138,10 @@ render_queue.h     → math/vec.h
 skeleton.h         → math/mat4.h, math/vec.h
 image_loader.h     → core/tga.h                   （声明 stbi_load）
 obj_loader.h       → mesh.h, tiny_obj_loader.h
-gltf_loader.h      → math/vec.h, gltf_types.h, mesh.h, tiny_gltf.h
-animation_player.h → math/mat4.h, math/quat.h, math/vec.h, gltf_types.h, tiny_gltf.h
+gltf_accessor.h    → tiny_gltf.h（非拥有字节视图）
+gltf_mesh.h        → gltf_accessor.h, mesh.h
+gltf_loader.h      → gltf_mesh.h, gltf_types.h, animation_player.h, tiny_gltf.h
+animation_player.h → math/mat4.h, math/quat.h, math/vec.h, gltf_types.h, gltf_accessor.h
 ```
 
 > ⚠️ **第三方头文件泄漏到公共接口**：`gltf_loader.h` 与 `animation_player.h` 在
@@ -211,7 +216,11 @@ sequenceDiagram
                     Rast->>Rast: 由边函数值算重心坐标 + 透视校正插值
                     Rast->>FS: fragment(Varyings, outColor)
                     FS-->>Rast: true = 写入 / false = 丢弃
-                    Rast->>FB: pixRow[x] = Color
+                    alt fragment 返回 true
+                        Rast->>FB: 同时写入 pixRow[x] 和 zbuf[x]
+                    else 丢弃
+                        Rast->>Rast: 保留原颜色和深度
+                    end
                 end
             end
         end
@@ -253,12 +262,16 @@ graph LR
 graph LR
     A[".gltf / .glb 文件"] --> B["tinygltf::TinyGLTF"]
     B --> C["tinygltf::Model"]
-    C --> D["gltfloader::load()"]
-    D --> E["GltfMesh / GltfMaterial / GltfTexture / GltfNode"]
-    C --> F["animation_player 直接采样"]
+    C --> D["sr::gltf::convertModel()"]
+    D --> E["LoadResult: Mesh / Material / Texture / Node"]
+    C --> V["sr::gltf::AccessorView"]
+    V --> D
+    V --> F["animation_player 校验与采样"]
     E --> G["Renderer 绘制"]
     F --> G
 ```
+
+加载错误不返回半成品；动画失败不修改输出；普通任务错误由 waitAll 报告，结果任务由 future::get 报告。接口生命周期与兼容性见 [ADR-002](adr/ADR-002-data-and-task-errors.md)。
 
 ### 实现单元分工（⚠ 与文件名直觉相反）
 
@@ -268,7 +281,7 @@ graph LR
 连同 `third/` 下的两个，全部第三方实现共三个单元，都编入 `third_party_impl` 静态库：
 
 | 实现单元 | `#define` | 提供的符号 |
-|---|---|---|
+| --- | --- | --- |
 | `third/tinygltf/tiny_gltf_impl.cpp` | `STB_IMAGE_IMPLEMENTATION`、`STB_IMAGE_WRITE_IMPLEMENTATION` | **stb_image + stb_image_write** |
 | `src/scene/gltf_loader_impl.cpp` | `TINYGLTF_IMPLEMENTATION` | **tinygltf** |
 | `third/tiny_obj_loader_impl.cpp` | `TINYOBJLOADER_IMPLEMENTATION` | **tinyobjloader** |
@@ -286,7 +299,7 @@ graph LR
 `src/` 的命名空间使用**不统一**，这是当前最主要的架构债（收敛中，见 ADR-001）：
 
 | 命名空间 | 所在文件 | 内容 |
-|---|---|---|
+| --- | --- | --- |
 | （全局） | `framebuffer.h`、`depthbuffer.h`、`color.h`、`blend.h`、`renderer.h`、`renderer2d.h`、`triangle.h`、`line.h`、`clip.h`、`camera.h`、`mesh.h`、`texture.h`、`skeleton.h`、`shader.h` 等 | `Framebuffer`、`Color`、`Renderer`、`Camera`、`Texture`、`Mesh` 等 **45 个**核心类型 |
 | `sr` | `arena.h`、`benchmark.h`、`log.h`、`profiler.h`、`resource_manager.h`、**`components.h`**、**`ssao.h`**、**`gbuffer.h`**、**`float_framebuffer.h`**、**`msaa_framebuffer.h`**、**`command_buffer.h`** | `ArenaAllocator`、`Profiler`、`ResourceManager`、`Log`、`formatLog`；**8 个 ECS 组件**；**`SSAO`/`SSAOConfig`/`GBuffer`/`FloatFramebuffer`/`MSAAFramebuffer`/`kMSAA4Offsets`/`CommandBuffer`/`ThreadPool`** |
 | `sr2d` | `shape2d.h`、`blit2d.h` | 全部 2D 图元与合成函数 |
@@ -300,7 +313,7 @@ graph LR
 ### 收敛进度（ADR-001）
 
 | 批次 | 范围 | 全局类型数 | 状态 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | — | 起点 | 60 | — |
 | 1 | `components.h` 的 8 个 ECS 组件 | 60 → 52 | ✅ 已完成 |
 | 2 | `ssao.h`、`gbuffer.h`、`float_framebuffer.h`、`msaa_framebuffer.h`、`command_buffer.h`（7 个类型 + `kMSAA4Offsets`） | 52 → **45** | ✅ 已完成 |
@@ -319,11 +332,11 @@ graph LR
    仍在全局，其内部查找只回落到全局、**不会进入 `sr`**，所以需
    `using sr::FloatFramebuffer;`。用 using-**声明**而非 directive，只引入确实需要的名字。
 3. **`.cpp` 应用代码可加 `using namespace sr;`**（已用于 `demo_stars.cpp`、
-   `stage11_postprocess.cpp`、`stage9_msaa.cpp`）。
+   `stage13_postprocess.cpp`、`stage11_msaa.cpp`）。
 
 #### ⚠ 测试文件不能用 `using namespace sr;`（实测发现）
 
-`tests/test_core.cpp` **故意不用** using-directive，原因是实测撞上了两个冲突：
+`tests/unit/test_core.cpp` **故意不用** using-directive，原因是实测撞上了两个冲突：
 
 1. 全局作用域的 `struct Position` 哨兵与 using-directive 引入的 `sr::Position`
    构成 **二义性（MSVC C2872）**，而不是预期的「全局声明遮蔽 directive 名字」。
@@ -342,7 +355,7 @@ graph LR
 > 注入全局命名空间，下游照样撞名。别名桥只是让大改动可以分批提交的工具，
 > **不是对下游的兼容承诺**。完整论证见 `docs/adr/ADR-001-namespace-convergence.md`。
 >
-> 该结论已用**编译期哨兵**锁定：`tests/test_core.cpp` 在全局作用域声明了
+> 该结论已用**编译期哨兵**锁定：`tests/unit/test_core.cpp` 在全局作用域声明了
 > 8 个同名哨兵类型（`struct Position { int canary; };` 等）。若将来有人加回
 > `using sr::Position;`，测试文件会直接报重定义错误。
 
@@ -379,15 +392,15 @@ graph LR
 `core/log.h` 有两种模式，**占位符语法统一为 fmt 风格的 `{}`**：
 
 | 模式 | 触发条件 | 实现 |
-|---|---|---|
+| --- | --- | --- |
 | spdlog | 定义 `SR_USE_SPDLOG` 且链接 `mylog` | `LOGS_WARN(...)` → fmt 格式化 |
 | 内置 | 默认 | `sr::formatLog`（变参模板 + `std::ostringstream`）→ 单个 `%s` 输出 |
 
 **哪些目标走哪条路径**（CMake 中只有调了 `sr_enable_logging()` 的目标才启用 spdlog）：
 
 | 目标 | 模式 |
-|---|---|
-| `stage6_realtime`、`stage8_realtime`、全部 `practice_*` | spdlog |
+| --- | --- |
+| `stage08_shader_live`、`stage10_shadow_live`、全部 `practice_*` | spdlog |
 | **`unit_tests`**、其余 20 个示例 | 内置 |
 
 → **内置模式是常用路径，不是罕见兜底**。这个事实是下面重构的依据。
@@ -397,7 +410,7 @@ graph LR
 旧版 `sr::Log::log` 是真正的 C 可变参函数（`const char* fmt, ...` + `va_list` + `vfprintf`）：
 
 | # | 缺陷 | 发现方式 |
-|---|---|---|
+| --- | --- | --- |
 | 1 | 传 `std::string` 等非 POD 类型经 `...` 是**未定义行为** | TASK-003 给 `image_loader.h` 加日志时，全量构建报出 2 个 **C4840** |
 | 2 | 格式串按 printf 语义解析，但约定写的是 `{}` → **占位符从不被替换**，默认构建下所有带参日志只能看到字面量 `{}`，参数全丢 | 阅读 `vfprintf` 路径时发现 |
 | 3 | 日志文本里的字面 `%`（如 `"100% done"`）被 `vfprintf` 当转换符解析 → UB | 同上 |
@@ -434,7 +447,7 @@ inline const char* levelName(LogLevel l);                       // switch，覆�
 #### 降级语义（与 fmt 的差异）
 
 | 情况 | fmt / spdlog | 内置 `formatLog` |
-|---|---|---|
+| --- | --- | --- |
 | 参数多于 `{}` | 忽略多余参数 | **追加输出**（不静默丢信息） |
 | `{}` 多于参数 | 抛 `fmt::format_error` | 原样保留 `{}`（降级而不崩溃） |
 | `{{` / `}}` 转义 | 输出字面 `{` / `}` | **不支持**，`{}` 一律当占位符 |
@@ -470,7 +483,8 @@ GCC 13+），且本项目 `src/` 已有 C++23 基线但希望尽可能宽容；
 ```mermaid
 graph TD
     SR["softrenderer (INTERFACE)"] --> TPI["third_party_impl (STATIC)"]
-    SR --> ENTT["entt (INTERFACE)"]
+    SR --> ENTT["sr_entt (INTERFACE，导出名 entt)"]
+    SR --> THREADS["Threads::Threads"]
     TPI --> STBINC["third/stb, third/tinygltf, third/nlohmann"]
 
     EX1["22 个示例可执行目标"] --> SR
@@ -478,16 +492,18 @@ graph TD
     UT["unit_tests"] --> SR
     UT --> GTEST["GTest::gtest_main"]
 
-    RT["实时窗口示例：stage6_realtime / stage8_realtime / stage1_sprite_anim"] --> GDI["gdi32 + user32（仅 WIN32）"]
-    RT --> PLATINC["${CMAKE_SOURCE_DIR} → platform/win32_window.h"]
+    RT["实时窗口示例：stage08_shader_live / stage10_shadow_live / stage03_sprite_anim"] --> GDI["gdi32 + user32（仅 WIN32）"]
+    RT --> PLATINC["${PROJECT_SOURCE_DIR} → platform/win32_window.h"]
 
     LOG["mylog (STATIC, 可选)"] --> SPD["spdlog 1.17.0"]
     SR_ENABLE["SR_ENABLE_SPDLOG=ON 时"] --> LOG
 ```
 
 `softrenderer` 提供 `SoftRenderer::softrenderer` 别名，供外部 `find_package` 使用。
-安装规则见 `cmake/install.cmake`（只安装 `softrenderer` / `third_party_impl` / `entt`，
-示例与练习目标不参与安装）。
+安装规则见 `cmake/install.cmake`（导出 `softrenderer` / `third_party_impl` / `entt`，
+安装它们的公共头及依赖头，示例与练习不安装）。根 CMake 负责库与接口，
+`examples/`、`practice/`、`tests/` 各自注册目标；作为子项目时三类目标默认关闭。
+安装包消费测试还验证整体移动安装前缀后可编译并运行。
 
 ## 八、平台隔离机制
 
@@ -497,10 +513,10 @@ graph TD
 实际隔离状态：
 
 | 层 | 平台相关代码 | 隔离手段 |
-|---|---|---|
+| --- | --- | --- |
 | `src/` | 无 | 约定 + 人工审查（**无编译期强制**） |
 | `src/raster/rasterizer_fast.h` | SSE2 intrinsics | `#if defined(__SSE2__) \|\| defined(_M_X64) \|\| ...` 编译期探测，非 x86 自动降级到标量版 |
 | `platform/win32_window.h` | 全部 Win32 | 整个文件包在 `#ifdef _WIN32` 内，非 Windows 平台展开为空 |
-| 实时窗口示例 | 使用 `Win32Window` | **无守卫** —— 非 Windows 平台会编译失败 |
+| 实时窗口示例 | 使用 `Win32Window` | `examples/CMakeLists.txt` 以 `if(WIN32)` 守卫整个目标 |
 
-⚠️ 最后一行是 CI 跨平台失败的根因，修复方案见 `docs/tasks/` 对应 TASK。
+窗口目标守卫已在 TASK-004 修复，本轮拆分 CMake 时保留。跨平台运行结果必须以实际 CI 作业为准。

@@ -76,7 +76,7 @@ PNG, JPEG, BMP, TGA, PSD, GIF, HDR, PIC, PNM (PPM/PGM) —— stb_image 全覆�
 | 文件 | 作用 |
 |---|---|
 | `third/stb/stb_image.h` | stb_image 头文件 |
-| `third/stb/stb_image_impl.cpp` | 实现（仅此一处 `#define STB_IMAGE_IMPLEMENTATION`） |
+| `third/tinygltf/tiny_gltf_impl.cpp` | 实现（`#define STB_IMAGE_IMPLEMENTATION` 在此处） |
 | `src/scene/image_loader.h` | 统一加载接口（薄包装） |
 
 ---

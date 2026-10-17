@@ -113,6 +113,45 @@ jobs:
           path: output/
           if-no-files-found: ignore
 
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure Debug sanitizers
+        run: >
+          cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug
+          -DSR_ENABLE_SANITIZERS=ON
+          -DSR_BUILD_EXAMPLES=OFF -DSR_BUILD_PRACTICE=OFF
+      - name: Build tests
+        run: cmake --build build-asan --parallel 2 --target unit_tests render_regression
+      - name: Run ASAN and UBSAN tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --test-dir build-asan -C Debug -L 'fast|regression' --output-on-failure
+
+  thread-sanitizer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure independent ThreadSanitizer build
+        # TSAN must not be combined with ASAN. Both library and tests are instrumented.
+        run: >
+          cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=Debug
+          -DSR_BUILD_EXAMPLES=OFF -DSR_BUILD_PRACTICE=OFF
+          -DCMAKE_CXX_FLAGS="-fsanitize=thread -fno-omit-frame-pointer -g"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
+      - name: Build tests
+        run: cmake --build build-tsan --parallel 2 --target unit_tests
+      - name: Run concurrent task tests
+        env:
+          TSAN_OPTIONS: halt_on_error=1
+        run: >
+          ctest --test-dir build-tsan -C Debug --output-on-failure
+          -R '^(ThreadFailures|ThreadPool|CommandBuffer)\.'
+
   # ============================================================
   # 覆盖率（testing_rules.md：核心模块行覆盖率 ≥ 80%、分支 ≥ 60%，
   # 且「覆盖率报告纳入 CI」）
@@ -150,6 +189,7 @@ jobs:
           cmake -S . -B build-cov
           -DCMAKE_BUILD_TYPE=Debug
           -DCMAKE_CXX_FLAGS="--coverage -g -O0"
+          -DSR_BUILD_EXAMPLES=OFF -DSR_BUILD_PRACTICE=OFF
 
       - name: Build test targets
         # 只构建两个测试目标，不构建 22 个示例（示例不参与覆盖率统计）
@@ -171,7 +211,7 @@ jobs:
           lcov --capture --directory build-cov --output-file coverage.info \
                --ignore-errors mismatch,unused,empty,inconsistent,corrupt
           # 只统计 src/：排除系统头、第三方库、测试代码本身、构建目录
-          lcov --extract coverage.info "*/src/*" \
+          lcov --extract coverage.info "${GITHUB_WORKSPACE}/src/*" \
                --output-file coverage-src.info \
                --ignore-errors mismatch,unused,empty,inconsistent
           echo "===== 覆盖率基线（仅 src/）====="

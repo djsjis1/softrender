@@ -15,13 +15,12 @@
 ### 现象：非 Windows 平台构建失败，报 `Win32Window` 未定义
 
 **原因**：`platform/win32_window.h` 整个文件包在 `#ifdef _WIN32` 内，非 Windows
-平台展开为空。而 `examples/stage6_realtime.cpp`、`examples/stage8_realtime.cpp`、
-`examples/stage1_sprite_anim.cpp` **无条件**使用 `Win32Window`，且 `CMakeLists.txt`
-对这三个目标的 `add_executable` 没有平台守卫（`if(WIN32)` 只包住了
-`target_link_libraries(... gdi32 user32)`）。
+平台展开为空。而 `examples/stage08_shader_live.cpp`、`examples/stage10_shadow_live.cpp`、
+`examples/stage03_sprite_anim.cpp` **无条件**使用 `Win32Window`。旧版只守卫
+链接库，没有守卫整个目标，因此在非 Windows 平台编译失败。
 
-**解决**：见 `docs/tasks/` 中 CI 跨平台修复任务。临时绕过：只构建离屏目标，
-例如 `cmake --build build --target stage6_offline`。
+**解决**：当前 `examples/CMakeLists.txt` 已用 `if(WIN32)` 守卫整个目标。
+若仍出现该问题，确认使用当前构建脚本并新建构建目录；只验证离屏路径可构建 `stage10_shadow`。
 
 ### 现象：MSVC 下大量 C4819 警告
 
@@ -39,22 +38,27 @@
 与 stb_image_write 在目录不存在时**静默失败**，不会创建目录。
 
 **解决**：
+
 1. 从**仓库根目录**运行示例（`cd` 到仓库根，再执行 `.\build\bin\Release\xxx.exe`）
 2. 确认 `output/` 目录存在。仓库中已提交 `output/.gitkeep` 保证克隆后目录存在；
    CI 中由 `.github/workflows/ci.yml` 的 `mkdir -p output` 步骤创建
 
 ### 现象：`ctest` 跑一次要 40 秒，但测试本身很快
 
-**原因**：`CMakeLists.txt` 用 `gtest_discover_tests(unit_tests)` 把**每个 GTest 用例
-注册为一个独立的 ctest 测试项**。94 个用例 = 94 次进程创建，实测每项 0.33~0.45 秒，
-几乎全是 Windows 进程启动 + GTest 初始化开销。测试逻辑本身单进程只需 **28 毫秒**。
+**原因**：`tests/CMakeLists.txt` 用 `gtest_discover_tests` 把每个 GTest 用例
+注册为独立进程，耗时受系统启动成本影响。此外 `packaging` 标签会构建真实下游工程，
+通常比纯单测更慢，不能把完整 CTest 时间当作渲染算法耗时。
 
 **解决**：
-```bash
-# 并行执行（推荐，墙钟降到 2~3 秒）
-ctest --test-dir build --output-on-failure -j
 
-# 开发迭代时直接跑测试二进制（约 30 毫秒）
+```bash
+# 快速迭代：单元测试单进程执行 + 像素回归
+ctest --test-dir build -C Release -L "fast|regression" --output-on-failure
+
+# 完整验证（包括下游构建）
+ctest --test-dir build -C Release --parallel 4 -LE fast --output-on-failure
+
+# 或直接跑测试二进制
 .\build\bin\Release\unit_tests.exe
 
 # 只跑某个套件
@@ -76,7 +80,7 @@ ctest --test-dir build --output-on-failure -j
 **原因**：`third/entt/` 下有**两份版本不同的 EnTT**：
 
 | 路径 | 版本 | 是否被构建使用 |
-|---|---|---|
+| --- | --- | --- |
 | `entt/src/entt/` | 3.14.0 | ✅ 是 |
 | `entt/single_include/entt/entt.hpp` | 3.13.2 | ❌ 否（陈旧残留） |
 
@@ -87,11 +91,14 @@ ctest --test-dir build --output-on-failure -j
 
 ### 现象：定义了 `SR_USE_SPDLOG` 后日志里的 `{}` 原样输出
 
-**原因**：`core/log.h` 的两种模式**格式字符串语义不同**：spdlog 模式用 fmt 风格
-`{}` 占位符，内置模式用 printf 风格 `%d` / `%s`。用错风格的参数不会被替换。
+**原因**：`core/log.h` 的两种模式**占位符语法已统一为 fmt 风格的 `{}`**。
+如果 `{}` 原样输出，最可能的原因是目标未正确链接 spdlog，导致实际走了内置模式
+而格式化参数类型不匹配（如传了不支持 `operator<<` 的类型）。
 
 **解决**：确认目标已定义 `SR_USE_SPDLOG` **且**链接了 `mylog`
 （CMake 中用 `sr_enable_logging(<target>)` 函数一次搞定两者）。
+若需转义 `{{` / `}}` 或格式规格（如 `{:>8}`），必须使用 spdlog 模式，
+内置模式不支持这些特性（见 `architecture.md` §6.2）。
 
 ## Sanitizer
 
@@ -116,7 +123,7 @@ $env:ASAN_OPTIONS = "detect_leaks=0"   # 可选：关掉泄漏检测，只留内
 **如何确认 ASAN 真的链上了**：比对两个配置的体积与导入表——
 
 | 配置 | 实测体积 | 导入 ASAN DLL |
-|---|---|---|
+| --- | --- | --- |
 | Debug（`SR_ENABLE_SANITIZERS=ON`） | 5,087,744 B | ✅ True |
 | Release（同一配置目录） | 847,360 B | ❌ False |
 

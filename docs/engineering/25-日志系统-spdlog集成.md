@@ -49,7 +49,7 @@ if(SR_ENABLE_SPDLOG)
 endif()
 
 # 为需要日志的目标启用：
-sr_enable_logging(stage8_realtime)
+sr_enable_logging(stage10_shadow_live)
 ```
 
 `sr_enable_logging` 函数自动添加 `SR_USE_SPDLOG` 定义和 `mylog` 链接。

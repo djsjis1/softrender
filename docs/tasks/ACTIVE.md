@@ -1,66 +1,59 @@
 # 当前活跃任务
 
-> 本文件是 `ai_workflow_rules.md` Step 0 要求开工前必读的入口。
-> 全部任务索引见 [`README.md`](README.md)，已完成任务档案在 [`DONE/`](DONE/)。
+> 更新于 2026-10-06。当前验证数值见 [项目上下文](../project_context.md)。
+> 本页只描述当前进度；旧任务文件的早期分析不能当作当前阻塞项。
 
-## TASK-005：构建系统现代化
+## 任务总览
 
-**快速状态**：待开始（下一个执行目标）
+| 编号 | 状态 | 内容 | 档案 |
+| --- | --- | --- | --- |
+| TASK-001 | 基础设施已落地 | 工程基线、Git 与文档 | [任务](TASK-001-工程基线建设.md) |
+| TASK-002 | 已完成 | 快速光栅化深度权重与顺时针修复 | [档案](DONE/TASK-002-光栅化器缺陷修复.md) |
+| TASK-003 | 已完成 | 边界安全、图像输入、混合和日志 | [档案](DONE/TASK-003-输入校验与边界安全.md) |
+| TASK-004 | 本地完成，远端待验收 | 跨平台目标守卫与像素回归 | [任务](TASK-004-CI跨平台与测试基础设施.md) |
+| TASK-005 | 部分完成 | CMake、Sanitizer、零警告已落地；静态分析待实跑 | [任务](TASK-005-构建系统现代化.md) |
+| TASK-006 | 部分完成 | 目录分层完成；旧单测继续拆分，覆盖率待实测 | [任务](TASK-006-测试目录重构与覆盖率.md) |
+| TASK-007 | 第 1、2 批完成 | 命名空间迁移与编译哨兵 | [任务](TASK-007-全局命名空间收敛.md) |
+| TASK-008 | 已完成 | 构建职责拆分、安装和真实消费工程验证 | [档案](DONE/TASK-008-library-integration.md) |
+| TASK-009 | 已完成 | discard 片元的深度提交修复 | [档案](DONE/TASK-009-render-discard.md) |
+| TASK-010 | 已完成 | Arena 安全校验与跨帧复用 | [档案](DONE/TASK-010-arena-safety.md) |
+| TASK-011 | 已完成 | glTF/动画数据校验与正确插值 | [档案](DONE/TASK-011-gltf-validation.md) |
+| TASK-012 | 已完成 | 任务异常与生命周期 | [档案](DONE/TASK-012-thread-failures.md) |
+| TASK-013 | 已完成 | 子像素覆盖、MSAA 逐样本提交、主管线性能基线 | [档案](DONE/TASK-013-raster-coverage.md) |
 
-**目标**：消除 CMake 全局指令、补齐三构建类型与 Sanitizer、接入静态检查与格式化。
+## 2026-10-06 已完成
 
-**阻塞项**：**需用户确认是否安装 LLVM 工具链**。
-实测 `where.exe clang-format` 无输出，`clang-format` 与 `clang-tidy` 均未安装，
-因此本任务的「零警告 `/WX`」「`.clang-tidy`」「全仓格式化」三节无法验收。
-不安装也可先做 target-based 改造与 Sanitizer 两节。
+[TASK-013](DONE/TASK-013-raster-coverage.md)：统一覆盖规则、修复 MSAA 颜色提交、建立主渲染基线；本地验证完成。
 
-**下一步**：CMake target-based 改造（消除 6 处 `include_directories` + `link_libraries`）
+## 待继续的工程任务
 
-**关键约束**：改造前必须记录基线（24 个 exe + 120 单元测试 + 3 回归），
-改造后**删除 build 缓存全新配置**再逐项比对，出问题直接 `git revert`。
+| 任务 | 当前状态 | 下一步与验收 |
+| --- | --- | --- |
+| TASK-004 跨平台 CI | 本地验证与 CI 配置已有；远端待验收 | 执行 Windows/Linux/macOS 作业，记录真实结果 |
+| TASK-005 构建现代化 | target-based、/WX、安装集成、Debug ASAN 已落地；静态分析未实跑 | 本轮修改文件已格式化；继续运行 clang-tidy 并处理实际诊断 |
+| TASK-006 测试拆分/覆盖率 | unit/integration/fixtures 分层和 tests/CMakeLists 已完成；Arena/Renderer 已独立 | 继续拆分旧 test_core.cpp 的依赖，保持用例集合；取得覆盖率基线 |
+| TASK-007 命名空间 | 第 1、2 批完成，公共全局符号仍存在 | 按 ADR-001 分批迁移，保留迁移说明与编译哨兵 |
 
----
+当前没有"必须先安装 LLVM 才能修改构建系统"或"删除工具不可用所以不能整理测试"的已验证阻塞。历史环境问题只保留在对应任务档案中。
 
-## 剩余待修缺陷（按优先级）
+## 2026-10-05 已完成
 
-| # | 缺陷 | 任务 |
-|---|---|---|
-| 1 | 无 Sanitizer：TASK-003 修的那类 UB（整数溢出、越界读）目前**没有任何机制能自动发现** | TASK-005 |
-| 2 | MSVC 只有 `/W4` 无 `/WX`，规范要求零警告编译 | TASK-005 |
-| 3 | `.clang-format` 从未执行：19 个 `src/` 头文件 namespace 缩进违反配置第 92 行 | TASK-005 |
-| 4 | `tests/test_core.cpp` 1200+ 行单文件，29+ 套件混在一起 | TASK-006 |
-| 5 | 无覆盖率度量，规范要求核心模块行覆盖率 ≥ 80% | TASK-006 |
-| 6 | **60 个顶层类型位于全局命名空间**，`Position`/`Light`/`Texture` 对下游集成方构成实际冲突风险 | TASK-007 |
+- [TASK-008](DONE/TASK-008-library-integration.md)：构建拆分、可选目标、安装闭包、版本和消费工程验证。
+- [TASK-009](DONE/TASK-009-render-discard.md)：discard 深度提交修复与非对称测试。
+- [TASK-010](DONE/TASK-010-arena-safety.md)：分配边界安全、RAII 与跨帧复用。
 
-### 需用户手动执行的两项
+- [TASK-011](DONE/TASK-011-gltf-validation.md)：glTF/动画共享读取、三次样条与解码纹理修复。
+- [TASK-012](DONE/TASK-012-thread-failures.md)：线程任务错误结果与生命周期；远端 TSAN 归 TASK-004 验收。
 
-| 项 | 原因 |
-|---|---|
-| `git rm src/test/test_framework.h` + `rmdir src\platform` | 删除工具被环境阻断，连续两次报成功而文件仍在。属无害死代码（零引用、不参与编译） |
-| 推送远端并确认三平台 CI 全绿 | 本地无法验证 Linux/macOS 构建，TASK-004 的最终验收依赖远端 CI |
+## 建议下一轮实现顺序
 
----
+1. 扩充代表性渲染负载，建立阶段耗时和交错重复 A/B 比较。
+2. 运行远端 Sanitizer/覆盖率，并处理静态分析诊断。
+3. 动画预编译缓存、完整节点层级和 skin 导入。
 
-## 已完成
+## 维护规则
 
-| 任务 | 核心成果 | 测试数 |
-|---|---|---|
-| [TASK-004](TASK-004-CI跨平台与测试基础设施.md) | 修复 ubuntu/macos job 必然编译失败；去掉吞失败的 `\|\| true`；接线像素回归并修复两个「永远假通过」陷阱（已反向验证）；ctest 39.89 秒 → 14.06 秒 | 113 → **120** + 3 回归 |
-| [DONE/TASK-003](DONE/TASK-003-输入校验与边界安全.md) | `image_loader.h` 整数溢出 UB；`getPixel`/`DepthBuffer::get` Release 越界读 UB；`blend.h` 截断改四舍五入；5 个枚举合规；**`core/log.h` 内置模式重写为变参模板**（消除 4 个缺陷） | 97 → **113** |
-| [DONE/TASK-002](DONE/TASK-002-光栅化器缺陷修复.md) | `rasterizer_fast.h` 深度插值重心权重错位（实测误差 0.325）+ 顺时针三角形静默丢弃 | 94 → **97** |
-| TASK-001 | git 初始化 + `.gitignore`；README / architecture / modules / changelog / troubleshooting / third 文档；7 个 TASK 建档；规则红线（11 条）与命令 | — |
-
-### 三个最值得记住的教训
-
-1. **一致性测试不能替代正确性测试**。`SSE2MatchesScalar` 在修复前就通过——因为标量版与
-   SSE2 版犯了同样的权重错位，两版彼此一致。正确性必须由独立算出的期望值来验证
-   （TASK-002 用面积法另写了一份 `barycentricByArea`，刻意不复用被测代码的边函数）。
-
-2. **对称盲点会让测试失效**。三角形几何重心处 `w0=w1=w2=1/3`，正确映射与错位映射
-   都得到同一个值。采样点必须取靠近各顶点的非对称位置。同理，插值类测试的
-   三个顶点取值**必须互不相等**——这条已写进 `engineering_rules.md` 红线。
-
-3. **不能依赖文件名或既有注释推断事实**。`tiny_gltf_impl.cpp` 位于 `tinygltf/` 目录、
-   名字也叫 `tiny_gltf_impl`，但它完全不含 tinygltf 的实现，只提供 stb。
-   根 `CMakeLists.txt` 的旧注释也是错的，我最初轻信并写进了两份文档，
-   读 `.cpp` 后才发现。
+- 已完成工作在 `DONE/` 留下设计、测试和结果，功能仍有剩余工作时保留任务状态。
+- 旧日志中的测试计数、工具路径、环境阻塞只适用于当时；不能直接复制到当前仪表盘。
+- 命名空间大规模迁移与第三方升级单独实施，以便区分接口和行为变化。
+- 每轮实现先补充缺陷回归或集成验收，再记录验证范围，不以文档存在代替实际验收。

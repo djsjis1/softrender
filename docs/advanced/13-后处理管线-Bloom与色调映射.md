@@ -39,7 +39,7 @@ $$\text{ACES}(x) = \frac{x(2.51x+0.03)}{x(2.43x+0.59)+0.14}$$
 | Gamma 校正 | `sr::FloatFramebuffer::gammaCorrect` |
 | 亮部提取 | `brightPass` |
 | 可分离高斯模糊 | `gaussianBlur` |
-| 对比示例 | `examples/stage11_postprocess.cpp` |
+| 对比示例 | `examples/stage13_postprocess.cpp` |
 
 ## 五、动手实验
 
