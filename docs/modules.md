@@ -67,9 +67,7 @@
 | `blend.h` | `enum class BlendMode`（Opaque / AlphaBlend / Additive / Multiply / Premultiplied）、`blendPixels(src, dst, mode)` |
 | `tga.h` | `namespace tga`：`Image`、`read` / `write`。按 y-up 约定设置 TGA 原点标志位 |
 | `image_write.h` | `namespace imagewriter`：`writeImage`（PNG/JPG/BMP/TGA，基于 stb_image_write） |
-| `fxaa.h` | `namespace fxaa`：FXAA 后处理抗锯齿 |
-| `post_effects.h` | `namespace postprocess`：Bloom、ACES 色调映射、景深、运动模糊、暗角、色差 |
-| `ssao.h` | `sr::SSAOConfig` / `sr::SSAO`：屏幕空间环境光遮蔽 |
+| `post_processing.h` | `namespace postprocess`：统一后处理入口——FXAA 抗锯齿、DOF 景深、径向模糊、暗角、色差、SSAO 环境光遮蔽 |
 
 ### 通用设施
 
@@ -232,11 +230,11 @@ struct Shader {
 视口变换 → 背面剔除 → 光栅化 → 深度测试 → 透视校正插值 + 片元着色。
 详见 `architecture.md` §4 的时序图。
 
-### 2D 路径（`namespace sr2d`）
+### 2D 路径（`namespace draw2d`）
 
 | 文件 | 内容 |
 | --- | --- |
-| `shape2d.h` | `ClipRect`；`fillRect` / `drawRect` / `fillRectGradient` / `fillCircle` / `drawCircle` / `fillEllipse` / `drawEllipse` / `fillRoundedRect` / `drawRoundedRect` / `fillPolygon` / `drawPolygon` / `drawThickLine`；底层 `plotBlend` / `lineBlend` |
+| `shape2d.h` | `ClipRect`；`fillRect` / `drawRect` / `fillRectGradient` / `fillCircle` / `drawCircle` / `fillEllipse` / `drawEllipse` / `fillRoundedRect` / `drawRoundedRect` / `fillPolygon` / `drawPolygon` / `drawThickLine`；底层 `plotBlend` / `drawLine` |
 | `blit2d.h` | `SpritePalette` / `tintPixel`；`drawCharSprite` / `blitImage` / `blitImageRect` / `blitImageScaled` / `blitImageTransformed` / `blitImageRotated` / `blitFramebuffer` / `blitTexture` |
 | `renderer2d.h` | `Renderer2D`：立即模式，封装 `Mat3` 变换栈（`push`/`pop`）、`Camera2D`、scissor、`BlendMode`；内置 5×7 点阵字体 `glyph5x7` |
 
@@ -244,12 +242,12 @@ struct Shader {
 混合 → 可选 `ClipRect` scissor。短路规则：仅 `Opaque`，或（`a == 255` 且模式为
 `AlphaBlend` / `Premultiplied`）时直接覆盖；`Additive` / `Multiply` 不短路。
 
-> **为什么 2D 符号都在 `sr2d` 而底层 `triangle.h`/`line.h` 在全局**：
+> **为什么 2D 符号都在 `draw2d` 而底层 `triangle.h`/`line.h` 在全局**：
 > 2D 图元函数名（`fillRect` / `fillCircle` / `SpritePalette`）曾与 `examples/` 中
-> 已有的全局同名符号冲突，故整体收进 `sr2d`。而 `triangle.h` / `line.h` 是
+> 已有的全局同名符号冲突，故整体收进 `draw2d`。而 `triangle.h` / `line.h` 是
 > 3D 与 2D 共享的最底层图元，保持全局以避免双重限定。
 >
-> **调用 2D 图元层时必须加 `sr2d::` 前缀**（单元测试中同样如此）。
+> **调用 2D 图元层时必须加 `draw2d::` 前缀**（单元测试中同样如此）。
 
 **扩展点**：新增 2D 图元 → `shape2d.h`；新增图像合成 → `blit2d.h`；
 两者都必须通过 `plotBlend` 写像素，禁止直接调 `Framebuffer::setPixel`

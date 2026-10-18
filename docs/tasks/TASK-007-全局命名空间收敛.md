@@ -32,7 +32,6 @@
 | | `float_framebuffer.h` | `FloatFramebuffer` |
 | | `msaa_framebuffer.h` | `MSAAFramebuffer` |
 | | `gbuffer.h` | `GBuffer` |
-| | `ssao.h` | `SSAOConfig`、`SSAO` |
 | | `command_buffer.h` | `CommandBuffer`、`ThreadPool` |
 | `math/` | `vec.h` | `Vec2`、`Vec3`、`Vec4` |
 | | `mat3.h` / `mat4.h` / `quat.h` / `rect.h` | `Mat3`、`Mat4`、`Quat`、`Rect2` |
@@ -59,7 +58,7 @@
 `drawLineGradient`、`fillTriangle` 等。
 
 已在命名空间内的（**不需要迁移**）：`sr`（arena / benchmark / log / profiler /
-resource_manager）、`sr2d`、`colors`、`transform`、`tga`、`imagewriter`、
+resource_manager）、`draw2d`、`colors`、`transform`、`tga`、`imagewriter`、
 `imageloader`、`meshgen`、`texgen`、`objloader`、`gltfloader`、`raster_fast`、
 `fxaa`、`postprocess`、`regression`。
 
@@ -67,7 +66,7 @@ resource_manager）、`sr2d`、`colors`、`transform`、`tga`、`imagewriter`、
 
 ### 1. 已经造成过实际冲突（不是理论风险）
 
-`namespace sr2d` 的引入原因，就是 2D 图元函数名（`fillRect` / `fillCircle` /
+`namespace draw2d` 的引入原因，就是 2D 图元函数名（`fillRect` / `fillCircle` /
 `SpritePalette`）与 `examples/` 中已有的全局同名符号冲突。
 **同一个仓库内部就已经发生过命名冲突。**
 
@@ -141,7 +140,7 @@ namespace sr {}
 - **被拒方案**：
   1. *一次性全量迁移* —— 拒绝：单个 commit 触及全仓，无法 review、无法二分定位回归
   2. *不迁移，只在文档中告知用户注意冲突* —— 拒绝：header-only 库的重定义错误
-     是编译期硬错误，用户无法绕过；且 `sr2d` 的历史证明冲突会真实发生
+     是编译期硬错误，用户无法绕过；且 `draw2d` 的历史证明冲突会真实发生
   3. *改用 `inline namespace` 做版本化* —— 拒绝：本项目无多版本共存需求，
      额外复杂度无收益
 - **适用与失效条件**：适用于 header-only 库形态；若将来改为编译型静态/动态库
@@ -173,7 +172,7 @@ namespace sr {}
 - [x] `float_framebuffer.h`：`FloatFramebuffer` 迁入 `sr`
 - [x] `msaa_framebuffer.h`：`MSAAFramebuffer` + `kMSAA4Offsets` 迁入 `sr`
 - [x] `command_buffer.h`：`CommandBuffer` / `ThreadPool` 迁入 `sr`
-- [x] `post_effects.h`：`namespace postprocess` 内加 `using sr::FloatFramebuffer;`
+- [x] `post_processing.h`：`namespace postprocess` 内加 `using sr::FloatFramebuffer;`（SSAO/SSAOConfig/FXAA/DOF 等统一在此命名空间）
 - [x] `test_core.cpp`：`sr::GBuffer` / `sr::CommandBuffer` / `sr::ThreadPool` 显式限定
 - [x] `demo_stars.cpp` / `stage11_postprocess.cpp` / `stage9_msaa.cpp`：加 `using namespace sr;`
 - [x] 顺带修复：`msaa_framebuffer.h` 用 `std::pair` 却未 include `<utility>`；
@@ -282,7 +281,7 @@ tests\test_core.cpp(1181,5): error C2872: “Position”: 不明确的符号
 - **改动面覆盖全仓，任何遗漏都导致编译失败** → 缓解：编译器会精确报错（安全失败）；
   每模块单独 commit，出问题可精确 revert
 - **`examples/` 中已有全局同名符号与迁移后的 `using` 别名二次冲突** → 缓解：
-  阶段二每步都全量构建 22 个示例，冲突立即暴露；这正是 `sr2d` 当年遇到的情况
+  阶段二每步都全量构建 22 个示例，冲突立即暴露；这正是 `draw2d` 当年遇到的情况
 - **与并行任务冲突** → 缓解：本任务**必须最后执行**，且执行期间冻结其他任务
 - **中途放弃导致半迁移状态** → 缓解：阶段一的别名桥保证「迁移到一半」时
   代码仍然完全可用，不存在必须一次做完的压力

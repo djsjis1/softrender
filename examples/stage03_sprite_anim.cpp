@@ -4,7 +4,7 @@
 // 【源码阅读】先读这些文件：
 //   platform/win32_window.h  — Win32 GDI 窗口：present(fb) 显示帧缓冲
 //   core/framebuffer.h       — 帧缓冲 + clear()
-//   raster/line.h            — 画线（地面轮廓等）
+//   raster/shape2d.h         — 画线（地面轮廓等）
 //
 // 【运行验证】弹出 800×600 窗口：
 //   勇者在黄昏草原上来回行走（2 帧动画），SPACE 跳跃，ESC 退出
@@ -19,7 +19,7 @@
 #include "core/framebuffer.h"
 #include "core/image_write.h"
 #include "platform/win32_window.h"
-#include "raster/line.h"
+#include "raster/shape2d.h"
 
 // 字符 → 颜色 映射（'.' 表示透明像素）
 struct SpritePalette
@@ -157,31 +157,31 @@ int main()
             float k = float(y) / float(H - 1);
             Color base = Color::lerp(skyDay, skyNight, 1.0f - dayK);  // 高度比例调亮度
             Color c = Color::lerp(base, skyNight, k);
-            drawLine(fb, 0, y, W - 1, y, c);
+            draw2d::drawLine(fb, 0, y, W - 1, y, c);
         }
 
         // ---- 太阳：高于地平线才画，颜色随高度变暗 ----
         if (sunY > 120)
         {
             Color sunCore = Color::lerp(Color(255, 214, 96), Color(255, 120, 60), 1.0f - dayK);
-            fillCircle(fb, 620, sunY, 58, Color(250, 150, 70));  // 外圈光晕
-            fillCircle(fb, 620, sunY, 34, sunCore);              // 亮核
+            draw2d::fillCircle(fb, 620, sunY, 58, Color(250, 150, 70));  // 外圈光晕
+            draw2d::fillCircle(fb, 620, sunY, 34, sunCore);              // 亮核
         }
 
         // ---- 云：两朵速度不同，从左飘到右再绕回 ----
         const Color cloud = Color::lerp(Color(250, 190, 150), Color(60, 66, 96), 1.0f - dayK);
         int cloudX1 = int(120 + 20.0f * t) % (W + 300) - 150;
-        fillRect(fb, cloudX1, 450, 90, 14, cloud);
-        fillRect(fb, cloudX1 + 30, 436, 56, 14, cloud);
-        fillRect(fb, cloudX1 + 20, 464, 60, 12, cloud);
+        draw2d::fillRect(fb, cloudX1, 450, 90, 14, cloud);
+        draw2d::fillRect(fb, cloudX1 + 30, 436, 56, 14, cloud);
+        draw2d::fillRect(fb, cloudX1 + 20, 464, 60, 12, cloud);
         int cloudX2 = int(480 + 12.0f * t) % (W + 300) - 150;
-        fillRect(fb, cloudX2, 500, 70, 12, cloud);
-        fillRect(fb, cloudX2 + 20, 490, 44, 10, cloud);
+        draw2d::fillRect(fb, cloudX2, 500, 70, 12, cloud);
+        draw2d::fillRect(fb, cloudX2 + 20, 490, 44, 10, cloud);
 
         // ---- 地面 + 地平线 + 小草（草丛 3 帧/秒明暗交替） ----
         for (int y = 0; y < 100; ++y)
-            drawLine(fb, 0, y, W - 1, y, Color(38, 28, 42));
-        drawLine(fb, 0, 100, W - 1, 100, Color::lerp(Color(255, 170, 90), Color(80, 70, 90), 1.0f - dayK));
+            draw2d::drawLine(fb, 0, y, W - 1, y, Color(38, 28, 42));
+        draw2d::drawLine(fb, 0, 100, W - 1, 100, Color::lerp(Color(255, 170, 90), Color(80, 70, 90), 1.0f - dayK));
         const int grass[][2] = {{60, 97}, {150, 98}, {260, 96}, {330, 99}, {420, 97}, {560, 98}, {700, 96}};
         bool grassBright = (int(t * 3.0f) % 2) == 0;
         for (const auto& g : grass)

@@ -1,5 +1,4 @@
 #pragma once
-#include <algorithm>
 #include <cstdint>
 
 #include "core/color.h"
@@ -7,86 +6,105 @@
 // ============================================================
 // Alpha 混合模式
 //
-// 公式：result = src × srcFactor + dst × dstFactor
+// 决定"前景色画到已有背景色上，最终像素是什么颜色"。
+// 被 shape2d.h 的 plotBlend 逐像素调用，是 2D 渲染热路径。
 //
-// 模式说明：
-//   Opaque        — 直接覆盖，忽略 dst
-//   AlphaBlend    — 标准半透明：src×α + dst×(1-α)
-//   Additive      — 加法混合：src + dst（发光/粒子）
-//   Multiply      — 乘法混合：src×dst（阴影/暗化）
-//   Premultiplied — 预乘 alpha：src + dst×(1-α)（推荐）
+// 全部使用整数运算（无浮点、无标准库依赖），
+// 可直接运行在无 FPU 的 MCU（Cortex-M0/M3）上。
 // ============================================================
 
 enum class BlendMode : uint8_t
 {
+    // ── 不透明 ──────────────────────────────────────────
+    // 前景直接盖住背景，完全看不到后面的内容。
+    // 用于：实体方块、不透明精灵、UI 实色背景。
+    // 性能：零计算，直接返回 src。
     Opaque,
+
+    // ── 半透明 ──────────────────────────────────────────
+    // 前景和背景按比例混合。α=0 全透明（只看到背景），
+    // α=255 不透明（等同于 Opaque），中间值如玻璃/烟雾。
+    // 用于：透明 UI、淡入淡出、水面、玻璃、阴影遮罩。
     AlphaBlend,
+
+    // ── 加法叠加 ────────────────────────────────────────
+    // 前景亮度加到背景上，越叠越亮，不会变暗。
+    // 黑色加任何颜色 = 原色不变（黑色是加法的"透明色"）。
+    // 用于：火焰、光晕、激光、粒子特效、爆炸光芒。
     Additive,
+
+    // ── 乘法变暗 ────────────────────────────────────────
+    // 前景和背景相乘，结果总是比两者都暗或相等。
+    // 白色乘任何颜色 = 原色不变（白色是乘法的"透明色"）。
+    // 用于：阴影投射、暗角效果、纹理叠加做旧、遮罩。
     Multiply,
+
+    // ── 预乘 Alpha ──────────────────────────────────────
+    // 与 AlphaBlend 视觉效果相同，但要求纹理的 RGB 已经
+    // 预乘过 α（即存储时 R/G/B 已乘过 α/255）。
+    // 比 AlphaBlend 少一次乘法，是游戏引擎和 GPU 的标准做法。
+    // 用于：预乘纹理的精灵、GPU 导出的图集、字体渲染。
     Premultiplied
 };
 
-// float → uint8_t：四舍五入 + 钳制到 [0,255]
-//
-// 为什么不用 std::lround：热路径性能（单条指令 vs 函数调用）
-// 为什么在这里钳制：避免调用方重复推理溢出问题
-inline uint8_t toUint8Round(float v) noexcept
+// 整数钳制到 [0, 255]
+inline uint8_t clampU8(int v) noexcept
 {
-    return uint8_t(std::min(255.0f, std::max(0.0f, v)) + 0.5f);
+    return v < 0 ? 0 : v > 255 ? 255 : static_cast<uint8_t>(v);
 }
 
-// 像素混合：src（前景）与 dst（背景）按 mode 混合
-inline Color blendPixels(Color src, Color dst, BlendMode mode)
+// 整数除以 255：(v + (v >> 8) + 128) >> 8
+// 等价于 v / 255，对所有 v ∈ [0, 65025] 精确无误差
+// 仅用移位和加法，无浮点、无硬件除法，Cortex-M0 也能跑
+inline int div255(int v) noexcept
 {
+    return (v + (v >> 8) + 128) >> 8;
+}
+
+// 整数混合核心：(src × α + dst × (255-α)) / 255
+inline int blendChannel(int src, int dst, int alpha, int invAlpha) noexcept
+{
+    return div255(src * alpha + dst * invAlpha);
+}
+
+// 单像素混合：src（前景）画到 dst（背景）上，按 mode 决定最终颜色
+inline Color blendPixels(Color src, Color dst, BlendMode mode) noexcept
+{
+    const int a = src.a;
+    const int inv = 255 - a;
+
     switch (mode)
     {
     case BlendMode::Opaque:
         return src;
 
     case BlendMode::AlphaBlend:
-    {
-        // 标准半透明：src×α + dst×(1-α)
-        float sa = src.a / 255.0f;
-        float da = 1.0f - sa;
         return Color(
-            toUint8Round(src.r * sa + dst.r * da),
-            toUint8Round(src.g * sa + dst.g * da),
-            toUint8Round(src.b * sa + dst.b * da),
-            toUint8Round(src.a + dst.a * da));
-    }
+            clampU8(blendChannel(src.r, dst.r, a, inv)),
+            clampU8(blendChannel(src.g, dst.g, a, inv)),
+            clampU8(blendChannel(src.b, dst.b, a, inv)),
+            clampU8(blendChannel(src.a, dst.a, a, inv)));
 
     case BlendMode::Additive:
-    {
-        // 加法混合：src×α + dst（可达 510，需钳制）
-        float sa = src.a / 255.0f;
         return Color(
-            toUint8Round(float(src.r) * sa + dst.r),
-            toUint8Round(float(src.g) * sa + dst.g),
-            toUint8Round(float(src.b) * sa + dst.b),
+            clampU8(div255(src.r * a) + dst.r),
+            clampU8(div255(src.g * a) + dst.g),
+            clampU8(div255(src.b * a) + dst.b),
             255);
-    }
 
     case BlendMode::Multiply:
-    {
-        // 乘法混合：(src×dst/255)×α + dst×(1-α)
-        float sa = src.a / 255.0f;
         return Color(
-            toUint8Round(src.r * dst.r / 255.0f * sa + dst.r * (1.0f - sa)),
-            toUint8Round(src.g * dst.g / 255.0f * sa + dst.g * (1.0f - sa)),
-            toUint8Round(src.b * dst.b / 255.0f * sa + dst.b * (1.0f - sa)),
+            clampU8(blendChannel(div255(src.r * dst.r), dst.r, a, inv)),
+            clampU8(blendChannel(div255(src.g * dst.g), dst.g, a, inv)),
+            clampU8(blendChannel(div255(src.b * dst.b), dst.b, a, inv)),
             255);
-    }
 
     case BlendMode::Premultiplied:
-    {
-        // 预乘 alpha：src + dst×(1-α)（src 已预乘，可达 510，需钳制）
-        float da = 1.0f - src.a / 255.0f;
         return Color(
-            toUint8Round(float(src.r) + dst.r * da),
-            toUint8Round(float(src.g) + dst.g * da),
-            toUint8Round(float(src.b) + dst.b * da),
+            clampU8(src.r + div255(dst.r * inv)),
+            clampU8(src.g + div255(dst.g * inv)),
+            clampU8(src.b + div255(dst.b * inv)),
             255);
-    }
     }
     return src;
 }

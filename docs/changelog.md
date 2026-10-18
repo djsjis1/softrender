@@ -367,7 +367,7 @@ Win32 依赖只存在于三个已守卫的示例 + `platform/win32_window.h` 本
 |---|---|
 | `zbuffer_twoOverlappingCubes` | 深度测试 + 背面剔除 + 视锥裁剪的联合行为 |
 | `pipeline_phongTexturedSphere` | 变换链 + 透视校正插值 + 纹理采样 + Phong 着色 |
-| `blend2d_alphaComposition` | alpha 混合（三种模式）+ sr2d 图元 + 变换栈 + scissor + 点阵字体 |
+| `blend2d_alphaComposition` | alpha 混合（三种模式）+ draw2d 图元 + 变换栈 + scissor + 点阵字体 |
 
 刻意**不**回归 `demo_stars`（含随机星点）与 `stage12_threaded`（线程顺序不定）。
 

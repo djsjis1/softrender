@@ -13,7 +13,7 @@
 //   Animation / Texture / Mesh / Vertex / Color / Camera 这类领域通用名，
 //   下游使用者几乎必然已经定义过 → 编译期重定义硬错误，无法绕过。
 //
-//   这不是理论风险：`namespace sr2d` 的引入原因，正是 2D 图元名
+//   这不是理论风险：`namespace draw2d` 的引入原因，正是 2D 图元名
 //   （fillRect / fillCircle / SpritePalette）与 examples/ 中已有的全局同名符号
 //   发生了真实冲突。
 //
@@ -26,10 +26,10 @@
 //   不是对下游的兼容承诺。因此对高冲突名字不使用别名桥。
 //
 // 【已有的其他命名空间】不需要迁移，它们本来就不在全局作用域：
-//   sr2d（2D 图元与合成）、colors（颜色常量）、transform（投影变换）、
+//   draw2d（2D 图元与合成）、colors（颜色常量）、transform（投影变换）、
 //   tga / imagewriter / imageloader（图像 I/O）、meshgen / texgen（资源生成）、
 //   objloader / gltfloader（模型加载）、raster_fast（实验性光栅化）、
-//   fxaa / postprocess（后处理）、regression（测试工具）、
+//   postprocess（后处理：FXAA/DOF/SSAO/暗角/色差）、regression（测试工具）、
 //   sr 内已有的 ArenaAllocator / Profiler / ResourceManager / Log / formatLog
 //
 // 【使用方式】

@@ -4,7 +4,7 @@
 #include "core/framebuffer.h"
 #include "math/vec.h"
 #include "raster/coverage.h"
-#include "raster/line.h"
+#include "raster/shape2d.h"
 
 // ============================================================
 // 三角形光栅化：边函数 + 重心坐标法
@@ -108,7 +108,7 @@ inline void fillTriangleGradient(Framebuffer &fb, Vec2f v0, Vec2f v1, Vec2f v2, 
 // 线框三角形（复用阶段 1 的画线）
 inline void wireTriangle(Framebuffer &fb, Vec2f v0, Vec2f v1, Vec2f v2, Color color)
 {
-    drawLine(fb, (int)v0.x, (int)v0.y, (int)v1.x, (int)v1.y, color);
-    drawLine(fb, (int)v1.x, (int)v1.y, (int)v2.x, (int)v2.y, color);
-    drawLine(fb, (int)v2.x, (int)v2.y, (int)v0.x, (int)v0.y, color);
+    draw2d::drawLine(fb, (int)v0.x, (int)v0.y, (int)v1.x, (int)v1.y, color);
+    draw2d::drawLine(fb, (int)v1.x, (int)v1.y, (int)v2.x, (int)v2.y, color);
+    draw2d::drawLine(fb, (int)v2.x, (int)v2.y, (int)v0.x, (int)v0.y, color);
 }

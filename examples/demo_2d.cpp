@@ -82,7 +82,7 @@ void renderScene2D(Framebuffer& fb)
     r2d.fillRect(0, 0, (float)W, 120.0f);
 
     // ---- 5. 精灵：一排不同缩放/染色的侵略者 ----
-    std::vector<sr2d::SpritePalette> pal = {{'X', Color(120, 240, 140)}};
+    std::vector<draw2d::SpritePalette> pal = {{'X', Color(120, 240, 140)}};
     for (int i = 0; i < 5; ++i)
     {
         r2d.setColor(Color(255, 255, 255, 255));
@@ -130,7 +130,7 @@ void renderScene2D(Framebuffer& fb)
     {
         Mat3 xf = Mat3::translate(820.0f, 160.0f) * Mat3::rotate(0.4f) * Mat3::scale(1.6f) *
                   Mat3::translate(-32.0f, -32.0f);
-        sr2d::blitImageTransformed(fb, checker, xf, colors::white, true, BlendMode::AlphaBlend);
+        draw2d::blitImageTransformed(fb, checker, xf, colors::white, true, BlendMode::AlphaBlend);
     }
     r2d.bilinear = false;
 

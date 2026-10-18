@@ -102,12 +102,10 @@ framebuffer.h        → color.h
 blend.h              → color.h
 tga.h                → framebuffer.h
 image_write.h        → framebuffer.h            （实现依赖 stb_image_write）
-fxaa.h               → color.h, framebuffer.h
 msaa_framebuffer.h   → color.h, depthbuffer.h
 float_framebuffer.h  → color.h, depthbuffer.h, framebuffer.h, math/vec.h
 gbuffer.h            → math/vec.h, float_framebuffer.h
-post_effects.h       → float_framebuffer.h, math/vec.h
-ssao.h               → math/mat4.h, math/vec.h
+post_processing.h    → color.h, framebuffer.h, float_framebuffer.h, math/mat4.h, math/vec.h
 log.h                → Logger.h（仅当定义 SR_USE_SPDLOG）
 profiler.h           → （叶子）
 arena.h              → （叶子）
@@ -116,7 +114,7 @@ resource_manager.h   → （叶子，模板 + concepts）
 command_buffer.h     → （叶子，线程池）
 ```
 
-> ⚠️ **`core/` 并非严格的最底层**：`gbuffer.h`、`post_effects.h`、`ssao.h`、
+> ⚠️ **`core/` 并非严格的最底层**：`gbuffer.h`、`post_processing.h`、
 > `float_framebuffer.h` 都依赖 `math/`。真实最底层是 `math/` + `core/color.h` +
 > `core/depthbuffer.h`。
 >
@@ -243,8 +241,8 @@ graph LR
     A --> E["BlendMode"]
     B --> F["deviceTransform = camera × model"]
     C --> F
-    F --> G["sr2d:: 图元层 shape2d.h / blit2d.h"]
-    D --> H["sr2d::plotBlend 统一像素写入"]
+    F --> G["draw2d:: 图元层 shape2d.h / blit2d.h"]
+    D --> H["draw2d::plotBlend 统一像素写入"]
     E --> H
     G --> H
     H --> I["Framebuffer（与 3D 共用）"]
@@ -300,15 +298,16 @@ graph LR
 
 | 命名空间 | 所在文件 | 内容 |
 | --- | --- | --- |
-| （全局） | `framebuffer.h`、`depthbuffer.h`、`color.h`、`blend.h`、`renderer.h`、`renderer2d.h`、`triangle.h`、`line.h`、`clip.h`、`camera.h`、`mesh.h`、`texture.h`、`skeleton.h`、`shader.h` 等 | `Framebuffer`、`Color`、`Renderer`、`Camera`、`Texture`、`Mesh` 等 **45 个**核心类型 |
-| `sr` | `arena.h`、`benchmark.h`、`log.h`、`profiler.h`、`resource_manager.h`、**`components.h`**、**`ssao.h`**、**`gbuffer.h`**、**`float_framebuffer.h`**、**`msaa_framebuffer.h`**、**`command_buffer.h`** | `ArenaAllocator`、`Profiler`、`ResourceManager`、`Log`、`formatLog`；**8 个 ECS 组件**；**`SSAO`/`SSAOConfig`/`GBuffer`/`FloatFramebuffer`/`MSAAFramebuffer`/`kMSAA4Offsets`/`CommandBuffer`/`ThreadPool`** |
-| `sr2d` | `shape2d.h`、`blit2d.h` | 全部 2D 图元与合成函数 |
+| （全局） | `framebuffer.h`、`depthbuffer.h`、`color.h`、`blend.h`、`renderer.h`、`renderer2d.h`、`triangle.h`、`clip.h`、`camera.h`、`mesh.h`、`texture.h`、`skeleton.h`、`shader.h` 等 | `Framebuffer`、`Color`、`Renderer`、`Camera`、`Texture`、`Mesh` 等 **45 个**核心类型 |
+| `sr` | `arena.h`、`benchmark.h`、`log.h`、`profiler.h`、`resource_manager.h`、**`components.h`**、**`gbuffer.h`**、**`float_framebuffer.h`**、**`msaa_framebuffer.h`**、**`command_buffer.h`** | `ArenaAllocator`、`Profiler`、`ResourceManager`、`Log`、`formatLog`；**8 个 ECS 组件**；**`GBuffer`/`FloatFramebuffer`/`MSAAFramebuffer`/`kMSAA4Offsets`/`CommandBuffer`/`ThreadPool`** |
+| `draw2d` | `shape2d.h`、`blit2d.h` | 全部 2D 图元与合成函数 |
 | `colors` | `color.h` | 颜色常量 |
 | `transform` | `transform.h`、`transform2d.h` | 投影与视口变换 |
 | `tga` / `imagewriter` / `imageloader` | `tga.h` / `image_write.h` / `image_loader.h` | 图像 I/O |
 | `meshgen` / `texgen` / `objloader` / `gltfloader` | `mesh.h` / `texture.h` / `obj_loader.h` / `gltf_loader.h` | 资源生成与加载 |
 | `raster_fast` | `rasterizer_fast.h` | 实验性 SIMD 光栅化器 |
-| `fxaa` / `postprocess` / `regression` | `fxaa.h` / `post_effects.h` / `test/pixel_regression.h` | 后处理与测试 |
+| `postprocess` | `post_processing.h` | 后处理合集：FXAA、DOF、径向模糊、暗角、色差、SSAO |
+| `regression` | `test/pixel_regression.h` | 像素回归测试 |
 
 ### 收敛进度（ADR-001）
 
@@ -316,10 +315,10 @@ graph LR
 | --- | --- | --- | --- |
 | — | 起点 | 60 | — |
 | 1 | `components.h` 的 8 个 ECS 组件 | 60 → 52 | ✅ 已完成 |
-| 2 | `ssao.h`、`gbuffer.h`、`float_framebuffer.h`、`msaa_framebuffer.h`、`command_buffer.h`（7 个类型 + `kMSAA4Offsets`） | 52 → **45** | ✅ 已完成 |
+| 2 | `gbuffer.h`、`float_framebuffer.h`、`msaa_framebuffer.h`、`command_buffer.h`（6 个类型 + `kMSAA4Offsets`）；`ssao.h` 已合并入 `post_processing.h`（统一 `namespace postprocess`） | 52 → **45** | ✅ 已完成 |
 | 3 | `skeleton.h`（6）、`particle_system.h`（3）、`render_queue.h`（2）、`gltf_types.h`（6）、`shader/` 具体着色器（5） | — | 待做（均低引用面，可不留别名） |
 | 4 | `color.h`、`math/`、`framebuffer.h`、`depthbuffer.h`、`mesh.h`、`texture.h`、`shader.h`、`renderer.h`、`raster/` | — | 待做（高引用面，需全仓扰动） |
-| 5 | 14 个全局子命名空间（`tga`/`colors`/`transform`/`sr2d`/`fxaa`/`postprocess` 等） | — | 待做（它们本身也是易撞名的全局符号） |
+| 5 | 14 个全局子命名空间（`tga`/`colors`/`transform`/`draw2d`/`fxaa`/`postprocess` 等） | — | 待做（它们本身也是易撞名的全局符号） |
 
 两批均**不留全局别名**直接完成，因为实测引用面极小。
 
@@ -328,7 +327,7 @@ graph LR
 1. **把头文件内容包进 `namespace sr`**。内部对尚未迁移的全局类型
    （`Vec3f` / `Mat4` / `Color` / `DepthBuffer`）的引用**无需改动** ——
    `namespace sr` 内的名字查找会回落到全局作用域。这是逐文件增量迁移可行的关键。
-2. **跨命名空间引用需显式引入**。例：`post_effects.h` 的 `namespace postprocess`
+2. **跨命名空间引用需显式引入**。例：`post_processing.h` 的 `namespace postprocess`
    仍在全局，其内部查找只回落到全局、**不会进入 `sr`**，所以需
    `using sr::FloatFramebuffer;`。用 using-**声明**而非 directive，只引入确实需要的名字。
 3. **`.cpp` 应用代码可加 `using namespace sr;`**（已用于 `demo_stars.cpp`、
@@ -359,7 +358,7 @@ graph LR
 > 8 个同名哨兵类型（`struct Position { int canary; };` 等）。若将来有人加回
 > `using sr::Position;`，测试文件会直接报重定义错误。
 
-**已经造成过实际冲突**：`sr2d` 命名空间的引入原因，就是 2D 图元函数名
+**已经造成过实际冲突**：`draw2d` 命名空间的引入原因，就是 2D 图元函数名
 （`fillRect` / `fillCircle` / `SpritePalette`）与 `examples/` 中已有的全局同名符号
 冲突。这不是理论风险。
 

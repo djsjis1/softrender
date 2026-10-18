@@ -620,27 +620,17 @@ TEST(Blend, AdditiveClamps)
     EXPECT_EQ(r.r, 255);  // 应 clamp 到 255
 }
 
-// toUint8Round 必须四舍五入而非截断，并双向钳制。
-// 旧实现四处都是 uint8_t(float)，直接截断小数 → 每次混合系统性偏暗最多 1/255，
-// 粒子 / 透明排序 / 2D 抗锯齿多层叠加后会累积出可见偏差。
-TEST(Blend, toUint8Round_roundsAndClamps)
+// clampU8 必须正确钳制到 [0,255]
+TEST(Blend, clampU8_clampsCorrectly)
 {
-    EXPECT_EQ(toUint8Round(0.0f), 0);
-    EXPECT_EQ(toUint8Round(0.4f), 0);
-    EXPECT_EQ(toUint8Round(0.5f), 1);  // 截断会给 0，这是两者可区分的最小用例
-    EXPECT_EQ(toUint8Round(0.6f), 1);
-    EXPECT_EQ(toUint8Round(254.4f), 254);
-    EXPECT_EQ(toUint8Round(254.9f), 255);
-    EXPECT_EQ(toUint8Round(255.0f), 255);
-
-    // 钳制上界：float → uint8_t 在值超出 [0,255] 时是 UB，
-    // 旧实现靠调用方逐个写 std::min，现在收敛到函数内部。
-    EXPECT_EQ(toUint8Round(255.4f), 255);
-    EXPECT_EQ(toUint8Round(300.0f), 255);
-    EXPECT_EQ(toUint8Round(1.0e9f), 255);
-    // 钳制下界：负值转无符号整型同样是 UB
-    EXPECT_EQ(toUint8Round(-0.4f), 0);
-    EXPECT_EQ(toUint8Round(-10.0f), 0);
+    EXPECT_EQ(clampU8(0), 0);
+    EXPECT_EQ(clampU8(128), 128);
+    EXPECT_EQ(clampU8(255), 255);
+    EXPECT_EQ(clampU8(-1), 0);
+    EXPECT_EQ(clampU8(-100), 0);
+    EXPECT_EQ(clampU8(256), 255);
+    EXPECT_EQ(clampU8(510), 255);
+    EXPECT_EQ(clampU8(10000), 255);
 }
 
 // 构造一个「截断与四舍五入结果不同」的真实混合用例。
@@ -1500,7 +1490,7 @@ TEST(Camera2D, CenterMapsToScreenCenter)
 TEST(Shape2D, FillRectCoversArea)
 {
     Framebuffer fb(20, 20, colors::black);
-    sr2d::fillRect(fb, 5, 5, 4, 4, colors::red);
+    draw2d::fillRect(fb, 5, 5, 4, 4, colors::red);
     EXPECT_EQ(fb.getPixel(5, 5).r, 255);
     EXPECT_EQ(fb.getPixel(8, 8).r, 255);
     EXPECT_EQ(fb.getPixel(9, 9).r, 0); // 越出矩形
@@ -1510,7 +1500,7 @@ TEST(Shape2D, FillRectCoversArea)
 TEST(Shape2D, FillCircleCenterAndOutside)
 {
     Framebuffer fb(40, 40, colors::black);
-    sr2d::fillCircle(fb, 20.0f, 20.0f, 5.0f, colors::green);
+    draw2d::fillCircle(fb, 20.0f, 20.0f, 5.0f, colors::green);
     EXPECT_EQ(fb.getPixel(20, 20).g, 255);
     EXPECT_EQ(fb.getPixel(30, 30).g, 0);
 }
@@ -1518,8 +1508,8 @@ TEST(Shape2D, FillCircleCenterAndOutside)
 TEST(Shape2D, ClipRestrictsDrawing)
 {
     Framebuffer fb(40, 40, colors::black);
-    sr2d::ClipRect clip(0, 0, 20, 40); // 只允许左半屏
-    sr2d::fillRect(fb, 10, 10, 20, 5, colors::red, BlendMode::Opaque, &clip);
+    draw2d::ClipRect clip(0, 0, 20, 40); // 只允许左半屏
+    draw2d::fillRect(fb, 10, 10, 20, 5, colors::red, BlendMode::Opaque, &clip);
     EXPECT_EQ(fb.getPixel(15, 12).r, 255); // 裁剪区内
     EXPECT_EQ(fb.getPixel(25, 12).r, 0);   // 裁剪区外被丢弃
 }
@@ -1528,7 +1518,7 @@ TEST(Shape2D, FillPolygonCoversInterior)
 {
     Framebuffer fb(40, 40, colors::black);
     std::vector<Vec2f> tri = {{5, 5}, {35, 5}, {20, 35}};
-    sr2d::fillPolygon(fb, tri, colors::blue);
+    draw2d::fillPolygon(fb, tri, colors::blue);
     EXPECT_EQ(fb.getPixel(20, 12).b, 255); // 三角形内部
     EXPECT_EQ(fb.getPixel(2, 38).b, 0);    // 外部
 }
@@ -1536,7 +1526,7 @@ TEST(Shape2D, FillPolygonCoversInterior)
 TEST(Shape2D, AlphaBlendMixes)
 {
     Framebuffer fb(4, 4, Color(0, 0, 0));
-    sr2d::fillRect(fb, 0, 0, 4, 4, Color(200, 200, 200, 128), BlendMode::AlphaBlend);
+    draw2d::fillRect(fb, 0, 0, 4, 4, Color(200, 200, 200, 128), BlendMode::AlphaBlend);
     Color c = fb.getPixel(1, 1);
     EXPECT_GT(c.r, 60);
     EXPECT_LT(c.r, 160); // 约一半混合
@@ -1551,7 +1541,7 @@ TEST(Blit2D, BlitImageCopies)
     img.height = 4;
     img.pixels.assign(16, Color(10, 200, 30));
     Framebuffer fb(10, 10, colors::black);
-    sr2d::blitImage(fb, img, 3, 3);
+    draw2d::blitImage(fb, img, 3, 3);
     EXPECT_EQ(fb.getPixel(3, 3).g, 200);
     EXPECT_EQ(fb.getPixel(6, 6).g, 200);
     EXPECT_EQ(fb.getPixel(8, 8).g, 0);
@@ -1559,7 +1549,7 @@ TEST(Blit2D, BlitImageCopies)
 
 TEST(Blit2D, TintScales)
 {
-    Color c = sr2d::tintPixel(Color(200, 100, 50, 255), Color(255, 0, 0, 255));
+    Color c = draw2d::tintPixel(Color(200, 100, 50, 255), Color(255, 0, 0, 255));
     EXPECT_EQ(c.r, 200);
     EXPECT_EQ(c.g, 0);
     EXPECT_EQ(c.b, 0);

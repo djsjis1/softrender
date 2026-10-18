@@ -17,9 +17,10 @@ class Framebuffer
 {
    public:
     Framebuffer(int width, int height, Color fill = colors::black)
-        : width_(width), height_(height), pixels_(new Color[size_t(width) * height])
+        : width_(width), height_(height), pixels_(nullptr)
     {
         assert(width > 0 && height > 0);
+        pixels_ = new Color[size_t(width) * height];
         clear(fill);
     }
 

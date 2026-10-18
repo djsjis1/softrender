@@ -28,7 +28,7 @@
 // 目标位置 (dx,dy) 指贴图左下角落在帧缓冲的哪个像素。
 // ============================================================
 
-namespace sr2d
+namespace draw2d
 {
 
 // 字符模板精灵的调色板：一个字符对应一种颜色（'.' 等透明字符跳过）
@@ -267,4 +267,4 @@ inline void blitTexture(Framebuffer& fb, const Texture& tex, int x, int y, int w
     }
 }
 
-} // namespace sr2d
+} // namespace draw2d

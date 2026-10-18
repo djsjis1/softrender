@@ -4,7 +4,7 @@
 // 【源码阅读】先读这些文件，再来看本示例：
 //   core/framebuffer.h  — 帧缓冲：像素数组 + 坐标约定（y 向上，左下角原点）
 //   core/color.h        — 颜色：RGBA8 + lerp 线性插值
-//   raster/line.h       — Bresenham 画线：整数误差累积，陡峭线转置
+//   raster/shape2d.h    — Bresenham 画线：整数误差累积，陡峭线转置
 //   core/tga.h          — TGA 图像写出
 //
 // 【运行验证】生成 output/stage01_framebuffer.tga：
@@ -17,7 +17,7 @@
 #include <filesystem>
 #include "core/framebuffer.h"
 #include "core/tga.h"
-#include "raster/line.h"
+#include "raster/shape2d.h"
 
 int main()
 {
@@ -60,7 +60,7 @@ int main()
         for (int i = 0; i < 5; ++i)
         {
             int j = (i * 2) % 5, k = ((i + 1) * 2) % 5;
-            drawLineGradient(fb, px[j], py[j], px[k], py[k], palette[i],
+            draw2d::drawLineGradient(fb, px[j], py[j], px[k], py[k], palette[i],
                              palette[(i + 1) % 5]);
         }
     }

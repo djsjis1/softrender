@@ -116,7 +116,7 @@ endif()
 `.clang-format` 存在（107 行，配置完备）但**从未被执行过**。实测证据：
 
 - 第 92 行 `NamespaceIndentation: None`，但 **19 个 `src/` 头文件的 namespace 体
-  缩进了 4 空格**：`arena.h`、`benchmark.h`、`fxaa.h`、`image_write.h`、`log.h`、
+  缩进了 4 空格**：`arena.h`、`benchmark.h`、`post_processing.h`、`image_write.h`、`log.h`、
   `profiler.h`、`tga.h`、`transform.h`、`transform2d.h`、`blit2d.h`、
   `rasterizer_fast.h`、`shape2d.h`、`gltf_loader.h`、`image_loader.h`、`mesh.h`、
   `obj_loader.h`、`texture.h`、`pixel_regression.h`、`test_framework.h`
@@ -152,7 +152,7 @@ endif()
 - `.qoder/rules/README.md`「规则维护」：「规则与现实冲突时，先修规则，再执行」
 - `cpp_project_rules.md` 本身已允许「工具类/函数文件使用 snake_case」。本项目是
   **header-only 库**，每个头文件既含类型也含大量自由函数（`blend.h` 的 `blendPixels`、
-  `clip.h` 的 `clipTriangleFullFrustum`、`shape2d.h` 的 `sr2d::fillRect`），
+  `clip.h` 的 `clipTriangleFullFrustum`、`shape2d.h` 的 `draw2d::fillRect`），
   本质上更接近「工具函数文件」而非「类文件」
 - 重命名 52 个头文件会破坏所有 `#include` 路径与下游用户代码，收益为零
 

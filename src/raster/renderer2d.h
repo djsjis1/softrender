@@ -201,7 +201,7 @@ class Renderer2D
     // ---------------- 裁剪区（设备像素）----------------
     void setScissor(int x, int y, int w, int h)
     {
-        scissor_ = sr2d::ClipRect(x, y, x + w, y + h);
+        scissor_ = draw2d::ClipRect(x, y, x + w, y + h);
         hasScissor_ = true;
     }
     void setScissor(const Recti& r) { setScissor(r.x, r.y, r.w, r.h); }
@@ -214,7 +214,7 @@ class Renderer2D
             return;
         Vec2f p = mapPoint(x, y);
         int s = std::max(1, (int)std::round(size * avgScale()));
-        sr2d::drawPoint(*fb_, (int)std::round(p.x), (int)std::round(p.y), color, s, blend, clip());
+        draw2d::drawPoint(*fb_, (int)std::round(p.x), (int)std::round(p.y), color, s, blend, clip());
     }
 
     void line(float x0, float y0, float x1, float y1, float thickness = 1.0f)
@@ -222,7 +222,7 @@ class Renderer2D
         if (!fb_)
             return;
         Vec2f a = mapPoint(x0, y0), b = mapPoint(x1, y1);
-        sr2d::drawThickLine(*fb_, a.x, a.y, b.x, b.y, thickness * avgScale(), color, true, blend, clip());
+        draw2d::drawThickLine(*fb_, a.x, a.y, b.x, b.y, thickness * avgScale(), color, true, blend, clip());
     }
 
     void fillRect(float x, float y, float w, float h)
@@ -256,7 +256,7 @@ class Renderer2D
         int Y = (int)std::floor(std::min(p0.y, p1.y));
         int W = (int)std::ceil(std::max(p0.x, p1.x)) - X;
         int H = (int)std::ceil(std::max(p0.y, p1.y)) - Y;
-        sr2d::fillRectGradient(*fb_, X, Y, W, H, c0, c1, horizontal, blend, clip());
+        draw2d::fillRectGradient(*fb_, X, Y, W, H, c0, c1, horizontal, blend, clip());
     }
 
     void fillRoundedRect(float x, float y, float w, float h, float r)
@@ -283,7 +283,7 @@ class Renderer2D
         {
             Vec2f p0 = mapPoint(x, y);
             float s = avgScale();
-            sr2d::drawRoundedRect(*fb_, p0.x, p0.y, w * s, h * s, r * s, color,
+            draw2d::drawRoundedRect(*fb_, p0.x, p0.y, w * s, h * s, r * s, color,
                               std::max(1, (int)std::round(thickness * s)), blend, clip());
         }
         else
@@ -298,7 +298,7 @@ class Renderer2D
             return;
         Vec2f c = mapPoint(cx, cy);
         Mat3 d = deviceTransform();
-        sr2d::fillEllipse(*fb_, c.x, c.y, r * d.scaleX(), r * d.scaleY(), color, blend, clip());
+        draw2d::fillEllipse(*fb_, c.x, c.y, r * d.scaleX(), r * d.scaleY(), color, blend, clip());
     }
 
     void circle(float cx, float cy, float r, float thickness = 1.0f)
@@ -307,7 +307,7 @@ class Renderer2D
             return;
         Vec2f c = mapPoint(cx, cy);
         float s = avgScale();
-        sr2d::drawCircle(*fb_, (int)std::round(c.x), (int)std::round(c.y), (int)std::round(r * s), color,
+        draw2d::drawCircle(*fb_, (int)std::round(c.x), (int)std::round(c.y), (int)std::round(r * s), color,
                      std::max(1, (int)std::round(thickness * s)), blend, clip());
     }
 
@@ -317,7 +317,7 @@ class Renderer2D
             return;
         Vec2f c = mapPoint(cx, cy);
         Mat3 d = deviceTransform();
-        sr2d::fillEllipse(*fb_, c.x, c.y, rx * d.scaleX(), ry * d.scaleY(), color, blend, clip());
+        draw2d::fillEllipse(*fb_, c.x, c.y, rx * d.scaleX(), ry * d.scaleY(), color, blend, clip());
     }
 
     void fillTriangle(float x0, float y0, float x1, float y1, float x2, float y2)
@@ -325,7 +325,7 @@ class Renderer2D
         if (!fb_)
             return;
         std::vector<Vec2f> tri = {mapPoint(x0, y0), mapPoint(x1, y1), mapPoint(x2, y2)};
-        sr2d::fillPolygon(*fb_, tri, color, blend, clip());
+        draw2d::fillPolygon(*fb_, tri, color, blend, clip());
     }
 
     void fillPolygon(const std::vector<Vec2f>& pts)
@@ -336,7 +336,7 @@ class Renderer2D
         mapped.reserve(pts.size());
         for (const auto& p : pts)
             mapped.push_back(mapPoint(p.x, p.y));
-        sr2d::fillPolygon(*fb_, mapped, color, blend, clip());
+        draw2d::fillPolygon(*fb_, mapped, color, blend, clip());
     }
 
     void polygon(const std::vector<Vec2f>& pts, bool closed = true, float thickness = 1.0f)
@@ -348,7 +348,7 @@ class Renderer2D
         for (const auto& p : pts)
             mapped.push_back(mapPoint(p.x, p.y));
         int t = std::max(1, (int)std::round(thickness * avgScale()));
-        sr2d::drawPolygon(*fb_, mapped, color, closed, t, blend, clip());
+        draw2d::drawPolygon(*fb_, mapped, color, closed, t, blend, clip());
     }
 
     // ---------------- 位图（用户空间定位，随变换缩放/旋转）----------------
@@ -357,7 +357,7 @@ class Renderer2D
         if (!fb_)
             return;
         Mat3 xf = deviceTransform() * Mat3::translate(x, y);
-        sr2d::blitImageTransformed(*fb_, img, xf, color, bilinear, blend, clip());
+        draw2d::blitImageTransformed(*fb_, img, xf, color, bilinear, blend, clip());
     }
 
     void image(const tga::Image& img, float x, float y, float dw, float dh)
@@ -366,7 +366,7 @@ class Renderer2D
             return;
         Mat3 xf = deviceTransform() * Mat3::translate(x, y) *
                   Mat3::scale(dw / img.width, dh / img.height);
-        sr2d::blitImageTransformed(*fb_, img, xf, color, bilinear, blend, clip());
+        draw2d::blitImageTransformed(*fb_, img, xf, color, bilinear, blend, clip());
     }
 
     void texture(const Texture& tex, float x, float y, float w, float h)
@@ -378,11 +378,11 @@ class Renderer2D
         int Y = (int)std::floor(std::min(p0.y, p1.y));
         int W = (int)std::ceil(std::max(p0.x, p1.x)) - X;
         int H = (int)std::ceil(std::max(p0.y, p1.y)) - Y;
-        sr2d::blitTexture(*fb_, tex, X, Y, W, H, color, blend, clip());
+        draw2d::blitTexture(*fb_, tex, X, Y, W, H, color, blend, clip());
     }
 
     // 字符模板精灵：用户空间左下角 (x,y)，每个字符像素放大 scale（用户单位）
-    void sprite(const std::vector<std::string>& spr, const std::vector<sr2d::SpritePalette>& palette,
+    void sprite(const std::vector<std::string>& spr, const std::vector<draw2d::SpritePalette>& palette,
                 float x, float y, float scale = 1.0f, char transparent = '.')
     {
         if (!fb_ || spr.empty())
@@ -405,7 +405,7 @@ class Renderer2D
                         break;
                     }
                 Color saved = color;
-                color = sr2d::tintPixel(saved, col); // 精灵色 * 当前 tint
+                color = draw2d::tintPixel(saved, col); // 精灵色 * 当前 tint
                 // 顶部行画在最高处（y 翻转）
                 fillUserRectMat(d, x + c * scale, y + (rows - 1 - r) * scale, scale, scale);
                 color = saved;
@@ -457,7 +457,7 @@ class Renderer2D
         Color color;
         BlendMode blend;
         Mat3 cur;
-        sr2d::ClipRect scissor;
+        draw2d::ClipRect scissor;
         bool hasScissor;
     };
 
@@ -465,10 +465,10 @@ class Renderer2D
     Mat3 base_ = Mat3::identity();   // 相机基变换
     Mat3 cur_ = Mat3::identity();    // 当前局部变换
     std::vector<State> stack_;
-    sr2d::ClipRect scissor_;
+    draw2d::ClipRect scissor_;
     bool hasScissor_ = false;
 
-    const sr2d::ClipRect* clip() const { return hasScissor_ ? &scissor_ : nullptr; }
+    const draw2d::ClipRect* clip() const { return hasScissor_ ? &scissor_ : nullptr; }
     Vec2f mapPoint(float x, float y) const { return deviceTransform().transformPoint({x, y}); }
 
     // 设备变换是否轴对齐（无旋转/错切）——决定用快速整数矩形还是通用多边形
@@ -497,18 +497,18 @@ class Renderer2D
             int Y = (int)std::floor(std::min(p0.y, p1.y));
             int X1 = (int)std::ceil(std::max(p0.x, p1.x));
             int Y1 = (int)std::ceil(std::max(p0.y, p1.y));
-            sr2d::fillRect(*fb_, X, Y, X1 - X, Y1 - Y, color, blend, clip());
+            draw2d::fillRect(*fb_, X, Y, X1 - X, Y1 - Y, color, blend, clip());
         }
         else
         {
             std::vector<Vec2f> quad = {d.transformPoint({x, y}), d.transformPoint({x + w, y}),
                                        d.transformPoint({x + w, y + h}), d.transformPoint({x, y + h})};
-            sr2d::fillPolygon(*fb_, quad, color, blend, clip());
+            draw2d::fillPolygon(*fb_, quad, color, blend, clip());
         }
     }
 
     void shape2dRoundRectFill(float dx, float dy, float dw, float dh, float dr)
     {
-        sr2d::fillRoundedRect(*fb_, dx, dy, dw, dh, dr, color, blend, clip());
+        draw2d::fillRoundedRect(*fb_, dx, dy, dw, dh, dr, color, blend, clip());
     }
 };
