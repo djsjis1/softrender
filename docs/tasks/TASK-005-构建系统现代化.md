@@ -161,7 +161,7 @@ endif()
 > 本项目例外（header-only 库）：`src/` 下所有头文件统一 snake_case，与其包含的
 > 主类型名保持词根对应（`framebuffer.h` ↔ `Framebuffer`）。理由：header-only 库的
 > 每个头文件同时导出类型与自由函数，PascalCase 文件名会误导使用者以为文件只含单个类；
-> 且 `#include "core/framebuffer.h"` 的路径风格与 `stb_image.h`、
+> 且 `#include <softrenderer/core/framebuffer.h>` 的路径风格与 `stb_image.h`、
 > `tiny_obj_loader.h` 等第三方依赖一致。
 
 ## 进度清单

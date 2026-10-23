@@ -8,7 +8,7 @@
 ### 现象：`cmake -S . -B build` 报 `CMAKE_CXX_STANDARD 23` 相关错误
 
 **原因**：CMake 版本低于 3.20，或编译器不完整支持 C++23。
-`src/math/vec.h` 使用了 `requires` 约束子句与 `std::same_as`，需要 C++20 以上语法。
+`include/softrenderer/math/vec.h` 使用了 `requires` 约束子句与 `std::same_as`，需要 C++20 以上语法。
 
 **解决**：CMake 升到 3.20+；编译器用 MSVC 2022 17.10+ / GCC 13+ / Clang 17+。
 
@@ -162,5 +162,5 @@ UndefinedBehaviorSanitizer**。此外 MSVC ASAN 与 `/RTC`（运行时检查）�
 若 `*_IMPLEMENTATION` 宏定义位置不当会产生重复符号。
 
 **解决**：本项目已把全部实现收敛到单一静态库 `third_party_impl`
-（`tiny_gltf_impl.cpp` + `tiny_obj_loader_impl.cpp` + `gltf_loader_impl.cpp`）。
+（`stb_impl.cpp` + `tiny_obj_loader_impl.cpp` + `tinygltf_impl.cpp`）。
 新增第三方 header-only 库时沿用此模式，不要在多个 .cpp 中定义 `*_IMPLEMENTATION`。

@@ -4,15 +4,15 @@
 
 ## 一、集成方式
 
-源码在 `third/stb/stb_image.h`（v2.30，从 GitHub 下载）；它的**实现不在同目录**，而是在 `third/tinygltf/tiny_gltf_impl.cpp`（见下方警告）。
+源码在 `third/stb/stb_image.h`（v2.30，从 GitHub 下载）；它的**实现不在同目录**，而是在 `src/io/stb_impl.cpp`（见下方警告）。
 
 CMake 中编入统一的实现库：
 
 ```cmake
 add_library(third_party_impl STATIC
-    third/tinygltf/tiny_gltf_impl.cpp      # ← stb_image + stb_image_write 的实现在这里
-    third/tiny_obj_loader_impl.cpp
-    src/scene/gltf_loader_impl.cpp
+    src/io/stb_impl.cpp      # ← stb_image + stb_image_write 的实现在这里
+    src/io/tinyobj_impl.cpp
+    src/io/tinygltf_impl.cpp
 )
 target_include_directories(third_party_impl PUBLIC
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/third/stb>
@@ -27,9 +27,9 @@ target_include_directories(third_party_impl PUBLIC
 >
 > | 实现单元 | `#define` | 提供的符号 |
 > |---|---|---|
-> | `third/tinygltf/tiny_gltf_impl.cpp` | `STB_IMAGE_IMPLEMENTATION`、`STB_IMAGE_WRITE_IMPLEMENTATION` | **stb_image + stb_image_write**（不含 tinygltf） |
-> | `src/scene/gltf_loader_impl.cpp` | `TINYGLTF_IMPLEMENTATION` | **tinygltf** |
-> | `third/tiny_obj_loader_impl.cpp` | `TINYOBJLOADER_IMPLEMENTATION` | **tinyobjloader** |
+> | `src/io/stb_impl.cpp` | `STB_IMAGE_IMPLEMENTATION`、`STB_IMAGE_WRITE_IMPLEMENTATION` | **stb_image + stb_image_write**（不含 tinygltf） |
+> | `src/io/tinygltf_impl.cpp` | `TINYGLTF_IMPLEMENTATION` | **tinygltf** |
+> | `src/io/tinyobj_impl.cpp` | `TINYOBJLOADER_IMPLEMENTATION` | **tinyobjloader** |
 >
 > 教训：判定第三方实现归属时必须读 `.cpp` 源文件，不能依赖文件名、
 > 目录名或既有注释推断。详见 `third/README.md`。
@@ -37,7 +37,7 @@ target_include_directories(third_party_impl PUBLIC
 ## 二、统一接口
 
 ```cpp
-#include "scene/image_loader.h"
+#include <softrenderer/scene/image_loader.h>
 
 tga::Image img;
 if (imageloader::loadImage("texture.png", img)) {
@@ -76,8 +76,8 @@ PNG, JPEG, BMP, TGA, PSD, GIF, HDR, PIC, PNM (PPM/PGM) —— stb_image 全覆�
 | 文件 | 作用 |
 |---|---|
 | `third/stb/stb_image.h` | stb_image 头文件 |
-| `third/tinygltf/tiny_gltf_impl.cpp` | 实现（`#define STB_IMAGE_IMPLEMENTATION` 在此处） |
-| `src/scene/image_loader.h` | 统一加载接口（薄包装） |
+| `src/io/stb_impl.cpp` | 实现（`#define STB_IMAGE_IMPLEMENTATION` 在此处） |
+| `include/softrenderer/io/image_loader.h` | 统一加载接口（薄包装） |
 
 ---
 

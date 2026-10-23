@@ -14,7 +14,7 @@
 ## 二、使用方式
 
 ```cpp
-#include "core/log.h"
+#include <softrenderer/core/log.h>
 
 int main() {
     sr_log_init();  // 初始化（spdlog 模式下配置控制台+文件）
@@ -64,7 +64,7 @@ Trace < Debug < Info < Warn < Error < Critical < Off
 
 | 文件 | 作用 |
 |---|---|
-| `src/core/log.h` | 条件编译日志接口 |
+| `include/softrenderer/runtime/log.h` | 条件编译日志接口 |
 | `third/log/Logger.h` | spdlog 封装（mylog 命名空间） |
 | `third/log/Logger.cpp` | 封装实现 |
 | `third/log/spdlog-1.17.0/` | spdlog 源码 |

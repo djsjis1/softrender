@@ -4,12 +4,12 @@
 
 ## 一、集成
 
-源码 `third/tiny_obj_loader.h`，实现 `third/tiny_obj_loader_impl.cpp`。
+源码 `third/tiny_obj_loader.h`，实现 `src/io/tinyobj_impl.cpp`。
 
 ## 二、接口
 
 ```cpp
-#include "scene/obj_loader.h"
+#include <softrenderer/scene/obj_loader.h>
 Mesh mesh;
 if (objloader::load("model.obj", mesh)) { /* 使用 mesh */ }
 ```

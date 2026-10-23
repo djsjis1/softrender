@@ -5,6 +5,123 @@
 > 按 `documentation_rules.md` 要求，每次有意义的变更都必须在此登记。
 > 重大接口变更需同时在变更内容中标注版本号。
 
+## 2026-10-23
+
+### 2.0.0 分层解耦重构（TASK-014 阶段 2–5）
+
+版本从 1.0.0 升到 **2.0.0**：头文件路径与命名空间按分层重排，**不保留旧路径转发或全局别名**，
+属破坏性变更。保留 C++23、全部渲染功能、示例目标名、`practice` 练习流程与数学/绘制头文件式用法。
+
+**目录与命名**
+
+- 公共头唯一入口 `include/softrenderer/`：`math/ core/ resource/ render/{raster,draw2d,pipeline,shader,postprocess}/ scene/ io/ runtime/`。
+- 私有实现集中到 `src/io/`（加载器 + 第三方实现单元）；`src/` 下不再有公共头。
+- 功能命名空间收敛：`sr::draw2d`、`sr::postprocess`、`sr::colors`、`sr::transform`、`sr::meshgen`、`sr::texgen`、`sr::animation`、`sr::io`、`sr::keyframe`。
+
+**核心数据与绘制解耦**
+
+| 变更 | 说明 |
+|---|---|
+| `core/image.h` | 从 TGA 头提取与文件格式无关的 `sr::Image`；Texture / blit / 生成器只依赖它，Texture 不再有 `loadFromFile` |
+| `render/postprocess/post_processing.h` | ACES / gamma / LDR resolve / brightPass / gaussianBlur / addBlend 从 `FloatFramebuffer` 迁出为自由函数；缓冲只保留存储与 `row()` 访问 |
+| `render/pipeline/varyings.h`、`shader.h`、`surface_shader.h` | 插值契约、管线回调、内置 uniforms 三分；内置着色器继承 `SurfaceShader`，clip 只依赖 Varyings |
+| `resource/vertex.h` | `Vertex` 从 mesh.h 独立；`render/shader/deferred_lighting.h` 承接 `lightingPass` |
+| `math/barycentric.h` | 重心坐标成为纯数学，基础光栅化不再包含整个 2D 模块；`wireTriangle` 归 `sr::draw2d` |
+| `scene/camera2d.h` + `Renderer2D::setViewTransform(Mat3)` | render 不再反向依赖 scene |
+| Renderer 去掉 `SR_PROFILE_SCOPE` | 绘制头不再引入时钟/线程/锁；计时由调用方用 `sr::ProfileScope` 包围 |
+| `resource/mesh_generator.h`、`texture_generator.h` | 程序化生成独立成头 |
+
+**场景、加载与宿主能力**
+
+- 自有场景数据：`sr::SceneAsset`（网格/材质/纹理/节点/蒙皮/动画片段）、`Material`、`SceneNode`、`Skin`、`AnimationClip`；材质用纹理**索引**引用资源，整体可安全移动/复制。
+- 动画在加载阶段解码（时间轴、关键帧值、三次插值切线，含长度/类型/索引/有限值/单调性/零四元数校验），运行时 `sr::animation::sampleChannel` / `sampleAnimation` 只做纯数学，**不访问 tinygltf**；Linear/Step/CubicSpline、四元数归一化与 bind pose 语义不变。
+- I/O 私有化：`sr::io::loadGltfScene` / `loadGltfMesh` / `loadObjMesh` / `loadImage` / `readTga` / `writeTga` / `writeImage`；实现移入 `src/io/*.cpp`（`gltf_loader.cpp`、`obj_loader.cpp`、`image_loader.cpp`、`image_write.cpp`、`tga.cpp`），第三方头（stb / tinyobj / tinygltf / nlohmann）只在实现单元可见。`gltf_accessor.h`、`gltf_mesh.h`、`convertModel` 为私有实现，内部单测显式获得 `src/io/` 私有 include。
+- `runtime/resource_cache.h`：`ResourceCache::load<T>(key, factory)`，工厂返回 `shared_ptr<T>`，失败不入缓存，不再要求 `T::loadFromFile`。
+- `runtime/thread_pool.h`：ThreadPool 与 CommandBuffer 分文件；`scene/keyframe_animation.h` 承接原 skeleton 的简化欧拉角动画。
+
+**CMake 与对外集成**
+
+- 组件目标：`SoftRenderer::core`（math/core/resource）、`::render`、`::scene`、`::io`（STATIC）、`::runtime`、可选 `::entt`；`SoftRenderer::softrenderer` 为已启用组件的聚合目标。
+- 新选项 `SR_BUILD_IO`、`SR_BUILD_RUNTIME`、`SR_ENABLE_ENTT`（默认 ON）；三者关闭时只配置核心库，**不查找 Threads、不编译加载器**。
+- 组件定义集中到 `cmake/targets.cmake`；`find_package(SoftRenderer COMPONENTS core)` 只导入 core 闭包，不查找 Threads。
+- 安装只发布 `include/softrenderer/` 公共头 + 组件目标 + 可选 EnTT 头；**不再安装 stb / tinyobj / tinygltf / nlohmann 头**，也不安装 tests/benchmarks/私有实现头。
+
+**验收实测（Windows Release）**
+
+- 全量构建 0 错误 0 警告；可执行目标 25 个（与基线一致）。
+- `unit_tests` **179/179** 通过（新增 ResourceCache 失败不缓存、动画已解码片段采样等用例）。
+- `render_regression` 3/3 通过，基准图未更新。
+- 20 个离屏程序（14 stage + 6 demo）退出码全为 0；窗口示例只构建。
+- 架构门禁：每个公共头单独编译（`public_headers_check`）、命名空间冲突哨兵（`namespace_sentinel`）、模块 include 白名单（`architecture_boundaries`）。
+- 下游消费：`consumer_subdirectory` / `consumer_installed` 均通过（安装到临时前缀后整体移动再 `find_package`），并新增只请求 core 的 `consumer_core` 场景。
+- 组件隔离：`-DSR_BUILD_IO=OFF -DSR_BUILD_RUNTIME=OFF -DSR_ENABLE_ENTT=OFF` 配置与构建通过。
+
+**本轮完成的 2.0.0 收尾（2026-10-23 晚）**
+
+- **全局类名迁移完成（TASK-007）**：27 个仍含全局声明的公共头（`framebuffer.h`、`depthbuffer.h`、
+  `blend.h`、`math/{vec,mat3,mat4,quat,rect}.h`、`renderer.h`、`renderer2d.h`、`clip.h`、`render_queue.h`、
+  `shader.h`、`surface_shader.h`、`varyings.h`、`triangle.h`、`shaders.h`、`advanced_shaders.h`、
+  `pbr_shader.h`、`cubemap.h`、`mesh.h`、`texture.h`、`vertex.h`、`camera.h`、`camera2d.h`、
+  `particle_system.h`、`skeleton.h`）全部包进 `namespace sr`；`color.h` 的 `Color`、`log.h` 的
+  `sr_log_init/sr_log_shutdown` 一并收敛（改为 `sr::logInit` / `sr::logShutdown`）。
+  `namespace raster_fast` → `sr::raster`，与「功能函数进 `sr::<模块>`」的约定一致。
+  **未保留任何别名桥**；应用侧统一 `using namespace sr;`。
+- **命名空间门禁升级**：`tests/architecture/namespace_sentinel.cpp` 现在先在全局作用域声明
+  60 个同名类型（`Framebuffer`/`Mesh`/`Texture`/`Camera`/`Renderer`/`Shader`/`Varyings`/
+  `Material`/`SceneNode`/`Position`/`GBuffer`/`Mat4`/`Log` …），再包含**全部**公共头，
+  并用 `static_assert` 确认这些类型位于 `sr`。任何回退都会在编译期失败。
+- **`test_core.cpp` 按模块拆分完成（TASK-006）**：1468 行的单文件拆成 10 个模块级文件
+  （`math_test` / `core_buffer_test` / `resource_test` / `render_pipeline_test` / `draw2d_test` /
+  `scene_test` / `ecs_test` / `runtime_test` / `io_test` / `pixel_regression_support_test`），
+  与 `tests/unit/` 已有的 `animation/arena/command_buffer/coverage/gltf/renderer` 单测并列。
+  ECS 的编译期哨兵类型移入 `namespace ecsCanary`，使测试文件可以用 using-directive。
+- **外部消费工程补全**：新增 `tests/integration/consumer_render`（只请求 `SoftRenderer::render`，
+  验证核心渲染无需 io/runtime/线程/窗口）；`run_consumer.cmake` 现同时验证聚合、core-only、
+  render-only 三类工程在 `add_subdirectory` 与「安装后整体移动前缀再 `find_package`」两种模式下可用，
+  并断言安装产物只含公共头与组件（泄露 `tests/`、`benchmarks/`、`stb_/tiny_/nlohmann` 头即失败）。
+- **第三方实现单元归位**：三个 `*_IMPLEMENTATION` 宏集中到 `src/io/stb_impl.cpp`、
+  `src/io/tinygltf_impl.cpp`、`src/io/tinyobj_impl.cpp`（文件名即实现的库）；
+  `third/` 不再放项目编写的包装单元，旧 `third/tinygltf/tiny_gltf_impl.cpp`
+  （实际只含 stb 实现）与 `src/io/gltf_loader_impl.cpp` 已删除。
+- **新增加载→采样端到端用例**：`tests/unit/gltf_animation_test.cpp` 写一个内嵌 buffer 的
+  真实 glTF（三角形 + translation 动画），加载后把 `SceneAsset` 移出结果对象、删掉文件，
+  再采样验证线性插值与首末帧钳制——锁定「加载器返回后仍可采样动画」。
+- **新增行为与边界门禁**：`tests/unit/postprocess_test.cpp` 用独立算出的期望值锁定 ACES/gamma/
+  brightPass/gaussianBlur/addBlend/resolveToLdr 的数值公式（并验证效果函数不修改源缓冲）；
+  `check_boundaries.cmake` 增加公共头 include **循环依赖检查**（已用合成 a↔b 用例验证可命中）。
+- **实测（Windows Release）**：全量构建 0 错误 0 警告；`unit_tests` **179/179**；
+  `render_regression` **3/3**（基准图未更新）；**20 个离屏示例退出码全为 0**；
+  可执行目标 **25 个**（与基线一致）；`ctest -L packaging` **3/3**
+  （`architecture_boundaries` + `consumer_subdirectory` + `consumer_installed`）。
+- **仍未完成**：覆盖率本地实测（本机无 LLVM/gcov 工具链，见 TASK-005/006）与
+  macOS/Linux 远端 CI 结果——两者都必须真实跑过才能报告，本轮不宣称通过。
+
+## 2026-10-23
+
+### 与实测状态对齐：覆盖规则、discard 深度与示例调用点（TASK-014 阶段 1）
+
+本轮先实测再修复。重构前基线（`develop` @ `2adfbf6`）：全量构建**失败**——
+`stage01_framebuffer` 6 处与 `stage05_transform` 1 处 `drawLine`、`stage03_sprite_anim`
+1 处 `fillRect` 未限定命名空间，另有 2 处 C4244 被 `/WX` 视为错误；`unit_tests`
+169 用例中 166 通过 3 失败；`render_regression` 3/3 通过。
+
+核实发现：`include/softrenderer/render/pipeline/renderer.h` 在 git 历史中只有初始化提交与一次 include 补齐，
+**TASK-009（discard 深度提交）与 TASK-013（Renderer 共用覆盖规则）的修复从未进入该文件**，
+与本变更日志和 `ACTIVE.md` 的既有陈述不符。判定以实测为准。
+
+| 修复 | 文件 | 说明 |
+|---|---|---|
+| 覆盖规则统一 | `include/softrenderer/render/pipeline/renderer.h` | `rasterTriangle` 改用 `sr::TriangleCoverage` 的整数 top-left 规则，替换浮点边函数 + `>=0` 判定；重心坐标由整数边函数值换算，属性插值仍为浮点 |
+| 深度提交顺序 | `include/softrenderer/render/pipeline/renderer.h` | 深度改在 `shader.fragment` 返回 `true` 后提交；被 discard 的片元不再占据深度 |
+| 示例调用点 | `examples/stage01_framebuffer.cpp`、`examples/stage05_transform.cpp`、`examples/stage03_sprite_anim.cpp` | 补齐 `draw2d::` 限定；`fillCircle` 的 float 形参显式转换 |
+
+验证：Windows Release 全量构建 0 错误 0 警告；`unit_tests` 169/169；`render_regression` 3/3
+（基准图未更新）；20 个离屏程序退出码全为 0。
+
+文档：新增 [ADR-004](adr/ADR-004-module-boundaries.md)（模块边界与 2.0 兼容性决策）；
+新增父任务 [TASK-014](tasks/TASK-014-分层解耦重构.md) 与子任务 TASK-015~018；
+补齐缺失的 [docs/tasks/README.md](tasks/README.md) 索引。
+
 ## 2026-10-06
 
 ### 子像素覆盖、MSAA 修复与主管线基线（TASK-013）
@@ -154,7 +271,7 @@ tests\test_core.cpp(1181,5): error C2872: “Position”: 不明确的符号
 |---|---|
 | `docs/adr/README.md` | ADR 索引 + 5 个待立 ADR 的已知决策点 |
 | `docs/adr/ADR-001-namespace-convergence.md` | 4 个备选方案对比、选定理由、失效条件 |
-| `src/core/namespace.h` | `namespace sr` 的约定锚点与迁移进度文档 |
+| `include/softrenderer/core/namespace.h` | `namespace sr` 的约定锚点与迁移进度文档 |
 
 #### 回归防护：编译期哨兵
 
@@ -407,15 +524,15 @@ Win32 依赖只存在于三个已守卫的示例 + `platform/win32_window.h` 本
 
 | 变更 | 影响范围 |
 |---|---|
-| **修复** `image_loader.h` 有符号整数溢出 UB：`for (int i = 0; i < w * h; ++i)` → `size_t` | `src/scene/image_loader.h` |
+| **修复** `image_loader.h` 有符号整数溢出 UB：`for (int i = 0; i < w * h; ++i)` → `size_t` | `include/softrenderer/io/image_loader.h` |
 | 新增尺寸校验与具名常量 `kMaxImageDimension = 16384`；变量声明即初始化 | 同上 |
 | 新增 **RAII 释放**（`unique_ptr` + 自定义删除器）——新增的校验分支提前 return 会泄露图像缓冲 | 同上 |
-| **修复** `Framebuffer::getPixel` 在 Release 下越界读 UB：越界返回 `colors::black` | `src/core/framebuffer.h` |
-| **修复** `DepthBuffer::get` 越界读 UB（旧版连 `assert` 都没有）：返回 `kFar` | `src/core/depthbuffer.h` |
-| **修复** `blend.h` alpha 混合截断而非四舍五入（每次混合系统性偏暗 ≤ 1/255）；新增 `toUint8Round` 统一钳制+取整 | `src/core/blend.h` |
+| **修复** `Framebuffer::getPixel` 在 Release 下越界读 UB：越界返回 `colors::black` | `include/softrenderer/core/framebuffer.h` |
+| **修复** `DepthBuffer::get` 越界读 UB（旧版连 `assert` 都没有）：返回 `kFar` | `include/softrenderer/core/depthbuffer.h` |
+| **修复** `blend.h` alpha 混合截断而非四舍五入（每次混合系统性偏暗 ≤ 1/255）；新增 `toUint8Round` 统一钳制+取整 | `include/softrenderer/core/blend.h` |
 | `blend.h` 补 `#include <algorithm>`（原依赖传递包含） | 同上 |
 | 5 个枚举合规：`ClipPlane` 裸 enum → `enum class : uint8_t`；`BlendMode`/`AlphaMode`/`Path`/`Interpolation`/`Filter` 补底层类型 | `clip.h`、`blend.h`、`gltf_types.h`、`texture.h` |
-| `clip.h` 新增 `static_assert` 防止 `kClipPlaneCount` 与枚举项数漂移 | `src/raster/clip.h` |
+| `clip.h` 新增 `static_assert` 防止 `kClipPlaneCount` 与枚举项数漂移 | `include/softrenderer/render/pipeline/clip.h` |
 
 #### 实施中新发现并修复
 
@@ -473,9 +590,9 @@ commit `73122d3`，`--no-ff` 合入 `develop`。
 
 | 变更 | 影响范围 |
 |---|---|
-| **修复** `rasterizer_fast.h` 深度插值的重心权重错位（同序映射 → 错位映射），标量版 + SSE2 版共 6 处 | `src/raster/rasterizer_fast.h` |
-| **修复** `setupEdges` 不做符号归一化导致顺时针三角形被静默丢弃 | `src/raster/rasterizer_fast.h` |
-| 改写文件头注释，标注本模块为**实验性**（未接入 `Renderer` 主链路）及两个原因 | `src/raster/rasterizer_fast.h` |
+| **修复** `rasterizer_fast.h` 深度插值的重心权重错位（同序映射 → 错位映射），标量版 + SSE2 版共 6 处 | `include/softrenderer/render/raster/rasterizer_fast.h` |
+| **修复** `setupEdges` 不做符号归一化导致顺时针三角形被静默丢弃 | `include/softrenderer/render/raster/rasterizer_fast.h` |
+| 改写文件头注释，标注本模块为**实验性**（未接入 `Renderer` 主链路）及两个原因 | `include/softrenderer/render/raster/rasterizer_fast.h` |
 | **新增 3 个回归测试**，单元测试 94 → 97 | `tests/test_core.cpp` |
 | 校正 `docs/engineering/54` 全部五节数据漂移，新增「实验性能力」分区 | 文档 |
 
@@ -530,7 +647,7 @@ commit `73122d3`，`--no-ff` 合入 `develop`。
 
 - `third/entt/` 下存在**两份版本不同的 EnTT**：`src/` 是 3.14.0（构建实际使用），
   `single_include/` 是陈旧的 3.13.2
-- `raster_fast::fillTriangleFast` **从未被 `Renderer` 调用**，仅 `core/benchmark.h`
+- `raster::fillTriangleFast` **从未被 `Renderer` 调用**，仅 `core/benchmark.h`
   与单元测试引用
 - `core/benchmark.h → raster/rasterizer_fast.h` 构成 `core/ → raster/` 的**层次倒置**
 

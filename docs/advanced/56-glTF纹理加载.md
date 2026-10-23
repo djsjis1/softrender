@@ -25,7 +25,7 @@ LoadResult 可移动、不可拷贝；材质引用和结果对象同寿命，调
 
 参数解析不代表 shader 自动应用全部材质特性；透明度、颜色空间及完整 PBR 材质整合仍需逐项验证。
 
-实现见 `src/scene/gltf_loader.h`，回归测试 `GltfTextureSafety` 验证解码像素数值、截断拒绝和移动后材质指针。
+实现见 `include/softrenderer/io/gltf_loader.h`，回归测试 `GltfTextureSafety` 验证解码像素数值、截断拒绝和移动后材质指针。
 
 上一篇：[55 · IBL 环境反射](55-IBL环境反射.md)
 下一篇：[57 · 骨骼动画播放](57-骨骼动画播放.md)

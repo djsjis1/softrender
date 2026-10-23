@@ -3,7 +3,57 @@
 > 本文件描述模块划分、依赖方向、数据流与设计思想。
 > 各模块的具体职责、输入输出与扩展点见 [`modules.md`](modules.md)。
 >
-> 依赖关系由实测 `src/` 全量 `#include` 扫描得出，非推测。
+> 依赖关系以 `tests/architecture/check_boundaries.cmake` 的 include 白名单为门禁，非推测。
+
+## 零、2.0.0 现状（先读这一节）
+
+2.0.0 起公共头唯一入口是 `include/softrenderer/`，`src/` 只保留 `src/io/` 私有实现；
+旧路径（`src/raster`、`src/scene`、`src/shader`、`src/core`）已不存在，文中若出现即为历史描述。
+
+| 组件目标 | 包含的公共头 | 允许依赖 |
+| --- | --- | --- |
+| `SoftRenderer::core` | `math/` `core/` `resource/` | 标准库 |
+| `SoftRenderer::render` | `render/{raster,draw2d,pipeline,shader,postprocess}/` | core |
+| `SoftRenderer::scene` | `scene/` | core |
+| `SoftRenderer::io`（STATIC） | `io/` 声明 + `src/io/` 实现 | scene / core；第三方解析器仅私有 |
+| `SoftRenderer::runtime` | `runtime/` | core + 宿主线程 |
+| `SoftRenderer::entt`（可选） | EnTT 适配 | 无 |
+| `SoftRenderer::softrenderer` | 已启用组件的聚合 | 以上全部 |
+
+边界事实（已实测，由门禁测试固定）：
+
+- `core/` 只包含 `math/` 与同目录头——没有文件系统、日志、线程或第三方依赖。
+- `render/` 不包含 `scene/`、`io/`、`runtime/`、`platform/`——因此绘制不需要加载器、线程或窗口。
+- `scene/` 不包含 `io/`、`runtime/`、`platform/`——相机、节点、动画采样与文件格式无关。
+- 公共头不出现 `tiny_gltf.h` / `tiny_obj_loader.h` / `stb_*` / `json.hpp`；这些只在 `src/io/` 实现单元可见。
+- 关闭 `SR_BUILD_IO` / `SR_BUILD_RUNTIME` / `SR_ENABLE_ENTT` 时只配置核心库（不查找 Threads、不编译加载器）。
+- **命名空间**：全部公共符号位于 `sr`（功能函数进 `sr::draw2d` / `sr::raster` / `sr::postprocess` /
+  `sr::animation` / `sr::io` 等），全局命名空间不再有本库的类型；详见第五节。
+- **测试布局**：单测按模块分组（`tests/unit/*_test.cpp`，一文件一模块），
+  `tests/architecture/` 放三道编译期门禁，`tests/integration/` 放像素回归与三类外部消费工程
+  （聚合 / core-only / render-only，均同时跑 `add_subdirectory` 与安装后 `find_package`）。
+
+数据流（2.0.0）：
+
+```mermaid
+sequenceDiagram
+    participant App as 应用
+    participant IO as sr::io 加载器
+    participant Asset as sr::SceneAsset
+    participant Anim as sr::animation
+    participant Render as Renderer
+    participant Shader as Shader 接口
+    participant FB as Framebuffer
+    App->>IO: loadGltfScene(path)
+    IO-->>App: SceneLoadResult{scene, success, error}
+    App->>Asset: 持有资源生命周期
+    App->>Anim: AnimationClip + SceneNode + 时间
+    Anim-->>App: NodePose / Mat4
+    App->>Render: drawMesh(mesh, shader)
+    Render->>Shader: vertex / geometry / fragment
+    Render->>FB: 提交像素
+```
+
 
 ## 一、设计定位
 
@@ -29,10 +79,12 @@ graph TD
         PLAT["platform/win32_window.h"]
     end
 
-    subgraph L3["src/ 渲染器与资源层（平台无关，以头文件为主）"]
-        RASTER["raster/ 光栅化与渲染器"]
-        SHADER["shader/ 可编程着色管线"]
-        SCENE["scene/ 场景资源与加载"]
+    subgraph L3["include/softrenderer 公共头 + src/ 待迁移层（平台无关）"]
+        RASTER["render/raster 与 src/raster 光栅化与渲染器"]
+        SHADER["render/shader 与 src/shader 可编程着色管线"]
+        SCENE["scene 与 src/scene 场景资源与加载"]
+        IO["io/ 图像与模型文件读写"]
+        RUNTIME["runtime/ 日志、线程与缓存"]
         CORE["core/ 缓冲与基础设施"]
         MATH["math/ 数学库"]
     end
@@ -61,14 +113,17 @@ graph TD
 
     SCENE -.gltf_loader.h / animation_player.h.-> TGLTF
     SCENE -.obj_loader.h.-> TOBJ
-    CORE -.image_write.h / tga.h.-> STB
+    IO -.image_write.h / tga.h.-> STB
     EX -.components.h + ECS 用法.-> ENTT
-    CORE -.core/log.h，仅 SR_USE_SPDLOG.-> SPDLOG
+    RUNTIME -.runtime/log.h，仅 SR_USE_SPDLOG.-> SPDLOG
 ```
 
 **分层规则（红线，见 `.qoder/rules/engineering_rules.md`）**：
 
-- 箭头只能自上而下。`src/` 中**任何文件都不得** `#include <windows.h>` 或引用 Win32 API
+- 箭头只能自上而下。公共头（`include/softrenderer/`）与 `src/` 中**任何文件都不得**
+  `#include <windows.h>` 或引用 Win32 API
+- 正式 include 入口为 `include/softrenderer/`，用法 `<softrenderer/core/framebuffer.h>`；
+  阶段 2~5 迁移期间 `src/` 仍提供尚未迁移的渲染与场景头（详见 [TASK-015](tasks/TASK-015-基础层与公共入口.md)）
 - `platform/` 不属于渲染器本体，只对需要开窗的示例可见
 - 虚线为**条件/局部**依赖：第三方头文件仅在少数几个头文件中出现，且多数受宏保护
 
@@ -76,7 +131,7 @@ graph TD
 
 实测的完整依赖边（`A -> B` 表示 A include B）：
 
-### math/（最底层，无外部依赖）
+### include/softrenderer/math/（最底层，无外部依赖）
 
 ```
 vec.h          → （叶子，仅标准库）
@@ -93,34 +148,43 @@ transform2d.h  → mat3.h, rect.h
 > `transform2d.h` 独立于 `transform.h`，是为了让 3D 投影（`transform.h` 只依赖 `mat4.h`）
 > 不被 2D 所需的 `mat3.h` / `rect.h` 污染依赖面。
 
-### core/（依赖 math/，可选依赖第三方）
+### include/softrenderer 的 core/ + io/ + runtime/（依赖 math/，io 可选依赖第三方）
 
 ```
+# core/
 color.h              → （叶子）
 depthbuffer.h        → （叶子）
 framebuffer.h        → color.h
 blend.h              → color.h
-tga.h                → framebuffer.h
-image_write.h        → framebuffer.h            （实现依赖 stb_image_write）
 msaa_framebuffer.h   → color.h, depthbuffer.h
 float_framebuffer.h  → color.h, depthbuffer.h, framebuffer.h, math/vec.h
 gbuffer.h            → math/vec.h, float_framebuffer.h
-post_processing.h    → color.h, framebuffer.h, float_framebuffer.h, math/mat4.h, math/vec.h
+arena.h              → （叶子）
+
+# io/
+tga.h                → framebuffer.h
+image_write.h        → framebuffer.h            （实现依赖 stb_image_write）
+
+# runtime/
 log.h                → Logger.h（仅当定义 SR_USE_SPDLOG）
 profiler.h           → （叶子）
-arena.h              → （叶子）
-benchmark.h          → raster/rasterizer_fast.h
 resource_manager.h   → （叶子，模板 + concepts）
 command_buffer.h     → （叶子，线程池）
+
+# render/postprocess/
+post_processing.h    → color.h, framebuffer.h, float_framebuffer.h, math/mat4.h, math/vec.h
+
+# 仍留在 src/
+core/benchmark.h     → （仅标准库）
 ```
 
-> ⚠️ **`core/` 并非严格的最底层**：`gbuffer.h`、`post_processing.h`、
-> `float_framebuffer.h` 都依赖 `math/`。真实最底层是 `math/` + `core/color.h` +
-> `core/depthbuffer.h`。
+> ⚠️ **`core/` 并非严格的最底层**：`gbuffer.h`、`float_framebuffer.h` 都依赖 `math/`，
+> `render/postprocess/post_processing.h` 还依赖 `float_framebuffer.h`。真实最底层是 `math/` +
+> `core/color.h` + `core/depthbuffer.h`。
 >
-> ⚠️ **`core/benchmark.h` 反向依赖 `raster/rasterizer_fast.h`**，是 `core/ → raster/`
-> 的层次倒置。这是 `rasterizer_fast.h` 未被主渲染链路使用（见「六、已知架构权衡」）
-> 带来的连带问题。
+> **已修正的过时描述**：旧文档称 `core/benchmark.h` 反向依赖 `raster/rasterizer_fast.h`，
+> 实测该头只依赖标准库（`<chrono>` / `<cstdio>` / `<functional>` / `<string>` / `<vector>`），
+> 不存在 `core/ → raster/` 的层次倒置。
 
 ### scene/（依赖 core/ + math/ + 第三方加载器）
 
@@ -186,7 +250,7 @@ renderer2d.h      → core/blend.h, core/framebuffer.h, core/tga.h, math/mat3.h,
 
 ## 四、核心数据流
 
-### 3D 渲染一帧（`Renderer::drawMesh`，`src/raster/renderer.h`）
+### 3D 渲染一帧（`Renderer::drawMesh`，`include/softrenderer/render/pipeline/renderer.h`）
 
 ```mermaid
 sequenceDiagram
@@ -231,7 +295,7 @@ sequenceDiagram
 这是一个**必须保持的契约**：任何修改包围盒计算或行指针用法的改动，都要重新确认
 clamp 仍然生效。
 
-### 2D 渲染（`Renderer2D`，`src/raster/renderer2d.h`）
+### 2D 渲染（`Renderer2D`，`include/softrenderer/render/draw2d/renderer2d.h`）
 
 ```mermaid
 graph LR
@@ -271,108 +335,75 @@ graph LR
 
 加载错误不返回半成品；动画失败不修改输出；普通任务错误由 waitAll 报告，结果任务由 future::get 报告。接口生命周期与兼容性见 [ADR-002](adr/ADR-002-data-and-task-errors.md)。
 
-### 实现单元分工（⚠ 与文件名直觉相反）
+### 实现单元分工（文件名即实现，不再有歧义）
 
-`src/` 几乎全是头文件，仅有 **1 个** `.cpp`：`src/scene/gltf_loader_impl.cpp`（9 行）。
-它的作用是 `#define TINYGLTF_IMPLEMENTATION`，把 tinygltf 的符号收敛到单个编译单元。
-
-连同 `third/` 下的两个，全部第三方实现共三个单元，都编入 `third_party_impl` 静态库：
+第三方库都是"头文件即实现"，每种 `*_IMPLEMENTATION` 宏在全程序只能定义一次。
+2.0.0 把它们收敛为 **三个** 实现单元，均位于 `src/io/` 并编入 `third_party_impl` 静态库：
 
 | 实现单元 | `#define` | 提供的符号 |
 | --- | --- | --- |
-| `third/tinygltf/tiny_gltf_impl.cpp` | `STB_IMAGE_IMPLEMENTATION`、`STB_IMAGE_WRITE_IMPLEMENTATION` | **stb_image + stb_image_write** |
-| `src/scene/gltf_loader_impl.cpp` | `TINYGLTF_IMPLEMENTATION` | **tinygltf** |
-| `third/tiny_obj_loader_impl.cpp` | `TINYOBJLOADER_IMPLEMENTATION` | **tinyobjloader** |
+| `src/io/stb_impl.cpp` | `STB_IMAGE_IMPLEMENTATION`、`STB_IMAGE_WRITE_IMPLEMENTATION` | **stb_image + stb_image_write** |
+| `src/io/tinygltf_impl.cpp` | `TINYGLTF_IMPLEMENTATION` | **tinygltf** |
+| `src/io/tinyobj_impl.cpp` | `TINYOBJLOADER_IMPLEMENTATION` | **tinyobjloader** |
 
-> ⚠️ **文件名陷阱**：`tinygltf/tiny_gltf_impl.cpp` 位于 `tinygltf/` 目录、
-> 名字也叫 `tiny_gltf_impl`，但它**完全不含 tinygltf 的实现**，只提供 stb。
->
-> 根 `CMakeLists.txt` 原本的注释声称「tinygltf 内部会 define
-> STB_IMAGE_IMPLEMENTATION，所以一个 .cpp 同时提供 stb + tinygltf 的所有符号」，
-> 与实际不符，已修正。**结论：涉及第三方实现归属时，必须读 `.cpp` 源文件，
-> 不能依赖文件名或既有注释推断。**
+要点：
 
-## 五、命名空间现状
+- **文件名与内容一致**：历史上有过 `third/tinygltf/tiny_gltf_impl.cpp` 实际只包含 stb 实现、
+  `src/scene/gltf_loader_impl.cpp` 才包含 tinygltf 实现的错位，已在本轮整理掉。
+- **实现单元全部在 `src/io/`**：`third/` 只放 vendored 源码与许可证，不再放项目编写的包装单元。
+- **宏只定义一次**：任何新增实现单元必须并入 `third_party_impl`，不得在其它 TU 重复定义。
+- **头不安装**：`third/` 与 `src/io/` 全部不进入安装产物（`consumer_installed` 用例断言）。
 
-`src/` 的命名空间使用**不统一**，这是当前最主要的架构债（收敛中，见 ADR-001）：
+## 五、命名空间（2.0.0 已完全收敛）
 
-| 命名空间 | 所在文件 | 内容 |
-| --- | --- | --- |
-| （全局） | `framebuffer.h`、`depthbuffer.h`、`color.h`、`blend.h`、`renderer.h`、`renderer2d.h`、`triangle.h`、`clip.h`、`camera.h`、`mesh.h`、`texture.h`、`skeleton.h`、`shader.h` 等 | `Framebuffer`、`Color`、`Renderer`、`Camera`、`Texture`、`Mesh` 等 **45 个**核心类型 |
-| `sr` | `arena.h`、`benchmark.h`、`log.h`、`profiler.h`、`resource_manager.h`、**`components.h`**、**`gbuffer.h`**、**`float_framebuffer.h`**、**`msaa_framebuffer.h`**、**`command_buffer.h`** | `ArenaAllocator`、`Profiler`、`ResourceManager`、`Log`、`formatLog`；**8 个 ECS 组件**；**`GBuffer`/`FloatFramebuffer`/`MSAAFramebuffer`/`kMSAA4Offsets`/`CommandBuffer`/`ThreadPool`** |
-| `draw2d` | `shape2d.h`、`blit2d.h` | 全部 2D 图元与合成函数 |
-| `colors` | `color.h` | 颜色常量 |
-| `transform` | `transform.h`、`transform2d.h` | 投影与视口变换 |
-| `tga` / `imagewriter` / `imageloader` | `tga.h` / `image_write.h` / `image_loader.h` | 图像 I/O |
-| `meshgen` / `texgen` / `objloader` / `gltfloader` | `mesh.h` / `texture.h` / `obj_loader.h` / `gltf_loader.h` | 资源生成与加载 |
-| `raster_fast` | `rasterizer_fast.h` | 实验性 SIMD 光栅化器 |
-| `postprocess` | `post_processing.h` | 后处理合集：FXAA、DOF、径向模糊、暗角、色差、SSAO |
-| `regression` | `test/pixel_regression.h` | 像素回归测试 |
+全部公共符号位于 `sr`；全局命名空间不再有本库的任何类型、枚举或自由函数。
 
-### 收敛进度（ADR-001）
+| 命名空间 | 内容 |
+| --- | --- |
+| `sr` | 公共类与结构体：`Framebuffer`/`DepthBuffer`/`Color`/`Image`/`GBuffer`/`FloatFramebuffer`/`MSAAFramebuffer`、`Renderer`/`Renderer2D`/`Shader`/`SurfaceShader`/`Varyings`/`Vertex`/`ClipVertex`、`Mesh`/`Texture`/`Cubemap`、`Camera`/`Camera2D`/`Material`/`SceneNode`/`SceneAsset`/`Skin`/`Skeleton`/`Bone`/`Particle`、`Mat3`/`Mat4`/`Quat`/`Rect`/`Vec2f`/`Vec3f`/`Vec4f`；`ArenaAllocator`/`Log`/`Profiler`/`ResourceCache`/`ThreadPool`/`CommandBuffer` |
+| `sr::draw2d` | 2D 图元、位图合成、`Renderer2D` |
+| `sr::raster` | 快速 / 增量 / SIMD 光栅化（`rasterizer_fast.h`） |
+| `sr::postprocess` | FXAA、HDR/Bloom、SSAO 等后处理自由函数 |
+| `sr::animation` | 动画采样（`NodePose` / `sampleChannel` / `sampleAnimation`） |
+| `sr::keyframe` | `skeleton.h` 的简化欧拉角关键帧动画 |
+| `sr::io` | TGA / 图像 / OBJ / glTF 的加载与写出 |
+| `sr::colors` / `sr::transform` / `sr::meshgen` / `sr::texgen` | 颜色常量、投影变换、程序化网格与纹理 |
 
-| 批次 | 范围 | 全局类型数 | 状态 |
-| --- | --- | --- | --- |
-| — | 起点 | 60 | — |
-| 1 | `components.h` 的 8 个 ECS 组件 | 60 → 52 | ✅ 已完成 |
-| 2 | `gbuffer.h`、`float_framebuffer.h`、`msaa_framebuffer.h`、`command_buffer.h`（6 个类型 + `kMSAA4Offsets`）；`ssao.h` 已合并入 `post_processing.h`（统一 `namespace postprocess`） | 52 → **45** | ✅ 已完成 |
-| 3 | `skeleton.h`（6）、`particle_system.h`（3）、`render_queue.h`（2）、`gltf_types.h`（6）、`shader/` 具体着色器（5） | — | 待做（均低引用面，可不留别名） |
-| 4 | `color.h`、`math/`、`framebuffer.h`、`depthbuffer.h`、`mesh.h`、`texture.h`、`shader.h`、`renderer.h`、`raster/` | — | 待做（高引用面，需全仓扰动） |
-| 5 | 14 个全局子命名空间（`tga`/`colors`/`transform`/`draw2d`/`fxaa`/`postprocess` 等） | — | 待做（它们本身也是易撞名的全局符号） |
+正式用法：
 
-两批均**不留全局别名**直接完成，因为实测引用面极小。
+```cpp
+#include <softrenderer/core/framebuffer.h>
 
-#### 已验证的迁移手法
+sr::Framebuffer fb(640, 480);
+sr::draw2d::fillRect(fb, 10, 10, 40, 20);   // 2D 图元
+sr::io::writeTga("out.tga", img);           // 文件读写
+```
 
-1. **把头文件内容包进 `namespace sr`**。内部对尚未迁移的全局类型
-   （`Vec3f` / `Mat4` / `Color` / `DepthBuffer`）的引用**无需改动** ——
-   `namespace sr` 内的名字查找会回落到全局作用域。这是逐文件增量迁移可行的关键。
-2. **跨命名空间引用需显式引入**。例：`post_processing.h` 的 `namespace postprocess`
-   仍在全局，其内部查找只回落到全局、**不会进入 `sr`**，所以需
-   `using sr::FloatFramebuffer;`。用 using-**声明**而非 directive，只引入确实需要的名字。
-3. **`.cpp` 应用代码可加 `using namespace sr;`**（已用于 `demo_stars.cpp`、
-   `stage13_postprocess.cpp`、`stage11_msaa.cpp`）。
+应用侧（`examples/`、`tests/`、`benchmarks/`、`practice/`）统一 `using namespace sr;`
+简化书写；**库头文件内部不使用 using-directive**，因此公共头之间不依赖 include 顺序。
 
-#### ⚠ 测试文件不能用 `using namespace sr;`（实测发现）
+### 门禁：命名空间哨兵
 
-`tests/unit/test_core.cpp` **故意不用** using-directive，原因是实测撞上了两个冲突：
+`tests/architecture/namespace_sentinel.cpp` 先在全局作用域声明 `Framebuffer`、`Mesh`、
+`Texture`、`Camera`、`Camera2D`、`Renderer`、`Shader`、`Varyings`、`Material`、
+`SceneNode`、`Position`、`GBuffer`、`Mat4`、`Log` 等 60 个同名类型，再包含**全部**公共头，
+并用 `static_assert` 确认这些类型确实位于 `sr`。
 
-1. 全局作用域的 `struct Position` 哨兵与 using-directive 引入的 `sr::Position`
-   构成 **二义性（MSVC C2872）**，而不是预期的「全局声明遮蔽 directive 名字」。
-   using-directive 会把 `sr` 的成员当作**最近公共外围命名空间**（此处即全局）
-   的成员参与查找，两者同级。
-2. gtest 的 `TEST(GBuffer, WriteAndRead)` 会创建名为 `GBuffer` 的**命名空间**，
-   与 using-directive 引入的 `sr::GBuffer` 类同名也冲突。
+- 任何把符号放回全局命名空间的改动 → 重定义编译错误；
+- 任何改用 `using sr::X;` 别名桥的改动 → 同样编译失败（using 声明仍注入全局）。
 
-因此测试文件统一写显式 `sr::` 限定。
+### 历史
 
-> **对后续批次的影响**：若想恢复测试文件的 using-directive 便利，应先把
-> 编译期哨兵拆到单独文件（该文件不用 directive）—— 这也正好是 TASK-006
-> 测试目录拆分的一部分。两者宜合并执行。
-
-> **为何不对高冲突名字用别名桥**：`using sr::Position;` 仍然把 `Position`
-> 注入全局命名空间，下游照样撞名。别名桥只是让大改动可以分批提交的工具，
-> **不是对下游的兼容承诺**。完整论证见 `docs/adr/ADR-001-namespace-convergence.md`。
->
-> 该结论已用**编译期哨兵**锁定：`tests/unit/test_core.cpp` 在全局作用域声明了
-> 8 个同名哨兵类型（`struct Position { int canary; };` 等）。若将来有人加回
-> `using sr::Position;`，测试文件会直接报重定义错误。
-
-**已经造成过实际冲突**：`draw2d` 命名空间的引入原因，就是 2D 图元函数名
-（`fillRect` / `fillCircle` / `SpritePalette`）与 `examples/` 中已有的全局同名符号
-冲突。这不是理论风险。
-
-**对下游集成方的影响**：本项目是 header-only 库。前两批完成后，
-`Color`（400 处引用 / 49 文件）、`Mat4`（231 / 33）、`Framebuffer`（160 / 45）、
-`Mesh`（63 / 24）、`Texture`（56 / 20）、`Animation`、`Vertex`、`Camera`、`Shader`、
-`Renderer` 等 **45 个**类型仍在全局命名空间，依然会与用户代码冲突。
-完整实测引用面数据与分批计划见 `docs/tasks/TASK-007-全局命名空间收敛.md`。
+ADR-001 记录收敛策略（按引用面分批、拒绝别名桥），ADR-004 记录 2.0.0 的最终落地：
+45 个全局类型与 14 个全局子命名空间全部迁移完毕，未保留任何旧头文件转发。
+原 `tests/unit/test_core.cpp` 的编译期哨兵已升级为上面独立编译的哨兵单元
+（TASK-006 测试拆分 + TASK-007 命名空间收敛同时完成）。
 
 ## 六、已知架构权衡
 
 ### 6.1 `rasterizer_fast.h` 未接入主渲染链路
 
-`raster_fast::fillTriangleFast`（增量边函数 + SSE2 四像素并行）**从未被
+`raster::fillTriangleFast`（增量边函数 + SSE2 四像素并行）**从未被
 `Renderer` 调用**，全仓引用只有 `core/benchmark.h` 与单元测试。
 
 不接入的理由：
@@ -514,7 +545,7 @@ graph TD
 | 层 | 平台相关代码 | 隔离手段 |
 | --- | --- | --- |
 | `src/` | 无 | 约定 + 人工审查（**无编译期强制**） |
-| `src/raster/rasterizer_fast.h` | SSE2 intrinsics | `#if defined(__SSE2__) \|\| defined(_M_X64) \|\| ...` 编译期探测，非 x86 自动降级到标量版 |
+| `include/softrenderer/render/raster/rasterizer_fast.h` | SSE2 intrinsics | `#if defined(__SSE2__) \|\| defined(_M_X64) \|\| ...` 编译期探测，非 x86 自动降级到标量版 |
 | `platform/win32_window.h` | 全部 Win32 | 整个文件包在 `#ifdef _WIN32` 内，非 Windows 平台展开为空 |
 | 实时窗口示例 | 使用 `Win32Window` | `examples/CMakeLists.txt` 以 `if(WIN32)` 守卫整个目标 |
 

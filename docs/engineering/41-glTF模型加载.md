@@ -12,7 +12,7 @@
 ## 二、用法
 
 ```cpp
-#include "scene/gltf_loader.h"
+#include <softrenderer/scene/gltf_loader.h>
 
 // 加载所有 mesh
 auto result = gltfloader::load("model.glb");
@@ -37,9 +37,9 @@ tinygltf 依赖 nlohmann/json（JSON 解析）和 stb_image（纹理加载）。
 |---|---|
 | `third/tinygltf/tiny_gltf.h` | tinygltf 头文件 |
 | `third/nlohmann/json.hpp` | JSON 解析器 |
-| `third/tinygltf/tiny_gltf_impl.cpp` | stb_image / stb_image_write 实现 |
-| `src/scene/gltf_loader_impl.cpp` | tinygltf 实现 |
-| `src/scene/gltf_loader.h` | 加载器包装 |
+| `src/io/stb_impl.cpp` | stb_image / stb_image_write 实现 |
+| `src/io/tinygltf_impl.cpp` | tinygltf 实现 |
+| `include/softrenderer/io/gltf_loader.h` | 加载器包装 |
 
 ---
 

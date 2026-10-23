@@ -68,10 +68,10 @@ $$t = \frac{d_{cur}}{d_{cur} - d_{nxt}}, \qquad P_{hit} = \text{lerp}(cur, nxt, 
 
 | 概念 | 代码 |
 |---|---|
-| 裁剪顶点（位置+属性） | `src/raster/clip.h`：`ClipVertex` |
+| 裁剪顶点（位置+属性） | `include/softrenderer/render/pipeline/clip.h`：`ClipVertex` |
 | 交点线性插值 | `lerpClipVertex` |
 | 近平面裁剪主算法 | `clipTriangleNearPlane`（返回 0/3/4） |
-| 接入管线 | `src/raster/renderer.h`：`nearClip` 分支 + 三角扇循环 |
+| 接入管线 | `include/softrenderer/render/pipeline/renderer.h`：`nearClip` 分支 + 三角扇循环 |
 | 粗暴剔除（对比用） | `renderer.h`：`nearClip=false` 分支 |
 | 对比图 | `examples/stage09_clip.cpp` → `output/stage09_clip.tga` |
 

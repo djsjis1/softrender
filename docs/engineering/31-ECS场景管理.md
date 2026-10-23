@@ -36,7 +36,7 @@ target_compile_features(entt INTERFACE cxx_std_23)
 
 ```cpp
 #include <entt/entt.hpp>
-#include "scene/components.h"  // sr::Position, sr::Velocity, sr::MeshRef 等
+#include <softrenderer/scene/components.h>  // sr::Position, sr::Velocity, sr::MeshRef 等
 
 entt::registry registry;
 
@@ -71,7 +71,7 @@ registry.destroy(player);
 
 ## 四、组件定义
 
-组件是纯 struct，放在 `src/scene/components.h` 的 `namespace sr` 内：
+组件是纯 struct，放在 `include/softrenderer/scene/components.h` 的 `namespace sr` 内：
 
 ```cpp
 namespace sr
@@ -111,7 +111,7 @@ struct Light    { int canary = 0; };
 | 文件 | 作用 |
 | --- | --- |
 | `third/entt/src/entt/` | EnTT 源码（76 个头文件） |
-| `src/scene/components.h` | 渲染器组件定义 |
+| `include/softrenderer/scene/components.h` | 渲染器组件定义 |
 | `tests/unit/test_core.cpp` | ECS 测试（EnTT API） |
 
 ## 六、EnTT 进阶用法

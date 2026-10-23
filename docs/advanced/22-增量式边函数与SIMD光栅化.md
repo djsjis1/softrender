@@ -33,7 +33,7 @@ for (int y = bounds.minY; y <= bounds.maxY; ++y) {
 
 ## SSE2 路径
 
-`raster_fast::fillTriangleSSE2` 用两个 `__m128i` 二元组表示四个像素的 int64 边值。
+`raster::fillTriangleSSE2` 用两个 `__m128i` 二元组表示四个像素的 int64 边值。
 对三条边按位 OR 后提取每个 64 位元素的符号位，得到覆盖掩码，再用 `_mm_add_epi64` 一次推进四像素。
 `_mm_castsi128_pd` 仅用于位解释和 movemask，不做浮点运算。尾部不足四像素使用同一整数覆盖规则。
 

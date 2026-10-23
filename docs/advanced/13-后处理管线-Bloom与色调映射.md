@@ -34,7 +34,7 @@ $$\text{ACES}(x) = \frac{x(2.51x+0.03)}{x(2.43x+0.59)+0.14}$$
 
 | 概念 | 代码 |
 |---|---|
-| HDR 浮点缓冲 | `src/core/float_framebuffer.h` |
+| HDR 浮点缓冲 | `include/softrenderer/core/float_framebuffer.h` |
 | ACES 色调映射 | `sr::FloatFramebuffer::acesToneMap` |
 | Gamma 校正 | `sr::FloatFramebuffer::gammaCorrect` |
 | 亮部提取 | `brightPass` |

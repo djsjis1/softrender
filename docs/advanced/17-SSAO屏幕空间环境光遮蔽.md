@@ -31,7 +31,7 @@
 > `SSAO` 与 `SSAOConfig` 位于 **`namespace postprocess`**。
 
 ```cpp
-#include "core/post_processing.h"
+#include <softrenderer/core/post_processing.h>
 
 postprocess::SSAO ssao;
 ssao.compute(viewPositions, viewNormals, depthBuffer, W, H, viewProj, aoMap);

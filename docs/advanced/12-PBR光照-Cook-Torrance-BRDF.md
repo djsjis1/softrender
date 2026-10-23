@@ -27,7 +27,7 @@ $$f_r = \frac{D \cdot G \cdot F}{4 (N \cdot V)(N \cdot L)}$$
 
 | 概念 | 代码 |
 |---|---|
-| PBR 着色器 | `src/shader/pbr_shader.h`：`PBRShader` |
+| PBR 着色器 | `include/softrenderer/render/shader/pbr_shader.h`：`PBRShader` |
 | GGX D 项 | `fragment` 中 `a2 / (π * denom²)` |
 | Smith G 项 | `G1V * G1L` |
 | Schlick F 项 | `F0 + (1-F0) * pow(1-VdotH, 5)` |

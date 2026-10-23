@@ -28,7 +28,7 @@ header-only 意味着：本项目头文件里的每个符号都会**直接进入
 
 `Position`、`Scale`、`Rotation`、`Light`、`Animation`、`Texture`、`Mesh`、`Vertex`、
 `Color`、`Camera` 这些名字，下游使用者几乎必然已在自己的代码里定义过。
-任何人 `#include "scene/components.h"` 都会撞上重定义错误——而这 8 个 ECS 组件
+任何人 `#include <softrenderer/scene/components.h>` 都会撞上重定义错误——而这 8 个 ECS 组件
 恰恰是本项目 ECS 能力的入口。
 
 ### 这不是理论风险，项目内部已经踩过
@@ -117,9 +117,9 @@ header-only 意味着：本项目头文件里的每个符号都会**直接进入
 ### 立即执行（本次）
 
 * 新增 `docs/adr/`（本 ADR + 索引）
-* 新增 `src/core/namespace.h`：声明 `namespace sr` 为所有 SoftRenderer 公共符号的
+* 新增 `include/softrenderer/core/namespace.h`：声明 `namespace sr` 为所有 SoftRenderer 公共符号的
   目标命名空间，并写明迁移约定与进度
-* `src/scene/components.h`：8 个 ECS 组件迁入 `namespace sr`，**不留全局别名**
+* `include/softrenderer/scene/components.h`：8 个 ECS 组件迁入 `namespace sr`，**不留全局别名**
 * `tests/test_core.cpp`：ECS 套件改用 `sr::` 限定
 * 公共接口变更：`Position` 等 8 个名字从全局作用域消失 → **API Break**
 

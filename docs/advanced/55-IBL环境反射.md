@@ -38,8 +38,8 @@ shader.envMap = &envMap; // 一行开启 IBL
 
 | 文件 | 作用 |
 |---|---|
-| `src/shader/pbr_shader.h` | IBL 采样逻辑 |
-| `src/scene/cubemap.h` | Cubemap 类 + 程序化天空生成 |
+| `include/softrenderer/render/shader/pbr_shader.h` | IBL 采样逻辑 |
+| `include/softrenderer/resource/cubemap.h` | Cubemap 类 + 程序化天空生成 |
 | `examples/demo_ibl_pbr.cpp` | IBL + PBR 完整 demo |
 
 ---

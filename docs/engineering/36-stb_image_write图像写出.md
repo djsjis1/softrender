@@ -5,7 +5,7 @@
 ## 一、用法
 
 ```cpp
-#include "core/image_write.h"
+#include <softrenderer/core/image_write.h>
 imagewriter::writeImage("output.png", framebuffer);  // 自动按扩展名选格式
 imagewriter::writeImage("output.jpg", framebuffer, 95); // JPG 质量 95
 ```
@@ -19,8 +19,8 @@ PNG（无损）、BMP、TGA、JPG（有损）、HDR（浮点）。
 | 文件 | 作用 |
 |---|---|
 | `third/stb/stb_image_write.h` | 头文件 |
-| `third/tinygltf/tiny_gltf_impl.cpp` | 实现（`#define STB_IMAGE_WRITE_IMPLEMENTATION` 在此处） |
-| `src/core/image_write.h` | 统一接口 |
+| `src/io/stb_impl.cpp` | 实现（`#define STB_IMAGE_WRITE_IMPLEMENTATION` 在此处） |
+| `include/softrenderer/io/image_write.h` | 统一接口 |
 
 ---
 

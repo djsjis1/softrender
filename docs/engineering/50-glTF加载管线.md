@@ -23,7 +23,7 @@ AccessorView 校验下标链、字节范围、对齐、stride 与分量类型；
 ## 使用与错误
 
 ```cpp
-#include "scene/gltf_loader.h"
+#include <softrenderer/scene/gltf_loader.h>
 
 auto result = gltfloader::load("model.glb");
 if (!result.success) {
@@ -63,10 +63,10 @@ for (const auto& mesh : result.meshes) {
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/scene/gltf_accessor.h` | 非拥有、受校验的分量读取 |
-| `src/scene/gltf_mesh.h` | 类型/数量/索引校验与 Mesh 转换 |
-| `src/scene/gltf_loader.h` | 文件入口、材质/纹理/节点/动画转换 |
-| `src/scene/gltf_loader_impl.cpp` | tinygltf 实现，链接 third_party_impl |
+| `src/io/gltf_accessor.h` | 非拥有、受校验的分量读取 |
+| `src/io/gltf_mesh.h` | 类型/数量/索引校验与 Mesh 转换 |
+| `include/softrenderer/io/gltf_loader.h` | 文件入口、材质/纹理/节点/动画转换 |
+| `src/io/tinygltf_impl.cpp` | tinygltf 实现，链接 third_party_impl |
 | `tests/unit/gltf_test.cpp` | 畸形输入、stride、索引和解码纹理测试 |
 
 旧 `accessorFloats` 已删除，迁移为 `AccessorView::create` 后调用 `readFloat` 或 `readUnsigned`，并处理失败状态。

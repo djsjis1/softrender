@@ -2,7 +2,25 @@
 
 基于 C++23 的教学型 CPU 软件渲染器：从画线、三角形光栅化，到可编程着色、PBR、IBL、骨骼动画和后处理。不依赖 OpenGL、DirectX 或 Vulkan。
 
-核心算法以头文件为主；图像、模型和 ECS 使用仓库内置的第三方库，glTF/OBJ/stb 实现通过静态库链接。实时窗口示例使用 Windows GDI，离屏渲染与数学模块不依赖窗口系统。
+2.0.0 起按职责分层：公共头统一在 `include/softrenderer/`，按组件导出
+`SoftRenderer::core` / `::render` / `::scene` / `::io` / `::runtime` / 可选 `::entt`。
+找缓冲只进 `core`，找绘制只进 `render`，找资源加载只进 `io`；核心渲染无需接入文件解析、线程或窗口。
+
+```cpp
+#include <softrenderer/core/framebuffer.h>
+#include <softrenderer/render/pipeline/renderer.h>
+
+Framebuffer fb(800, 600);
+Renderer renderer(800, 600);   // 只用 render + core 即可绘制
+```
+
+```cmake
+find_package(SoftRenderer 2.0 REQUIRED COMPONENTS core render)
+target_link_libraries(app PRIVATE SoftRenderer::core SoftRenderer::render)
+```
+
+核心算法以头文件为主；图像、模型加载器编入 `SoftRenderer::io` 静态库，第三方头不外露。
+实时窗口示例使用 Windows GDI，离屏渲染与数学模块不依赖窗口系统。
 
 ## 能力与边界
 

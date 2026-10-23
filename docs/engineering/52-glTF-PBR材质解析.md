@@ -46,8 +46,8 @@ for (size_t i = 0; i < result.meshes.size(); ++i) {
 
 | 文件 | 作用 |
 |---|---|
-| `src/scene/gltf_types.h` | GltfMaterial, GltfNode, GltfAnimation 等类型 |
-| `src/scene/gltf_loader.h` | 解析逻辑（材质+节点） |
+| `include/softrenderer/scene/scene_asset.h` | GltfMaterial, GltfNode, GltfAnimation 等类型 |
+| `include/softrenderer/io/gltf_loader.h` | 解析逻辑（材质+节点） |
 | `examples/demo_pbr_material.cpp` | PBR 材质渲染 demo |
 
 ---

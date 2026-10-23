@@ -69,25 +69,25 @@ AI 修改代码前必须先读目标文件的头注释，快速理解模块职�
 * **禁止 `src/` 下任何文件 `#include <windows.h>`、`#include "platform/..."` 或引用 Win32 API**
   平台隔离是本项目的核心卖点（`CMakeLists.txt` 第 72-79 行的分层注释已声明此意图）。
   渲染器本体一旦沾上平台代码，「可作为纯头文件库跨平台集成」即告失效。
-  唯一例外：`src/raster/rasterizer_fast.h` 的 SSE2 intrinsics，已用
+  唯一例外：`include/softrenderer/render/raster/rasterizer_fast.h` 的 SSE2 intrinsics，已用
   `#if defined(__SSE2__) || defined(_M_X64) || ...` 编译期探测并提供标量降级路径。
   新增此类例外必须同样提供**非 x86 平台的降级实现**。
 
 ### 坐标与数据契约
 
 * **禁止修改 `Framebuffer` 的坐标约定**（x 向右、y 向上、`(0,0)` 在左下角）
-  `framebuffer.h` 第 11-15 行注明「后面所有阶段都遵守」。`Renderer2D`、`tga` 写出、
+  `include/softrenderer/core/framebuffer.h` 头注释注明「后面所有阶段都遵守」。`Renderer2D`、`sr::io` 的 TGA 写出、
   `pixel_regression` 比对、全部 22 个示例都依赖此约定。改动会**静默翻转所有输出图像**——
   不报错、不崩溃，只是图上下颠倒，极难定位。
 
-* **禁止修改 `Varyings`（`shader/shader.h`）已有字段的语义**
+* **禁止修改 `Varyings`（`render/pipeline/varyings.h`）已有字段的语义**
   它是 `Renderer` 与全部 6 个内置着色器之间的公共契约。新增字段需同步修改
   `interpolateVaryings`，否则该字段不会被透视校正插值（静默得到错误值）。
 
 * **禁止在多个 `.cpp` 中定义 `STB_IMAGE_IMPLEMENTATION` / `TINYGLTF_IMPLEMENTATION` 等
   `*_IMPLEMENTATION` 宏**
   本项目已把全部第三方实现收敛到单一静态库 `third_party_impl`
-  （`tiny_gltf_impl.cpp` + `tiny_obj_loader_impl.cpp` + `gltf_loader_impl.cpp`）。
+  （`stb_impl.cpp` + `tiny_obj_loader_impl.cpp` + `tinygltf_impl.cpp`）。
   重复定义会导致符号重定义链接错误，或在 ASAN 下报 `odr-violation`。
 
 ### 光栅化热路径
@@ -95,11 +95,12 @@ AI 修改代码前必须先读目标文件的头注释，快速理解模块职�
 * **禁止在 `Renderer::rasterTriangle` 中放宽包围盒的 clamp**
   内层循环用 `fb.row(y)` / `zbuf_.row(y)` **行指针直写**，绕过 `setPixel` /
   `testAndSet` 的边界检查。安全性完全依赖包围盒预先 clamp 到
-  `[0, width-1] × [0, height-1]`（`renderer.h` 第 102-108 行）。
+  `include/softrenderer/render/pipeline/renderer.h` 中 `rasterTriangle` 前的注释已声明该前提
+  （包围盒 clamp 到 `[0, width-1] × [0, height-1]`）。
   任何修改包围盒计算或行指针用法的改动，都必须重新确认 clamp 仍然生效，
   否则会引入**越界写内存**。
 
-* **禁止 2D 图元绕过 `sr2d::plotBlend` 直接调用 `Framebuffer::setPixel`**
+* **禁止 2D 图元绕过 `sr::draw2d::plotBlend` 直接调用 `sr::Framebuffer::setPixel`**
   `plotBlend` 是 2D 子系统唯一的像素写入出口，统一处理边界裁剪、`BlendMode`
   混合与 scissor。绕过它会让 scissor 裁剪与混合模式**静默失效**。
 
@@ -127,12 +128,13 @@ AI 修改代码前必须先读目标文件的头注释，快速理解模块职�
 ### 命名空间
 
 * **禁止在全局命名空间新增顶层类型、枚举或自由函数**
-  本项目是 header-only 库，符号直接进入用户的编译单元。现存 60 个全局类型
-  已是待偿还的架构债（见 `docs/tasks/TASK-007`），`Position` / `Light` / `Texture` /
-  `Mesh` 这类通用名对下游集成方构成实际冲突风险。
-  新增符号必须放入 `namespace sr`（渲染核心）或 `namespace sr2d`（2D 子系统）。
-  历史教训：`sr2d` 命名空间的引入原因，正是 2D 图元名与 `examples/` 中的
-  全局同名符号发生了真实冲突。
+  本项目是 header-only 库，符号直接进入用户的编译单元。2.0.0 已把全部公共符号
+  收敛到 `namespace sr`（功能函数进 `sr::draw2d` / `sr::raster` / `sr::postprocess` /
+  `sr::animation` / `sr::io` 等子命名空间），**不留旧头文件转发与全局别名**。
+  新增符号一律放入上述命名空间；禁止用 `using sr::X;` 别名桥把名字重新注入全局
+  （using 声明仍注入全局，解决不了撞名）。
+  门禁：`tests/architecture/namespace_sentinel.cpp` 在全局声明 60 个同名类型后
+  包含全部公共头，回归即编译失败。
 
 ### 测试
 
@@ -176,7 +178,7 @@ cmake --build build --config Release --target unit_tests
 **测试**
 
 ```powershell
-# 开发迭代首选：单进程跑完 169 个用例，约 20 毫秒
+# 开发迭代首选：单进程跑完 179 个用例，约 20 毫秒
 .\build\bin\Release\unit_tests.exe
 
 # 全量 ctest（CI 用的命令；串行约 40 秒，并行约 13 秒）
@@ -193,8 +195,8 @@ ctest --test-dir build -C Release -L fast
 ```
 
 > ⚠️ `ctest` 慢的原因：`gtest_discover_tests` 把每个用例注册为独立 ctest 项，
-> 169 用例 = 169 次进程启动，开销全在进程创建而非测试本身。
-> `-LE fast` 排除 `unit_tests_all`，避免与 169 个 discover 项重复跑。
+> 179 用例 = 179 次进程启动，开销全在进程创建而非测试本身。
+> `-LE fast` 排除 `unit_tests_all`，避免与 179 个 discover 项重复跑。
 > 详见 `docs/troubleshooting.md`。
 
 **Sanitizer**（默认关闭，需显式开启）
@@ -231,7 +233,7 @@ clang-format -i <files>          # 配置见根目录 .clang-format
 clang-tidy <files>               # 配置见根目录 .clang-tidy（待建立）
 ```
 
-> `.clang-format` 已存在但**从未被执行过**：实测 19 个 `src/` 头文件的 namespace 体
+> `.clang-format` 已存在但**从未被执行过**：实测 60 个 `include/softrenderer/` 头文件的 namespace 体
 > 缩进 4 空格，违反配置第 92 行的 `NamespaceIndentation: None`。
 > 全仓格式化必须排在所有功能性修改之后、单独一个 commit 执行，
 > 并配合 `.git-blame-ignore-revs`。详见 `docs/tasks/TASK-005`。
@@ -245,7 +247,7 @@ clang-tidy <files>               # 配置见根目录 .clang-tidy（待建立）
 
 ```powershell
 cmake --build build --config Release --parallel   # 零错误零警告
-.\build\bin\Release\unit_tests.exe                # 169 用例全绿
+.\build\bin\Release\unit_tests.exe                # 179 用例全绿
 .\build\bin\Release\render_regression.exe         # 3 个像素回归全绿
 ```
 

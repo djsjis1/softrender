@@ -6,7 +6,7 @@
 
 ```bash
 # 格式化单个文件
-clang-format -i src/core/profiler.h
+clang-format -i include/softrenderer/runtime/profiler.h
 
 # 格式化所有源文件
 find src/ -name "*.h" -o -name "*.cpp" | xargs clang-format -i

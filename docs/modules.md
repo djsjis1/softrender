@@ -1,25 +1,38 @@
 # 模块职责
 
-> 本文件描述 `src/` 各模块的职责边界、依赖方向、输入输出与扩展点。
+> 本文件描述 `include/softrenderer/` 与 `src/` 各模块的职责边界、依赖方向、输入输出与扩展点。
 > 模块间的完整依赖边与架构图见 [`architecture.md`](architecture.md)。
 >
 > 核心约定：**模块边界 = 目录边界**。禁止跨模块直接引用内部实现细节。
 
-## 模块总览
+## 模块总览（2.0.0 唯一正式布局）
 
-| 目录 | 职责 | 文件数 | 依赖 |
-| --- | --- | --- | --- |
-| `src/math/` | 向量、矩阵、四元数、矩形、变换与投影 | 7 | 无（最底层） |
-| `src/core/` | 帧缓冲、深度缓冲、颜色、混合、图像 I/O、后处理、基础设施 | 19 | `math/` |
-| `src/scene/` | 网格、纹理、相机、骨骼、动画、粒子、模型加载、ECS 组件 | 14 | `math/`、`core/`、第三方加载器 |
-| `src/shader/` | 可编程着色管线（vertex / geometry / fragment） | 4 | `math/`、`scene/`、`core/` |
-| `src/raster/` | 光栅化、裁剪、3D 与 2D 渲染器 | 10 | 全部下层 |
-| `src/test/` | 像素回归测试工具 | 1 | `core/` |
-| `platform/` | 平台后端（Win32 GDI 窗口 + 输入） | 1 | `core/`；**不属于 `src/`** |
+| 目录 | 职责 | 依赖（只允许这些） |
+| --- | --- | --- |
+| `include/softrenderer/math/` | 向量、矩阵、四元数、矩形、变换与投影、重心坐标 | 标准库 |
+| `include/softrenderer/core/` | 颜色、混合、帧缓冲、深度/HDR/MSAA 缓冲、G-Buffer、内存分配器、`Image` | `math/` |
+| `include/softrenderer/resource/` | 顶点、网格、纹理、Cubemap、材质数据与程序化生成（`mesh_generator.h` / `texture_generator.h`） | `core/`、`math/` |
+| `include/softrenderer/render/raster/` | 覆盖规则、基础光栅化、SIMD 光栅化 | `core/`、`math/` |
+| `include/softrenderer/render/draw2d/` | 2D 图元、位图合成、`Renderer2D`、线框三角形 | `core/`、`math/` |
+| `include/softrenderer/render/pipeline/` | `Varyings`、`Shader`/`SurfaceShader` 契约、裁剪、`Renderer`、MSAA、渲染队列 | `resource/`、`core/`、`math/` |
+| `include/softrenderer/render/shader/` | 内置着色器、PBR 着色器、延迟光照 | `resource/`、`core/`、`math/` |
+| `include/softrenderer/render/postprocess/` | FXAA / HDR+Bloom / SSAO 等后处理统一入口 | `core/`、`math/` |
+| `include/softrenderer/scene/` | 相机（2D/3D）、场景节点、材质、蒙皮、动画片段与采样、粒子、ECS 组件、关键帧 | `resource/`、`core/`、`math/` |
+| `include/softrenderer/io/` | 图像/TGA/OBJ/glTF 加载与写出的**声明** | `scene/`、`resource/`、`core/` |
+| `include/softrenderer/runtime/` | 日志、Profiler、线程池、命令缓冲、资源缓存 | `core/`、宿主线程能力 |
+| `src/io/` | 加载器实现与第三方实现单元（私有，不安装） | `include/` 公共头 + 第三方（私有） |
+| `platform/` | Win32 GDI 窗口适配（不属于公共头） | `core/` |
+
+分层约束由 CTest 门禁强制：`tests/architecture/check_boundaries.cmake` 扫描全部公共头的
+`#include` 白名单（例如 render 不得包含 scene/io/runtime，core 不得包含文件/日志/线程/第三方），
+`public_headers_check` 逐个单独编译每个公共头，`namespace_sentinel` 验证通用名未回退到全局作用域。
+
+旧版表格（`src/raster`、`src/scene`、`src/shader` 等）已随 2.0.0 失效，以本表为准。
+
 
 ---
 
-## src/math/ — 数学库
+## include/softrenderer/math/ — 数学库
 
 **职责**：提供渲染所需的全部线性代数原语。纯计算，无状态，无 I/O。
 
@@ -39,10 +52,10 @@
 
 ---
 
-## src/core/ — 缓冲与基础设施
+## include/softrenderer/core/ — 缓冲与基础设施
 
-**职责**：像素存储、颜色运算、图像读写、后处理，以及与渲染无关的通用设施
-（内存池、线程池、Profiler、日志）。
+**职责**：颜色与混合、像素存储、深度缓冲与内存分配器。
+图像文件 I/O 归 `io/`，后处理归 `render/postprocess/`，日志 / 线程 / 缓存归 `runtime/`。
 
 ### 渲染目标
 
@@ -60,31 +73,31 @@
 > Release 越界返回黑色 / 最远深度。`row(y)` 只提供断言，调用前**必须**自行保证合法行列。
 > `renderer.h` 通过把包围盒 clamp 到帧缓冲尺寸来满足此契约。
 
-### 像素运算与图像 I/O
+### 像素运算（I/O 与后处理已归各自模块）
 
 | 文件 | 关键内容 |
 | --- | --- |
 | `blend.h` | `enum class BlendMode`（Opaque / AlphaBlend / Additive / Multiply / Premultiplied）、`blendPixels(src, dst, mode)` |
-| `tga.h` | `namespace tga`：`Image`、`read` / `write`。按 y-up 约定设置 TGA 原点标志位 |
-| `image_write.h` | `namespace imagewriter`：`writeImage`（PNG/JPG/BMP/TGA，基于 stb_image_write） |
-| `post_processing.h` | `namespace postprocess`：统一后处理入口——FXAA 抗锯齿、DOF 景深、径向模糊、暗角、色差、SSAO 环境光遮蔽 |
+| `include/softrenderer/io/tga.h` | `namespace tga`：`Image`、`read` / `write`。按 y-up 约定设置 TGA 原点标志位 |
+| `include/softrenderer/io/image_write.h` | `namespace imagewriter`：`writeImage`（PNG/JPG/BMP/TGA，基于 stb_image_write） |
+| `include/softrenderer/render/postprocess/post_processing.h` | `namespace postprocess`：统一后处理入口——FXAA 抗锯齿、DOF 景深、径向模糊、暗角、色差、SSAO 环境光遮蔽 |
 
-### 通用设施
+### 通用设施（线程与缓存已归 runtime/）
 
 | 文件 | 关键内容 |
 | --- | --- |
 | `arena.h` | `sr::ArenaAllocator`：安全对齐与长度校验，reset 保留并复用块；used/capacity 分别观测当前使用和保留容量 |
-| `command_buffer.h` | `sr::CommandBuffer` / `sr::ThreadPool`：任务分发、waitAll 异常报告和 submitFuture 结果 |
-| `profiler.h` | `sr::Profiler`（Meyers 单例）、`SR_PROFILE_SCOPE` 宏，输出 Chrome Tracing JSON |
-| `resource_manager.h` | `sr::ResourceManager`：引用计数缓存，用 C++20 `concepts`（`has_loadFromFile`）约束资源类型 |
-| `benchmark.h` | `sr::` 基准测试工具，用于对比标量 / SSE2 光栅化吞吐 |
-| `log.h` | `SR_LOG_*` 宏 + `sr_log_init` / `sr_log_shutdown`。双模式条件编译，见 `architecture.md` §6.2 |
+| `include/softrenderer/runtime/command_buffer.h` | `sr::CommandBuffer` / `sr::ThreadPool`：任务分发、waitAll 异常报告和 submitFuture 结果 |
+| `include/softrenderer/runtime/profiler.h` | `sr::Profiler`（Meyers 单例）、`SR_PROFILE_SCOPE` 宏，输出 Chrome Tracing JSON |
+| `include/softrenderer/runtime/resource_manager.h` | `sr::ResourceManager`：引用计数缓存，用 C++20 `concepts`（`has_loadFromFile`）约束资源类型（阶段 4 改为 `ResourceCache`） |
+| `benchmarks/support/benchmark.h` | `sr::` 基准测试工具（阶段 5 迁往 benchmarks 支持目录） |
+| `include/softrenderer/runtime/log.h` | `SR_LOG_*` 宏 + `sr_log_init` / `sr_log_shutdown`。双模式条件编译，见 `architecture.md` §6.2 |
 
 > ⚠️ `sr_log_init` / `sr_log_shutdown` 位于**全局命名空间**，而 `LogLevel` / `Log`
 > 在 `namespace sr` 内。这是历史遗留的不一致。
 
 **扩展点**：新的缓冲类型放本目录，只能依赖 `math/` 与 `core/` 内部。
-通用设施（内存 / 线程 / 性能分析）也归本目录，但**禁止**依赖 `scene/` 及以上。
+日志、线程与资源缓存等宿主设施归 `runtime/`，**禁止**本层依赖 `scene/` 及以上。
 
 ---
 
@@ -127,7 +140,7 @@
 | `image_loader.h` | PNG / JPG / BMP / TGA / PSD / GIF / HDR / PIC / PNM（stb_image） | `imageloader` |
 | `obj_loader.h` | Wavefront OBJ（tinyobjloader） | `objloader` |
 | `gltf_accessor.h` / `gltf_mesh.h` | 共享字节校验与 primitive 转换 | `sr::gltf` |
-| `gltf_loader.h` + `gltf_loader_impl.cpp` | glTF 2.0 / glb（tinygltf） | `gltfloader` |
+| `gltf_loader.h` + `tinygltf_impl.cpp` | glTF 2.0 / glb（tinygltf） | `gltfloader` |
 
 > ⚠️ `gltf_loader.h` 与 `animation_player.h` 在公共头中 include `tiny_gltf.h`，
 > 下游用户需要 tinygltf 与 nlohmann/json 的头文件路径。这是**有意的接口泄漏**
@@ -145,7 +158,7 @@ ECS 容器本身来自 EnTT（`third/entt`），`components.h` 只定义组件�
 > ✅ **这 8 个组件已迁入 `namespace sr`，且未保留全局别名**（ADR-001 第 1 批）。
 > 它们曾是命名空间收敛的最高优先级目标：名字均为 ECS 领域通用名，
 > 而本项目是 header-only 库，全局定义会让下游用户
-> `#include "scene/components.h"` 时直接撞上重定义硬错误。
+> `#include <softrenderer/scene/components.h>` 时直接撞上重定义硬错误。
 >
 > 能不留别名直接迁完，是因为实测引用面极小：本文件只被 2 个文件引用
 > （自身 + `tests/unit/test_core.cpp`），`Light` 除定义处外全仓零使用，
@@ -298,6 +311,6 @@ math/  ←  core/  ←  scene/  ←  shader/  ←  raster/  ←  examples/ + pla
 
 | 文件 | 职责 |
 | --- | --- |
-| src/raster/coverage.h | sr::TriangleCoverage / RasterBounds，整数子像素覆盖与有限包围盒 |
-| src/raster/msaa_renderer.h | sr::MSAAFlatRenderer<1/4>，常量颜色的逐样本覆盖与深度/颜色提交 |
+| include/softrenderer/render/raster/coverage.h | sr::TriangleCoverage / RasterBounds，整数子像素覆盖与有限包围盒 |
+| include/softrenderer/render/pipeline/msaa_renderer.h | sr::MSAAFlatRenderer<1/4>，常量颜色的逐样本覆盖与深度/颜色提交 |
 | benchmarks/renderer_benchmark.cpp | 可选主管线基线；配置和数据见 [性能记录](engineering/58-覆盖规则与性能基线.md) |

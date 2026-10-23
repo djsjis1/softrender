@@ -3,7 +3,9 @@
 ## 基本信息
 
 - 创建日期：2026-09-05
-- 状态：**第 1 批已完成**（ECS 组件），余 52 个类型待分批
+- 状态：**已完成（2026-10-23）**——60 个全局类型全部迁入 `namespace sr`，未保留别名桥；
+  `namespace raster_fast` → `sr::raster`；门禁为 `tests/architecture/namespace_sentinel.cpp`
+  （全局声明 60 个同名类型后包含全部公共头 + `static_assert`）
 - 涉及模块：**全部** `src/`、`examples/`（22 个）、`tests/`、`practice/`
 - 变更级别：**L**（架构级 + 破坏公共接口 + 已建 ADR）
 - 前置依赖：TASK-001、TASK-005（格式化完成）、TASK-006（测试拆分完成）
@@ -79,7 +81,7 @@ resource_manager）、`draw2d`、`colors`、`transform`、`tga`、`imagewriter`�
 `Animation`、`Keyframe`、`Bone`、`Texture`、`Mesh`、`Vertex`、`Color`、`Particle`、
 `Shader` 这些名字，**下游用户几乎必然已经在自己的代码里定义过**。
 
-任何人 `#include "scene/components.h"` 都会撞上重定义错误——而这 8 个 ECS 组件
+任何人 `#include <softrenderer/scene/components.h>` 都会撞上重定义错误——而这 8 个 ECS 组件
 恰恰是本项目 ECS 能力的入口。
 
 ### 3. 违反明确规范

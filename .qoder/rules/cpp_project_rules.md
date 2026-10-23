@@ -289,7 +289,7 @@ class VideoDecoder {
 
 1. **本项目是 header-only 库**，每个头文件既导出类型也导出大量自由函数
    （`blend.h` 的 `blendPixels`、`clip.h` 的 `clipTriangleFullFrustum`、
-   `shape2d.h` 的 `sr2d::fillRect`），本质上更接近上文已允许的
+   `render/draw2d/shape2d.h` 的 `sr::draw2d::fillRect`），本质上更接近上文已允许的
    「工具类/函数文件」而非「类文件」。PascalCase 文件名会误导使用者
    以为文件只含单个类。
 2. **与依赖风格一致**：`#include "core/framebuffer.h"` 的路径风格与

@@ -1,11 +1,18 @@
 # TASK-006：测试目录重构与覆盖率接入
 
+> 2026-10-23 更新：`test_core.cpp`（1468 行）已按模块拆成 10 个文件
+> （`math_test` / `core_buffer_test` / `resource_test` / `render_pipeline_test` / `draw2d_test` /
+> `scene_test` / `ecs_test` / `runtime_test` / `io_test` / `pixel_regression_support_test`），
+> `tests/CMakeLists.txt` 显式列出源文件；ECS 编译期哨兵移入 `namespace ecsCanary`，
+> 命名空间门禁另由 `tests/architecture/namespace_sentinel.cpp` 独立编译。
+> 实测 179/179 通过。**仍未完成**：覆盖率本地实测（本机无 LLVM/gcov 工具链）。
+
 > 2026-10-05 更新：unit/integration/fixtures 目录分层已完成，tests/CMakeLists.txt 已建立，新增 Arena/Renderer 独立测试和下游消费测试。旧 test_core.cpp 仍待按依赖拆分，覆盖率待实测。下文“删除工具阻塞”是历史环境记录，不是当前已验证阻塞。
 
 ## 基本信息
 
 - 创建日期：2026-09-05
-- 状态：**覆盖率已完成；目录拆分已推迟**（原因见下）
+- 状态：**目录拆分与 test_core.cpp 拆分已完成（2026-10-23）；覆盖率未实测**
 - 涉及模块：`tests/`、`CMakeLists.txt`、`.github/workflows/ci.yml`、`.qoder/rules/testing_rules.md`
 - 变更级别：**L**（跨模块 + CI + 规则例外条款）
 - 前置依赖：TASK-004（已完成）

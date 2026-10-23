@@ -31,7 +31,7 @@ const int FXAA_SEARCH_STEPS = 8;                    // 边缘搜索步数
 ## 四、代码入口
 
 ```cpp
-#include "core/post_processing.h"
+#include <softrenderer/core/post_processing.h>
 Framebuffer aaResult(W, H);
 postprocess::fxaa(srcFramebuffer, aaResult);
 ```

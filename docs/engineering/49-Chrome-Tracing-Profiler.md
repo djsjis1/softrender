@@ -5,7 +5,7 @@
 ## 一、用法
 
 ```cpp
-#include "core/profiler.h"
+#include <softrenderer/core/profiler.h>
 
 void renderFrame() {
     SR_PROFILE_FUNCTION();  // 自动用函数名
@@ -45,7 +45,7 @@ int main() {
 
 ## 五、对应代码
 
-`src/core/profiler.h`
+`include/softrenderer/runtime/profiler.h`
 
 ---
 
