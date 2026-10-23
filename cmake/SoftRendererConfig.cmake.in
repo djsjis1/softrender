@@ -1,7 +1,35 @@
 @PACKAGE_INIT@
 
+# ============================================================
+# SoftRenderer 组件化 package config
+#
+# 规则：
+#   - 指定 COMPONENTS 时只导入请求组件的依赖闭包：
+#       find_package(SoftRenderer COMPONENTS core) 不查找 Threads
+#   - 未指定组件时导入本包中实际构建出的全部组件与聚合目标
+#   - 请求未构建的组件 → 该组件 FOUND=FALSE，check_required_components 报错
+# ============================================================
+
 include(CMakeFindDependencyMacro)
-find_dependency(Threads)
+
+set(_sr_components ${SoftRenderer_FIND_COMPONENTS})
+if(NOT _sr_components)
+    set(_sr_components @SR_EXPORTED_COMPONENTS@)
+endif()
+
+# runtime 组件用宿主线程能力；只有它需要 Threads。
+if("runtime" IN_LIST _sr_components)
+    find_dependency(Threads)
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/SoftRendererTargets.cmake")
+
+foreach(_sr_component IN LISTS _sr_components)
+    if(TARGET SoftRenderer::${_sr_component})
+        set(SoftRenderer_${_sr_component}_FOUND TRUE)
+    else()
+        set(SoftRenderer_${_sr_component}_FOUND FALSE)
+    endif()
+endforeach()
 
 check_required_components(SoftRenderer)

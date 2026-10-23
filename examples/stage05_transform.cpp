@@ -16,12 +16,16 @@
 #include <cstdio>
 #include <filesystem>
 #include <random>
-#include "core/framebuffer.h"
-#include "core/tga.h"
-#include "math/transform.h"
-#include "raster/triangle.h"
-#include "scene/mesh.h"
-#include "scene/obj_loader.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/io/tga.h"
+#include "softrenderer/math/transform.h"
+#include "softrenderer/render/raster/triangle.h"
+#include "softrenderer/resource/mesh.h"
+#include "softrenderer/io/obj_loader.h"
+#include "softrenderer/resource/mesh_generator.h"
+#include "softrenderer/render/draw2d/shape2d.h"
+
+using namespace sr;
 
 int main() {
     const int W = 800, H = 600;
@@ -29,11 +33,11 @@ int main() {
 
     // 载入模型：优先外部 OBJ，回退到程序化立方体
     Mesh mesh;
-    if (objloader::load("assets/model.obj", mesh))
+    if (sr::io::loadObjMesh("assets/model.obj", mesh))
         std::printf("已加载 assets/model.obj: %d 顶点 %d 三角形\n",
                     int(mesh.vertices.size()), mesh.triangleCount());
     else {
-        mesh = meshgen::cube(1.0f);
+        mesh = sr::meshgen::cube(1.0f);
         std::printf("未找到 assets/model.obj，使用程序化立方体\n");
     }
 
@@ -42,9 +46,9 @@ int main() {
     // Model：绕 Y 和 X 转一点，让立方体呈现三个可见面
     Mat4 model = Mat4::rotateY(PI * 0.2f) * Mat4::rotateX(PI * 0.15f);
     // View：相机在 (0,0,3) 看向原点
-    Mat4 view = transform::lookAt({0, 0, 3}, {0, 0, 0}, {0, 1, 0});
+    Mat4 view = sr::transform::lookAt({0, 0, 3}, {0, 0, 0}, {0, 1, 0});
     // Projection：45° 视场角
-    Mat4 proj = transform::perspective(PI / 4.0f, float(W) / H, 0.1f, 100.0f);
+    Mat4 proj = sr::transform::perspective(PI / 4.0f, float(W) / H, 0.1f, 100.0f);
     Mat4 mvp = proj * view * model;
 
     std::mt19937 rng(7);
@@ -75,16 +79,16 @@ int main() {
         Vec3f p0 = mesh.vertices[mesh.indices[i * 3 + 0]].position;
         Vec3f p1 = mesh.vertices[mesh.indices[i * 3 + 1]].position;
         Vec3f p2 = mesh.vertices[mesh.indices[i * 3 + 2]].position;
-        wireTriangle(fb, project(p0, W / 2), project(p1, W / 2), project(p2, W / 2),
-                     colors::green);
+        sr::draw2d::wireTriangle(fb, project(p0, W / 2), project(p1, W / 2), project(p2, W / 2),
+                     sr::colors::green);
     }
 
     // 中间分隔线
-    drawLine(fb, W / 2, 0, W / 2, H - 1, Color(80, 80, 90));
+    sr::draw2d::drawLine(fb, W / 2, 0, W / 2, H - 1, Color(80, 80, 90));
 
     std::filesystem::create_directories("output");
     const char* path = "output/stage05_transform.tga";
-    if (!tga::write(path, fb)) {
+    if (!sr::io::writeTga(path, fb)) {
         std::printf("写文件失败: %s\n", path);
         return 1;
     }

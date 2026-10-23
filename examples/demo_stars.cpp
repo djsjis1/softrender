@@ -15,11 +15,11 @@
 #include <random>
 #include <vector>
 
-#include "core/color.h"
-#include "core/float_framebuffer.h"
-#include "core/framebuffer.h"
-#include "core/tga.h"
-#include "math/vec.h"
+#include "softrenderer/core/color.h"
+#include "softrenderer/core/float_framebuffer.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/io/tga.h"
+#include "softrenderer/math/vec.h"
 
 // 本库公共符号正逐步迁入 namespace sr（见 docs/adr/ADR-001）。
 // 示例属于应用代码，用 using-directive 比逐处写 sr:: 前缀更接近真实集成方式。
@@ -239,7 +239,7 @@ int main()
 
     // ---- 输出 ----
     std::filesystem::create_directories("output");
-    tga::write("output/stars.tga", ldr);
+    sr::io::writeTga("output/stars.tga", ldr);
     printf("已生成 output/stars.tga (%dx%d)\n", W, H);
     return 0;
 }

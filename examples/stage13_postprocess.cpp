@@ -2,9 +2,9 @@
 // 阶段 13：后处理管线（Bloom + ACES 色调映射）
 //
 // 【源码阅读】先读这些文件：
-//   core/float_framebuffer.h  — HDR 浮点帧缓冲
-//   core/post_effects.h       — Bloom：亮部提取 + 高斯模糊 + 合成
-//   core/color.h              — ACES 色调映射：HDR → LDR
+//   core/float_framebuffer.h                 — HDR 浮点帧缓冲（只负责像素存取）
+//   render/postprocess/post_processing.h     — Bloom 算子与 ACES 色调映射
+//   core/color.h                             — 颜色与 8 位输出
 //
 // 【运行验证】生成 output/stage13_postprocess.tga（左右对比）：
 //   左：HDR → clamp（无后处理）vs 右：HDR → Bloom → ACES
@@ -12,12 +12,15 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
-#include "core/float_framebuffer.h"
-#include "core/framebuffer.h"
-#include "core/tga.h"
-#include "math/transform.h"
-#include "raster/triangle.h"
-#include "scene/mesh.h"
+#include "softrenderer/core/float_framebuffer.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/io/tga.h"
+#include "softrenderer/math/transform.h"
+#include "softrenderer/render/postprocess/post_processing.h"
+#include "softrenderer/render/raster/triangle.h"
+#include "softrenderer/resource/mesh.h"
+#include "softrenderer/resource/mesh_generator.h"
+#include "softrenderer/math/barycentric.h"
 
 // 本库公共符号正逐步迁入 namespace sr（见 docs/adr/ADR-001）。
 using namespace sr;
@@ -28,9 +31,9 @@ static void renderHDRScene(FloatFramebuffer &hdrFB, int W, int H)
     hdrFB.clear(Vec3f{0.01f, 0.01f, 0.015f}); // 暗背景
 
     const float PI = 3.14159265f;
-    Mat4 view = transform::lookAt({0, 0, 6}, {0, 0, 0}, {0, 1, 0});
-    Mat4 proj = transform::perspective(PI / 4.0f, float(W) / H, 0.1f, 100.0f);
-    Mat4 vp = transform::viewport(W, H);
+    Mat4 view = sr::transform::lookAt({0, 0, 6}, {0, 0, 0}, {0, 1, 0});
+    Mat4 proj = sr::transform::perspective(PI / 4.0f, float(W) / H, 0.1f, 100.0f);
+    Mat4 vp = sr::transform::viewport(W, H);
 
     // 5 个球，不同颜色和自发光强度
     struct Emissive
@@ -50,7 +53,7 @@ static void renderHDRScene(FloatFramebuffer &hdrFB, int W, int H)
 
     for (auto &ball : balls)
     {
-        Mesh sphere = meshgen::sphere(ball.radius, 32, 20);
+        Mesh sphere = sr::meshgen::sphere(ball.radius, 32, 20);
         Mat4 model = Mat4::translate(ball.pos.x, ball.pos.y, ball.pos.z);
         Mat4 mvp = proj * view * model;
 
@@ -85,7 +88,7 @@ static void renderHDRScene(FloatFramebuffer &hdrFB, int W, int H)
             for (int y = minY; y <= maxY; ++y)
                 for (int x = minX; x <= maxX; ++x)
                 {
-                    Vec3f bc = barycentric(p0, p1, p2, {x + 0.5f, y + 0.5f});
+                    Vec3f bc = sr::barycentric(p0, p1, p2, {x + 0.5f, y + 0.5f});
                     if (bc.x < 0 || bc.y < 0 || bc.z < 0)
                         continue;
                     float z = bc.x * s0.z + bc.y * s1.z + bc.z * s2.z;
@@ -117,10 +120,10 @@ int main()
     // ---- 右半屏：Bloom + ACES ----
     // 1. 亮部提取
     FloatFramebuffer bright(W, H), blurH(W, H), blurV(W, H);
-    hdr.brightPass(bright, 1.0f);
+    sr::postprocess::brightPass(hdr, bright, 1.0f);
     // 2. 两遍高斯模糊（水平 + 垂直）
-    bright.gaussianBlur(blurH, true, 12);
-    blurH.gaussianBlur(blurV, false, 12);
+    sr::postprocess::gaussianBlur(bright, blurH, true, 12);
+    sr::postprocess::gaussianBlur(blurH, blurV, false, 12);
     // 3. 合成：HDR + bloom
     FloatFramebuffer combined(W, H);
     for (int y = 0; y < H; ++y)
@@ -133,7 +136,7 @@ int main()
         for (int x = 0; x < W / 2; ++x)
         {
             Vec3f c = combined.getPixel(x + W / 2, y);
-            Vec3f mapped = FloatFramebuffer::gammaCorrect(FloatFramebuffer::acesToneMap(c));
+            Vec3f mapped = sr::postprocess::gammaCorrect(sr::postprocess::acesToneMap(c));
             right.setPixel(x, y, Color::fromFloat(mapped.x, mapped.y, mapped.z));
         }
 
@@ -150,7 +153,7 @@ int main()
         fb.setPixel(W / 2, y, Color(255, 200, 0));
 
     std::filesystem::create_directories("output");
-    tga::write("output/stage13_postprocess.tga", fb);
+    sr::io::writeTga("output/stage13_postprocess.tga", fb);
     std::printf("已生成 output/stage13_postprocess.tga（左=clamp, 右=Bloom+ACES）\n");
     return 0;
 }

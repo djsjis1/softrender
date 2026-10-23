@@ -12,15 +12,17 @@
 #include <string>
 #include <vector>
 
-#include "core/framebuffer.h"
-#include "core/profiler.h"
-#include "core/tga.h"
-#include "math/transform.h"
-#include "raster/renderer.h"
-#include "scene/camera.h"
-#include "scene/gltf_loader.h"
-#include "scene/mesh.h"
-#include "shader/pbr_shader.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/runtime/profiler.h"
+#include "softrenderer/io/tga.h"
+#include "softrenderer/math/transform.h"
+#include "softrenderer/render/pipeline/renderer.h"
+#include "softrenderer/scene/camera.h"
+#include "softrenderer/io/gltf_loader.h"
+#include "softrenderer/resource/mesh.h"
+#include "softrenderer/render/shader/pbr_shader.h"
+
+using namespace sr;
 
 // Base64 编码
 static std::string base64Encode(const uint8_t* data, size_t len)
@@ -160,13 +162,14 @@ int main()
     }
 
     // 加载
-    auto result = gltfloader::load("output/pbr_materials.gltf");
+    auto result = sr::io::loadGltfScene("output/pbr_materials.gltf");
     if (!result.success)
     {
         printf("加载失败: %s\n", result.error.c_str());
         return 1;
     }
-    printf("加载成功：%zu mesh, %zu 材质\n", result.meshes.size(), result.materials.size());
+    const sr::SceneAsset& scene = result.scene;
+    printf("加载成功：%zu mesh, %zu 材质\n", scene.meshes.size(), scene.materials.size());
 
     // 渲染
     {
@@ -186,30 +189,29 @@ int main()
         shader.cameraPos = cam.position;
         shader.ambient = {0.03f, 0.03f, 0.05f};
 
-        for (size_t i = 0; i < result.meshes.size(); ++i)
+        for (size_t i = 0; i < scene.meshes.size(); ++i)
         {
-            int matIdx = (i < result.meshMaterialIndices.size()) ? result.meshMaterialIndices[i] : -1;
-            if (matIdx >= 0 && matIdx < (int)result.materials.size())
+            const sr::Material* mat = scene.materialForMesh(int(i));
+            if (mat)
             {
-                const auto& mat = result.materials[matIdx];
-                shader.baseColor = mat.baseColorFactor;
-                shader.metallic = mat.metallicFactor;
-                shader.roughness = mat.roughnessFactor;
+                shader.baseColor = mat->baseColorFactor;
+                shader.metallic = mat->metallicFactor;
+                shader.roughness = mat->roughnessFactor;
                 printf("  Mesh %zu: 材质='%s' metallic=%.2f roughness=%.2f color=(%.2f,%.2f,%.2f)\n", i,
-                       mat.name.c_str(), mat.metallicFactor, mat.roughnessFactor, mat.baseColorFactor.x,
-                       mat.baseColorFactor.y, mat.baseColorFactor.z);
+                       mat->name.c_str(), mat->metallicFactor, mat->roughnessFactor, mat->baseColorFactor.x,
+                       mat->baseColorFactor.y, mat->baseColorFactor.z);
             }
 
             Mat4 model = Mat4::identity();
             shader.model = model;
             shader.mvp = shader.proj * shader.view * model;
             shader.normalMatrix = model.inversed().transposed();
-            renderer.drawMesh(fb, result.meshes[i], shader);
+            renderer.drawMesh(fb, scene.meshes[i], shader);
         }
     }
 
     // 输出
-    tga::write("output/demo_pbr_material.tga", fb);
+    sr::io::writeTga("output/demo_pbr_material.tga", fb);
     sr::Profiler::instance().flush("output/trace_pbr_material.json");
     printf("已生成 output/demo_pbr_material.tga\n");
     return 0;

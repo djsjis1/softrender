@@ -14,13 +14,14 @@
 #include <filesystem>
 #include <vector>
 
-#include "core/framebuffer.h"
-#include "core/msaa_framebuffer.h"
-#include "core/tga.h"
-#include "math/transform.h"
-#include "raster/msaa_renderer.h"
-#include "scene/mesh.h"
-#include "shader/shaders.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/core/msaa_framebuffer.h"
+#include "softrenderer/io/tga.h"
+#include "softrenderer/math/transform.h"
+#include "softrenderer/render/pipeline/msaa_renderer.h"
+#include "softrenderer/resource/mesh.h"
+#include "softrenderer/render/shader/shaders.h"
+#include "softrenderer/resource/mesh_generator.h"
 
 // 本库公共符号正逐步迁入 namespace sr（见 docs/adr/ADR-001）。
 using namespace sr;
@@ -32,13 +33,13 @@ int main()
 
     // 场景：旋转的立方体 + 球（斜线多，锯齿明显）
     const float PI = 3.14159265f;
-    Mesh cube = meshgen::cube(1.4f);
-    Mesh sphere = meshgen::sphere(0.8f, 24, 16);
+    Mesh cube = sr::meshgen::cube(1.4f);
+    Mesh sphere = sr::meshgen::sphere(0.8f, 24, 16);
 
     Mat4 modelCube = Mat4::translate(-0.8f, 0, 0) * Mat4::rotateY(0.7f) * Mat4::rotateX(0.4f);
     Mat4 modelSphere = Mat4::translate(0.9f, 0, 0);
-    Mat4 view = transform::lookAt({0, 0, 4}, {0, 0, 0}, {0, 1, 0});
-    Mat4 proj = transform::perspective(PI / 4.0f, float(halfW) / H, 0.1f, 100.0f);
+    Mat4 view = sr::transform::lookAt({0, 0, 4}, {0, 0, 0}, {0, 1, 0});
+    Mat4 proj = sr::transform::perspective(PI / 4.0f, float(halfW) / H, 0.1f, 100.0f);
 
     auto project = [&](const Vec3f &p, const Mat4 &mvp) -> std::pair<Vec2f, float> {
         Vec4f clip = mvp * Vec4f(p, 1.0f);
@@ -106,7 +107,7 @@ int main()
         fb.setPixel(halfW, y, Color(255, 200, 0));
 
     std::filesystem::create_directories("output");
-    tga::write("output/stage11_msaa.tga", fb);
+    sr::io::writeTga("output/stage11_msaa.tga", fb);
     std::printf("已生成 output/stage11_msaa.tga（左=无AA，右=4xMSAA）\n");
     return 0;
 }

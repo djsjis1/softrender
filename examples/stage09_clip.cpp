@@ -13,26 +13,30 @@
 #include <cstdio>
 #include <filesystem>
 #include <vector>
-#include "core/framebuffer.h"
-#include "core/tga.h"
-#include "raster/renderer.h"
-#include "scene/camera.h"
-#include "scene/mesh.h"
-#include "scene/texture.h"
-#include "shader/shaders.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/io/tga.h"
+#include "softrenderer/render/pipeline/renderer.h"
+#include "softrenderer/scene/camera.h"
+#include "softrenderer/resource/mesh.h"
+#include "softrenderer/resource/texture.h"
+#include "softrenderer/render/shader/shaders.h"
+#include "softrenderer/resource/mesh_generator.h"
+#include "softrenderer/resource/texture_generator.h"
+
+using namespace sr;
 
 int main()
 {
     const int W = 800, H = 600;
     Framebuffer fb(W, H, Color(30, 34, 44));
 
-    Texture checker(texgen::checkerboard(256, 8, Color(220, 220, 220), Color(70, 80, 95)));
-    Texture wallTex(texgen::checkerboard(256, 6, Color(200, 150, 120), Color(90, 60, 45)));
+    Texture checker(sr::texgen::checkerboard(256, 8, Color(220, 220, 220), Color(70, 80, 95)));
+    Texture wallTex(sr::texgen::checkerboard(256, 6, Color(200, 150, 120), Color(90, 60, 45)));
 
     // 地面 + 一堵竖墙（都用大网格，保证有三角形横跨近平面）
-    Mesh ground = meshgen::planeGrid(40.0f, 20, 20.0f);
+    Mesh ground = sr::meshgen::planeGrid(40.0f, 20, 20.0f);
     // 墙：把地面网格立起来（绕 X 转 90°）并抬到前方
-    Mesh wall = meshgen::planeGrid(20.0f, 16, 8.0f);
+    Mesh wall = sr::meshgen::planeGrid(20.0f, 16, 8.0f);
 
     Camera cam;
     // 相机压得很低、几乎贴地，且离墙很近——制造大量跨近平面三角形
@@ -94,7 +98,7 @@ int main()
 
     std::filesystem::create_directories("output");
     const char *path = "output/stage09_clip.tga";
-    if (!tga::write(path, fb))
+    if (!sr::io::writeTga(path, fb))
     {
         std::printf("写文件失败: %s\n", path);
         return 1;

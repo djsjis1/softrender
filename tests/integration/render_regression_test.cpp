@@ -28,16 +28,20 @@
 // ============================================================
 #include <gtest/gtest.h>
 
-#include "core/blend.h"
-#include "core/framebuffer.h"
-#include "math/rect.h"
-#include "raster/renderer.h"
-#include "raster/renderer2d.h"
-#include "scene/camera.h"
-#include "scene/mesh.h"
-#include "scene/texture.h"
-#include "shader/shaders.h"
-#include "test/pixel_regression.h"
+#include "softrenderer/core/blend.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/math/rect.h"
+#include "softrenderer/render/pipeline/renderer.h"
+#include "softrenderer/render/draw2d/renderer2d.h"
+#include "softrenderer/scene/camera.h"
+#include "softrenderer/resource/mesh.h"
+#include "softrenderer/resource/texture.h"
+#include "softrenderer/render/shader/shaders.h"
+#include "softrenderer/resource/mesh_generator.h"
+#include "softrenderer/resource/texture_generator.h"
+#include "support/pixel_regression.h"
+
+using namespace sr;
 
 namespace {
 
@@ -87,7 +91,7 @@ TEST(RenderRegression, zbuffer_twoOverlappingCubes)
     renderer.cullBackface = true;
 
     // 近处小红立方体，稍微偏左，部分遮挡远处的大蓝立方体
-    const Mesh nearBox = meshgen::cube(1.6f);
+    const Mesh nearBox = sr::meshgen::cube(1.6f);
     shader.model = Mat4::translate(-0.7f, 0.8f, 1.5f) * Mat4::rotateY(0.5f);
     shader.mvp = shader.proj * shader.view * shader.model;
     shader.normalMatrix = shader.model.inversed().transposed();
@@ -96,7 +100,7 @@ TEST(RenderRegression, zbuffer_twoOverlappingCubes)
     renderer.drawMesh(fb, nearBox, shader);
 
     // 远处大蓝立方体，位置更靠后、更靠右
-    const Mesh farBox = meshgen::cube(2.6f);
+    const Mesh farBox = sr::meshgen::cube(2.6f);
     shader.model = Mat4::translate(1.1f, 1.2f, -2.0f) * Mat4::rotateY(-0.6f);
     shader.mvp = shader.proj * shader.view * shader.model;
     shader.normalMatrix = shader.model.inversed().transposed();
@@ -121,7 +125,7 @@ TEST(RenderRegression, pipeline_phongTexturedSphere)
     cam.yaw = -1.8f;  // 非默认朝向，让球体落在画面偏侧位置
     cam.aspect = float(kRegressionWidth) / kRegressionHeight;
 
-    const Texture uvgrid(texgen::uvGrid(128, 8));
+    const Texture uvgrid(sr::texgen::uvGrid(128, 8));
 
     PhongShader shader;
     shader.view = cam.viewMatrix();
@@ -135,7 +139,7 @@ TEST(RenderRegression, pipeline_phongTexturedSphere)
     renderer.cullBackface = true;
 
     // 分段数固定：改变分段数会改变几何，基准图自然失效
-    const Mesh ball = meshgen::sphere(1.3f, 32, 20);
+    const Mesh ball = sr::meshgen::sphere(1.3f, 32, 20);
     shader.model = Mat4::translate(0.9f, 0.6f, 0.0f);
     shader.mvp = shader.proj * shader.view * shader.model;
     shader.normalMatrix = shader.model.inversed().transposed();
@@ -185,7 +189,7 @@ TEST(RenderRegression, blend2d_alphaComposition)
     // 文字：验证点阵字体与 deviceTransform 缓存路径
     r.clearScissor();
     r.setBlend(BlendMode::Opaque);
-    r.setColor(colors::white);
+    r.setColor(sr::colors::white);
     r.text(8.0f, 8.0f, "REGRESSION");
 
     r.end();

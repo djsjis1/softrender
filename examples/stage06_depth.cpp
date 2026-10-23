@@ -15,12 +15,16 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
-#include "core/depthbuffer.h"
-#include "core/framebuffer.h"
-#include "core/tga.h"
-#include "math/transform.h"
-#include "raster/triangle.h"
-#include "scene/mesh.h"
+#include "softrenderer/core/depthbuffer.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/io/tga.h"
+#include "softrenderer/math/transform.h"
+#include "softrenderer/render/raster/triangle.h"
+#include "softrenderer/resource/mesh.h"
+#include "softrenderer/resource/mesh_generator.h"
+#include "softrenderer/math/barycentric.h"
+
+using namespace sr;
 
 struct Scene
 {
@@ -36,22 +40,22 @@ int main()
     DepthBuffer zbuf(W, H);
 
     const float PI = 3.14159265f;
-    Mat4 view = transform::lookAt({0, 1.2f, 4}, {0, 0, 0}, {0, 1, 0});
-    Mat4 proj = transform::perspective(PI / 4.0f, float(W) / H, 0.1f, 100.0f);
-    Mat4 vp = transform::viewport(W, H);
+    Mat4 view = sr::transform::lookAt({0, 1.2f, 4}, {0, 0, 0}, {0, 1, 0});
+    Mat4 proj = sr::transform::perspective(PI / 4.0f, float(W) / H, 0.1f, 100.0f);
+    Mat4 vp = sr::transform::viewport(W, H);
 
     // 平行光方向（指向光源），朗伯光照 = max(0, 法线·光向)
     Vec3f lightDir = Vec3f{0.5f, 0.8f, 0.6f}.normalized();
 
     // 场景：三个立方体 + 一个球，位置互相遮挡
     std::vector<Scene> scenes = {
-        {meshgen::cube(1.2f), Mat4::translate(-1.0f, 0, 0) * Mat4::rotateY(0.6f),
+        {sr::meshgen::cube(1.2f), Mat4::translate(-1.0f, 0, 0) * Mat4::rotateY(0.6f),
          Color(230, 100, 90)},
-        {meshgen::cube(1.2f), Mat4::translate(1.0f, 0, -0.5f) * Mat4::rotateY(-0.4f),
+        {sr::meshgen::cube(1.2f), Mat4::translate(1.0f, 0, -0.5f) * Mat4::rotateY(-0.4f),
          Color(90, 170, 230)},
-        {meshgen::sphere(0.9f, 32, 24), Mat4::translate(0, 0.1f, 1.0f),
+        {sr::meshgen::sphere(0.9f, 32, 24), Mat4::translate(0, 0.1f, 1.0f),
          Color(120, 220, 130)},
-        {meshgen::cube(0.6f), Mat4::translate(0.2f, 1.2f, 0.3f) * Mat4::rotateX(0.5f),
+        {sr::meshgen::cube(0.6f), Mat4::translate(0.2f, 1.2f, 0.3f) * Mat4::rotateX(0.5f),
          Color(240, 210, 100)},
     };
 
@@ -117,7 +121,7 @@ int main()
             {
                 for (int x = minX; x <= maxX; ++x)
                 {
-                    Vec3f bc = barycentric(p0, p1, p2, {x + 0.5f, y + 0.5f});
+                    Vec3f bc = sr::barycentric(p0, p1, p2, {x + 0.5f, y + 0.5f});
                     if (bc.x < 0 || bc.y < 0 || bc.z < 0)
                         continue;
                     // 深度插值（屏幕空间线性插值 z 即可，z 已在 NDC 后）
@@ -136,12 +140,12 @@ int main()
     }
 
     std::filesystem::create_directories("output");
-    tga::write("output/stage06_depth.tga", fb);
+    sr::io::writeTga("output/stage06_depth.tga", fb);
 
     // 深度可视化：把 zbuffer 映射成灰度图（近亮远暗）
     // 注意：透视深度是"非线性"的，数值几乎全部挤在接近 1 的远端，
     // 直接用 1-z 会几乎全黑。所以先扫描出实际 [min,max] 再线性拉伸。
-    Framebuffer zvis(W, H, colors::black);
+    Framebuffer zvis(W, H, sr::colors::black);
     float zmin = DepthBuffer::kFar, zmax = -DepthBuffer::kFar;
     for (int y = 0; y < H; ++y)
         for (int x = 0; x < W; ++x)
@@ -162,7 +166,7 @@ int main()
             float g = 1.0f - (z - zmin) / range; // 拉伸到 [0,1]，近=1 亮
             zvis.setPixel(x, y, Color::fromFloat(g, g, g));
         }
-    tga::write("output/stage06_depth_zbuf.tga", zvis);
+    sr::io::writeTga("output/stage06_depth_zbuf.tga", zvis);
 
     std::printf("已生成 output/stage06_depth.tga 与 output/stage06_depth_zbuf.tga\n");
     return 0;

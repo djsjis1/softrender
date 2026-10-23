@@ -1,7 +1,8 @@
 /** @file command_buffer_test.cpp
  *  @brief 任务异常、等待语义与生命周期回归。
  */
-#include "core/command_buffer.h"
+#include "softrenderer/runtime/command_buffer.h"
+#include "softrenderer/runtime/thread_pool.h"
 
 #include <gtest/gtest.h>
 
@@ -10,6 +11,8 @@
 #include <memory>
 #include <stdexcept>
 #include <vector>
+
+using namespace sr;
 
 namespace sr::tests {
 TEST(ThreadFailures, waitAll_throwingTask_reportsOnCallerWithoutTerminating)

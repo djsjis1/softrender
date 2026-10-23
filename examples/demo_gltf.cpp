@@ -14,15 +14,18 @@
 #include <string>
 #include <vector>
 
-#include "core/framebuffer.h"
-#include "core/profiler.h"
-#include "core/tga.h"
-#include "math/transform.h"
-#include "raster/renderer.h"
-#include "scene/camera.h"
-#include "scene/gltf_loader.h"
-#include "scene/mesh.h"
-#include "shader/shaders.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/runtime/profiler.h"
+#include "softrenderer/io/tga.h"
+#include "softrenderer/math/transform.h"
+#include "softrenderer/render/pipeline/renderer.h"
+#include "softrenderer/scene/camera.h"
+#include "softrenderer/io/gltf_loader.h"
+#include "softrenderer/resource/mesh.h"
+#include "softrenderer/render/shader/shaders.h"
+#include "softrenderer/resource/mesh_generator.h"
+
+using namespace sr;
 
 // 生成一个内嵌 buffer 的极简 glTF JSON（一个三角形）
 // buffer 数据：3 个顶点位置 (3*3*4=36 bytes) + 3 个索引 (3*2=6 bytes, padded to 8)
@@ -105,10 +108,10 @@ int main()
     Mesh mesh;
     {
         SR_PROFILE_SCOPE("load_gltf");
-        if (!gltfloader::loadFirstMesh("output/test_triangle.gltf", mesh))
+        if (!sr::io::loadGltfMesh("output/test_triangle.gltf", mesh))
         {
             printf("glTF 加载失败，使用 fallback 网格\n");
-            mesh = meshgen::cube(1.0f);
+            mesh = sr::meshgen::cube(1.0f);
         }
         else
         {
@@ -144,7 +147,7 @@ int main()
     // ---- 4. 输出 ----
     {
         SR_PROFILE_SCOPE("write_output");
-        tga::write("output/demo_gltf.tga", fb);
+        sr::io::writeTga("output/demo_gltf.tga", fb);
         printf("已生成 output/demo_gltf.tga\n");
     }
 

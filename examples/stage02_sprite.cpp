@@ -4,7 +4,7 @@
 // 【源码阅读】先读这些文件：
 //   core/framebuffer.h  — 帧缓冲坐标约定（y 向上）
 //   core/color.h        — Color::lerp 逐行渐变
-//   raster/shape2d.h    — draw2d::drawLine 画轮廓
+//   raster/shape2d.h    — sr::draw2d::drawLine 画轮廓
 //
 // 【运行验证】生成 output/stage02_sprite.png：
 //   黄昏天空渐变 + 像素勇者（16x20 字符画，12 倍放大）+ 地面影子
@@ -15,9 +15,11 @@
 #include <string>
 #include <vector>
 
-#include "core/framebuffer.h"
-#include "core/image_write.h"
-#include "raster/shape2d.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/io/image_write.h"
+#include "softrenderer/render/draw2d/shape2d.h"
+
+using namespace sr;
 
 // 字符 → 颜色 映射（'.' 表示透明像素）
 struct SpritePalette
@@ -66,7 +68,7 @@ void drawSprite(Framebuffer& fb, const std::vector<std::string>& sprite, const s
                 continue;  // 透明像素跳过
 
             // 查调色板；查不到就给品红色，方便发现字符拼写错误
-            Color c = colors::magenta;
+            Color c = sr::colors::magenta;
             for (const auto& p : palette)
                 if (p.ch == ch)
                 {
@@ -96,7 +98,7 @@ int main()
     for (int y = 0; y < H; ++y)
     {
         float t = float(y) / float(H - 1);
-        draw2d::drawLine(fb, 0, y, W - 1, y, Color::lerp(skyBottom, skyTop, t));
+        sr::draw2d::drawLine(fb, 0, y, W - 1, y, Color::lerp(skyBottom, skyTop, t));
     }
 
     // ---------- 2. 像素方块太阳：两圈"光晕"，用勾股距离判断圆形范围 ----------
@@ -115,17 +117,17 @@ int main()
     // ---------- 3. 两朵被夕阳染红的云 ----------
     {
         const Color cloud(250, 190, 150);
-        draw2d::fillRect(fb, 120, 450, 90, 14, cloud);  // 云 1：上中下三块拼
-        draw2d::fillRect(fb, 150, 436, 56, 14, cloud);
-        draw2d::fillRect(fb, 140, 464, 60, 12, cloud);
-        draw2d::fillRect(fb, 480, 500, 70, 12, cloud);  // 云 2：小一点
-        draw2d::fillRect(fb, 500, 490, 44, 10, cloud);
+        sr::draw2d::fillRect(fb, 120, 450, 90, 14, cloud);  // 云 1：上中下三块拼
+        sr::draw2d::fillRect(fb, 150, 436, 56, 14, cloud);
+        sr::draw2d::fillRect(fb, 140, 464, 60, 12, cloud);
+        sr::draw2d::fillRect(fb, 480, 500, 70, 12, cloud);  // 云 2：小一点
+        sr::draw2d::fillRect(fb, 500, 490, 44, 10, cloud);
     }
 
     // ---------- 4. 地面 + 地平线 + 小草 ----------
     for (int y = 0; y < 100; ++y)
-        draw2d::drawLine(fb, 0, y, W - 1, y, Color(38, 28, 42));    // 暗色大地
-    draw2d::drawLine(fb, 0, 100, W - 1, 100, Color(255, 170, 90));  // 被夕阳照亮的地平线
+        sr::draw2d::drawLine(fb, 0, y, W - 1, y, Color(38, 28, 42));    // 暗色大地
+    sr::draw2d::drawLine(fb, 0, 100, W - 1, 100, Color(255, 170, 90));  // 被夕阳照亮的地平线
     const int grass[][2] = {{60, 97}, {150, 98}, {260, 96}, {330, 99}, {420, 97}, {560, 98}, {700, 96}};  // 几丛小草
     for (const auto& g : grass)
     {
@@ -140,7 +142,7 @@ int main()
     const int hy = 100;              // 脚底贴在地面上
 
     // 影子：脚下一层暗色（没有 alpha 混合，直接画深色块）
-    draw2d::fillRect(fb, hx + 20, hy - 6, heroW - 40, 6, Color(20, 14, 20));
+    sr::draw2d::fillRect(fb, hx + 20, hy - 6, heroW - 40, 6, Color(20, 14, 20));
 
     std::vector<SpritePalette> palette = {
         {'H', Color(238, 186, 48)},   // 金发
@@ -157,7 +159,7 @@ int main()
 
     // ---------- 6. 导出 PNG ----------
     const std::string path = "output/stage02_sprite.png";
-    if (!imagewriter::writeImage(path, fb))
+    if (!sr::io::writeImage(path, fb))
     {
         std::printf("写文件失败: %s\n", path.c_str());
         return 1;

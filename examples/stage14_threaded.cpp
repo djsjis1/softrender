@@ -15,12 +15,16 @@
 #include <filesystem>
 #include <thread>
 #include <vector>
-#include "core/framebuffer.h"
-#include "core/tga.h"
-#include "math/transform.h"
-#include "raster/triangle.h"
-#include "scene/mesh.h"
-#include "shader/shaders.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/io/tga.h"
+#include "softrenderer/math/transform.h"
+#include "softrenderer/render/raster/triangle.h"
+#include "softrenderer/resource/mesh.h"
+#include "softrenderer/render/shader/shaders.h"
+#include "softrenderer/resource/mesh_generator.h"
+#include "softrenderer/math/barycentric.h"
+
+using namespace sr;
 
 // 一条水平带的局部缓冲
 struct StripBuffer
@@ -64,7 +68,7 @@ static void renderStrip(StripBuffer &strip, const std::vector<std::pair<Mesh, Ma
     shader.lightDir = Vec3f{0.4f, 0.8f, 0.5f}.normalized();
     shader.ambient = {0.15f, 0.15f, 0.18f};
     shader.cameraPos = {0, 3, 8};
-    Mat4 vp = transform::viewport(W, H);
+    Mat4 vp = sr::transform::viewport(W, H);
 
     for (auto &[mesh, model] : objects)
     {
@@ -105,7 +109,7 @@ static void renderStrip(StripBuffer &strip, const std::vector<std::pair<Mesh, Ma
             for (int y = minY; y <= maxY; ++y)
                 for (int x = minX; x <= maxX; ++x)
                 {
-                    Vec3f bc = barycentric(p0, p1, p2, {x + 0.5f, y + 0.5f});
+                    Vec3f bc = sr::barycentric(p0, p1, p2, {x + 0.5f, y + 0.5f});
                     if (bc.x < 0 || bc.y < 0 || bc.z < 0)
                         continue;
                     float z = bc.x * s0.z + bc.y * s1.z + bc.z * s2.z;
@@ -124,7 +128,7 @@ int main()
 
     // 场景：一堆球体
     std::vector<std::pair<Mesh, Mat4>> objects;
-    Mesh sphere = meshgen::sphere(0.6f, 32, 24);
+    Mesh sphere = sr::meshgen::sphere(0.6f, 32, 24);
     for (int i = 0; i < 20; ++i)
     {
         float x = (i % 5 - 2) * 2.0f;
@@ -133,8 +137,8 @@ int main()
         objects.push_back({sphere, Mat4::translate(x, y, z)});
     }
 
-    Mat4 view = transform::lookAt({0, 3, 8}, {0, 0, 0}, {0, 1, 0});
-    Mat4 proj = transform::perspective(3.14159f / 3.0f, float(W) / H, 0.1f, 100.0f);
+    Mat4 view = sr::transform::lookAt({0, 3, 8}, {0, 0, 0}, {0, 1, 0});
+    Mat4 proj = sr::transform::perspective(3.14159f / 3.0f, float(W) / H, 0.1f, 100.0f);
 
     // ---- 多线程渲染 ----
     auto t0 = std::chrono::high_resolution_clock::now();
@@ -180,7 +184,7 @@ int main()
     float msSingle = std::chrono::duration<float, std::milli>(t3 - t2).count();
 
     std::filesystem::create_directories("output");
-    tga::write("output/stage14_threaded.tga", fb);
+    sr::io::writeTga("output/stage14_threaded.tga", fb);
     std::printf("已生成 output/stage14_threaded.tga\n");
     std::printf("  线程数: %d\n", numThreads);
     std::printf("  单线程: %.1f ms\n", msSingle);

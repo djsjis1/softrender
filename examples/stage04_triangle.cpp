@@ -15,9 +15,12 @@
 #include <cstdio>
 #include <filesystem>
 #include <random>
-#include "core/framebuffer.h"
-#include "core/tga.h"
-#include "raster/triangle.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/io/tga.h"
+#include "softrenderer/render/raster/triangle.h"
+#include "softrenderer/render/draw2d/shape2d.h"
+
+using namespace sr;
 
 int main()
 {
@@ -28,7 +31,7 @@ int main()
     // 三个顶点分别是纯红/纯绿/纯蓝，内部每个像素的颜色
     // 就是它的重心坐标 (α,β,γ) 本身——这张图等于把重心坐标可视化了
     fillTriangleGradient(fb, {80, 250}, {360, 250}, {220, 560},
-                         colors::red, colors::green, colors::blue);
+                         sr::colors::red, sr::colors::green, sr::colors::blue);
 
     // ---------- 2. 三角形扇 + 线框 ----------
     {
@@ -44,7 +47,7 @@ int main()
             Vec2f p1{center.x + 150 * std::cos(a1), center.y + 150 * std::sin(a1)};
             Color c(uint8_t(ch(rng)), uint8_t(ch(rng)), uint8_t(ch(rng)));
             fillTriangle(fb, center, p0, p1, c);
-            wireTriangle(fb, center, p0, p1, colors::white);
+            sr::draw2d::wireTriangle(fb, center, p0, p1, sr::colors::white);
         }
     }
 
@@ -74,7 +77,7 @@ int main()
 
     std::filesystem::create_directories("output");
     const char *path = "output/stage04_triangle.tga";
-    if (!tga::write(path, fb))
+    if (!sr::io::writeTga(path, fb))
     {
         std::printf("写文件失败: %s\n", path);
         return 1;

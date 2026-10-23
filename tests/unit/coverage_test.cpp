@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 
-#include "raster/msaa_renderer.h"
-#include "raster/rasterizer_fast.h"
-#include "raster/renderer.h"
+#include "softrenderer/render/pipeline/msaa_renderer.h"
+#include "softrenderer/render/raster/rasterizer_fast.h"
+#include "softrenderer/render/pipeline/renderer.h"
+
+using namespace sr;
 
 namespace sr::tests {
 namespace {
@@ -60,8 +62,8 @@ TEST(RasterCoverage, drawMesh_clippedQuad_hasNoInternalCrackOrDoubleHit)
 TEST(MSAACoverage, rasterize_centerOutside_commitsCoveredSample)
 {
     MSAAFlatRenderer<4> renderer(1, 1);
-    renderer.clear(colors::black);
-    renderer.rasterize({0.75f, 0.5f}, {1, 0.5f}, {1, 1}, 0.2f, 0.2f, 0.2f, colors::red);
+    renderer.clear(sr::colors::black);
+    renderer.rasterize({0.75f, 0.5f}, {1, 0.5f}, {1, 1}, 0.2f, 0.2f, 0.2f, sr::colors::red);
     Framebuffer fb(1, 1);
     renderer.resolveTo(fb);
     EXPECT_EQ(fb.getPixel(0, 0).r, 64);
@@ -69,9 +71,9 @@ TEST(MSAACoverage, rasterize_centerOutside_commitsCoveredSample)
 TEST(MSAACoverage, rasterize_backgroundDoesNotOverwriteOccludedSample)
 {
     MSAAFlatRenderer<4> renderer(1, 1);
-    renderer.clear(colors::black);
-    renderer.rasterize({0.75f, 0.5f}, {1, 0.5f}, {1, 1}, 0.2f, 0.2f, 0.2f, colors::red);
-    renderer.rasterize({-2, -2}, {4, -2}, {-2, 4}, 0.8f, 0.8f, 0.8f, colors::blue);
+    renderer.clear(sr::colors::black);
+    renderer.rasterize({0.75f, 0.5f}, {1, 0.5f}, {1, 1}, 0.2f, 0.2f, 0.2f, sr::colors::red);
+    renderer.rasterize({-2, -2}, {4, -2}, {-2, 4}, 0.8f, 0.8f, 0.8f, sr::colors::blue);
     Framebuffer fb(1, 1);
     renderer.resolveTo(fb);
     EXPECT_EQ(fb.getPixel(0, 0).r, 64);

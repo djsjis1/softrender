@@ -36,3 +36,34 @@ run_checked("${CMAKE_COMMAND}" -S "${SR_SOURCE_DIR}/tests/integration/consumer" 
 run_checked("${CMAKE_COMMAND}" --build "${work}/build" --config "${SR_CONFIG}" --parallel 2)
 run_checked("${CMAKE_CTEST_COMMAND}" --test-dir "${work}/build" -C "${SR_CONFIG}" --output-on-failure)
 message(STATUS "Consumer ${SR_MODE}: configure, build and run passed")
+
+# 只请求 core 组件的外部工程：验证依赖闭包不拉入 io / runtime / 线程。
+run_checked("${CMAKE_COMMAND}" -S "${SR_SOURCE_DIR}/tests/integration/consumer_core" -B "${work}/build-core" ${configure_args})
+run_checked("${CMAKE_COMMAND}" --build "${work}/build-core" --config "${SR_CONFIG}" --parallel 2)
+run_checked("${CMAKE_CTEST_COMMAND}" --test-dir "${work}/build-core" -C "${SR_CONFIG}" --output-on-failure)
+message(STATUS "Core-only consumer ${SR_MODE}: configure, build and run passed")
+
+# 只请求 render 组件：验证使用核心渲染不需要文件解析、线程与窗口。
+run_checked("${CMAKE_COMMAND}" -S "${SR_SOURCE_DIR}/tests/integration/consumer_render" -B "${work}/build-render" ${configure_args})
+run_checked("${CMAKE_COMMAND}" --build "${work}/build-render" --config "${SR_CONFIG}" --parallel 2)
+run_checked("${CMAKE_CTEST_COMMAND}" --test-dir "${work}/build-render" -C "${SR_CONFIG}" --output-on-failure)
+message(STATUS "Render-only consumer ${SR_MODE}: configure, build and run passed")
+
+# 安装产物边界：不包含测试/基准/私有实现头与第三方解析器头。
+if(SR_MODE STREQUAL "installed")
+    file(GLOB_RECURSE leaked_headers "${relocated}/include/softrenderer/*")
+    foreach(header IN LISTS leaked_headers)
+        file(RELATIVE_PATH rel "${relocated}/include/softrenderer" "${header}")
+        string(REPLACE "\\" "/" rel "${rel}")
+        if(rel MATCHES "^(test|tests|benchmarks)/" OR rel MATCHES "(^|/)(stb_|tiny_gltf|tiny_obj|nlohmann)")
+            message(FATAL_ERROR "Installed package leaks internal header: include/softrenderer/${rel}")
+        endif()
+    endforeach()
+    foreach(unexpected IN ITEMS tests benchmarks practice platform third examples src)
+        if(EXISTS "${relocated}/${unexpected}")
+            message(FATAL_ERROR "Installed package contains non-public directory: ${unexpected}/")
+        endif()
+    endforeach()
+    message(STATUS "Installed package layout: only public headers + components")
+endif()
+

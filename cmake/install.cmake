@@ -1,52 +1,60 @@
 # ============================================================
 # SoftRenderer 安装规则
 #
-# 安装后其他项目可通过 find_package(SoftRenderer) 使用：
-#   find_package(SoftRenderer REQUIRED)
-#   target_link_libraries(myapp PRIVATE SoftRenderer::softrenderer)
+# 安装后其他项目可通过 find_package(SoftRenderer [COMPONENTS ...]) 使用：
+#   find_package(SoftRenderer REQUIRED COMPONENTS core render)
+#   target_link_libraries(myapp PRIVATE SoftRenderer::core SoftRenderer::render)
+#
+# 只安装明确的公共接口：
+#   - include/softrenderer/ 下的公共头（不含 src/ 私有实现头）
+#   - 各组件目标与第三方实现库
+#   - 可选 EnTT 适配组件的公共头
+# tests / benchmarks / 私有实现头 / 第三方解析器头一律不安装。
 # ============================================================
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-# 安装头文件（渲染器本体 = src/ 下所有 .h）
-install(DIRECTORY ${PROJECT_SOURCE_DIR}/src/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/softrenderer
+# 安装公共头：唯一正式入口 include/softrenderer/
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     FILES_MATCHING PATTERN "*.h"
 )
 
-# 安装生成的版本头
+# 安装生成的版本头（PROJECT_VERSION 是版本号的唯一来源）
 install(DIRECTORY ${PROJECT_BINARY_DIR}/generated/softrenderer/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/softrenderer
     FILES_MATCHING PATTERN "*.h"
 )
 
-# 安装 stb_image 头文件
-install(FILES
-    ${PROJECT_SOURCE_DIR}/third/stb/stb_image.h
-    ${PROJECT_SOURCE_DIR}/third/stb/stb_image_write.h
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/softrenderer/stb
-)
+# EnTT 的公共头只随可选适配组件安装（保留许可证）
+if(SR_ENABLE_ENTT)
+    install(DIRECTORY ${PROJECT_SOURCE_DIR}/third/entt/src/entt
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/softrenderer
+    )
+    install(FILES ${PROJECT_SOURCE_DIR}/third/entt/LICENSE
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/softrenderer/entt
+        OPTIONAL
+    )
+endif()
 
-# 安装 tinyobjloader 头文件
-install(FILES ${PROJECT_SOURCE_DIR}/third/tiny_obj_loader.h
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/softrenderer
+# 组件目标：按实际构建结果导出
+set(SR_INSTALL_TARGETS
+    softrenderer
+    softrenderer_core
+    softrenderer_render
+    softrenderer_scene
 )
+if(SR_BUILD_IO)
+    list(APPEND SR_INSTALL_TARGETS third_party_impl softrenderer_io)
+endif()
+if(SR_BUILD_RUNTIME)
+    list(APPEND SR_INSTALL_TARGETS softrenderer_runtime)
+endif()
+if(SR_ENABLE_ENTT)
+    list(APPEND SR_INSTALL_TARGETS sr_entt)
+endif()
 
-# 公共 glTF/动画头直接引用 tinygltf，安装包必须包含它及 JSON 依赖。
-install(FILES ${PROJECT_SOURCE_DIR}/third/tinygltf/tiny_gltf.h
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/softrenderer/tinygltf
-)
-install(FILES ${PROJECT_SOURCE_DIR}/third/nlohmann/json.hpp
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/softrenderer/nlohmann
-)
-
-# 安装 EnTT 头文件
-install(DIRECTORY ${PROJECT_SOURCE_DIR}/third/entt/src/entt
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/softrenderer
-)
-
-# 核心是 INTERFACE 目标，资源解析由 third_party_impl 静态库提供符号。
-install(TARGETS softrenderer third_party_impl sr_entt EXPORT SoftRendererTargets
+install(TARGETS ${SR_INSTALL_TARGETS} EXPORT SoftRendererTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )

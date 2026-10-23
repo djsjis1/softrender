@@ -1,15 +1,18 @@
 /** @file renderer_test.cpp
  *  @brief 验证 discard、深度提交与遮挡顺序的公共渲染行为。
  */
-#include "raster/renderer.h"
+#include "softrenderer/render/pipeline/renderer.h"
+#include "softrenderer/render/pipeline/surface_shader.h"
 
 #include <gtest/gtest.h>
+
+using namespace sr;
 
 namespace sr::tests
 {
 namespace
 {
-struct MaskShader : Shader
+struct MaskShader : SurfaceShader
 {
     bool discardAll = false;
     bool discardLeft = false;
@@ -48,7 +51,7 @@ TEST(RendererDiscard, drawMesh_discardAll_preservesClearDepthAndColor)
 {
     Renderer renderer(16, 16);
     Framebuffer framebuffer(16, 16);
-    renderer.clear(framebuffer, colors::black);
+    renderer.clear(framebuffer, sr::colors::black);
     MaskShader shader;
     shader.discardAll = true;
     renderer.drawMesh(framebuffer, makeTriangle(0), shader);
@@ -64,7 +67,7 @@ TEST(RendererDiscard, drawMesh_partialDiscard_backgroundVisibleInEitherOrder)
         SCOPED_TRACE(backgroundFirst);
         Renderer renderer(16, 16);
         Framebuffer framebuffer(16, 16);
-        renderer.clear(framebuffer, colors::black);
+        renderer.clear(framebuffer, sr::colors::black);
         MaskShader foreground;
         foreground.baseColor = {1, 0, 0};
         foreground.discardLeft = true;

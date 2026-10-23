@@ -1,11 +1,13 @@
 /** @file arena_test.cpp
  *  @brief Arena 的边界、跨块数据完整性与重复帧复用测试。
  */
-#include "core/arena.h"
+#include "softrenderer/core/arena.h"
 
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <limits>
+
+using namespace sr;
 
 namespace sr::tests
 {

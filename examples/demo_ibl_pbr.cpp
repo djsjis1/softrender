@@ -11,15 +11,18 @@
 #include <cstdio>
 #include <filesystem>
 
-#include "core/framebuffer.h"
-#include "core/profiler.h"
-#include "core/tga.h"
-#include "math/transform.h"
-#include "raster/renderer.h"
-#include "scene/camera.h"
-#include "scene/cubemap.h"
-#include "scene/mesh.h"
-#include "shader/pbr_shader.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/runtime/profiler.h"
+#include "softrenderer/io/tga.h"
+#include "softrenderer/math/transform.h"
+#include "softrenderer/render/pipeline/renderer.h"
+#include "softrenderer/scene/camera.h"
+#include "softrenderer/resource/cubemap.h"
+#include "softrenderer/resource/mesh.h"
+#include "softrenderer/render/shader/pbr_shader.h"
+#include "softrenderer/resource/mesh_generator.h"
+
+using namespace sr;
 
 int main()
 {
@@ -34,7 +37,7 @@ int main()
     printf("已生成程序化天空 cubemap (64x64)\n");
 
     // 球体网格
-    Mesh sphere = meshgen::sphere(1.0f, 48, 32);
+    Mesh sphere = sr::meshgen::sphere(1.0f, 48, 32);
 
     // 渲染
     {
@@ -94,7 +97,7 @@ int main()
 
     // 输出
     std::filesystem::create_directories("output");
-    tga::write("output/demo_ibl_pbr.tga", fb);
+    sr::io::writeTga("output/demo_ibl_pbr.tga", fb);
     sr::Profiler::instance().flush("output/trace_ibl_pbr.json");
     printf("已生成 output/demo_ibl_pbr.tga\n");
     printf("  左=光滑金属(金) 中=粗糙金属(铜) 右=非金属(蓝塑料)\n");

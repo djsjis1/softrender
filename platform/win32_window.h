@@ -21,7 +21,7 @@
 #include <windows.h>
 #include <string>
 #include <vector>
-#include "core/framebuffer.h"
+#include "softrenderer/core/framebuffer.h"
 
 // ============================================================
 // Win32Window：用纯 Win32 + GDI 显示 framebuffer 的最小实时窗口。
@@ -97,9 +97,9 @@ public:
     }
 
     // 把 framebuffer 贴到窗口
-    void present(const Framebuffer &fb)
+    void present(const sr::Framebuffer &fb)
     {
-        const Color *src = fb.data();
+        const sr::Color *src = fb.data();
         size_t n = size_t(width_) * height_;
         for (size_t i = 0; i < n; ++i)
         {

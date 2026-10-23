@@ -16,10 +16,12 @@
 #include <string>
 #include <vector>
 
-#include "core/framebuffer.h"
-#include "core/image_write.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/io/image_write.h"
 #include "platform/win32_window.h"
-#include "raster/shape2d.h"
+#include "softrenderer/render/draw2d/shape2d.h"
+
+using namespace sr;
 
 // 字符 → 颜色 映射（'.' 表示透明像素）
 struct SpritePalette
@@ -64,7 +66,7 @@ void drawSprite(Framebuffer& fb, const std::vector<std::string>& sprite, const s
                 continue;  // 透明像素跳过
 
             // 查调色板；查不到就给品红色，方便发现字符拼写错误
-            Color c = colors::magenta;
+            Color c = sr::colors::magenta;
             for (const auto& p : palette)
                 if (p.ch == ch)
                 {
@@ -157,31 +159,31 @@ int main()
             float k = float(y) / float(H - 1);
             Color base = Color::lerp(skyDay, skyNight, 1.0f - dayK);  // 高度比例调亮度
             Color c = Color::lerp(base, skyNight, k);
-            draw2d::drawLine(fb, 0, y, W - 1, y, c);
+            sr::draw2d::drawLine(fb, 0, y, W - 1, y, c);
         }
 
         // ---- 太阳：高于地平线才画，颜色随高度变暗 ----
         if (sunY > 120)
         {
             Color sunCore = Color::lerp(Color(255, 214, 96), Color(255, 120, 60), 1.0f - dayK);
-            draw2d::fillCircle(fb, 620, sunY, 58, Color(250, 150, 70));  // 外圈光晕
-            draw2d::fillCircle(fb, 620, sunY, 34, sunCore);              // 亮核
+            sr::draw2d::fillCircle(fb, 620, float(sunY), 58, Color(250, 150, 70));  // 外圈光晕
+            sr::draw2d::fillCircle(fb, 620, float(sunY), 34, sunCore);              // 亮核
         }
 
         // ---- 云：两朵速度不同，从左飘到右再绕回 ----
         const Color cloud = Color::lerp(Color(250, 190, 150), Color(60, 66, 96), 1.0f - dayK);
         int cloudX1 = int(120 + 20.0f * t) % (W + 300) - 150;
-        draw2d::fillRect(fb, cloudX1, 450, 90, 14, cloud);
-        draw2d::fillRect(fb, cloudX1 + 30, 436, 56, 14, cloud);
-        draw2d::fillRect(fb, cloudX1 + 20, 464, 60, 12, cloud);
+        sr::draw2d::fillRect(fb, cloudX1, 450, 90, 14, cloud);
+        sr::draw2d::fillRect(fb, cloudX1 + 30, 436, 56, 14, cloud);
+        sr::draw2d::fillRect(fb, cloudX1 + 20, 464, 60, 12, cloud);
         int cloudX2 = int(480 + 12.0f * t) % (W + 300) - 150;
-        draw2d::fillRect(fb, cloudX2, 500, 70, 12, cloud);
-        draw2d::fillRect(fb, cloudX2 + 20, 490, 44, 10, cloud);
+        sr::draw2d::fillRect(fb, cloudX2, 500, 70, 12, cloud);
+        sr::draw2d::fillRect(fb, cloudX2 + 20, 490, 44, 10, cloud);
 
         // ---- 地面 + 地平线 + 小草（草丛 3 帧/秒明暗交替） ----
         for (int y = 0; y < 100; ++y)
-            draw2d::drawLine(fb, 0, y, W - 1, y, Color(38, 28, 42));
-        draw2d::drawLine(fb, 0, 100, W - 1, 100, Color::lerp(Color(255, 170, 90), Color(80, 70, 90), 1.0f - dayK));
+            sr::draw2d::drawLine(fb, 0, y, W - 1, y, Color(38, 28, 42));
+        sr::draw2d::drawLine(fb, 0, 100, W - 1, 100, Color::lerp(Color(255, 170, 90), Color(80, 70, 90), 1.0f - dayK));
         const int grass[][2] = {{60, 97}, {150, 98}, {260, 96}, {330, 99}, {420, 97}, {560, 98}, {700, 96}};
         bool grassBright = (int(t * 3.0f) % 2) == 0;
         for (const auto& g : grass)
@@ -201,7 +203,7 @@ int main()
         float shadowScale = 1.0f - float(jumpDy) / 140.0f;
         int shW = int((heroW - 40) * shadowScale);
         if (shW > 0)
-            fillRect(fb, heroX + (heroW - shW) / 2, 94, shW, 6, Color(20, 14, 20));
+            sr::draw2d::fillRect(fb, heroX + (heroW - shW) / 2, 94, shW, 6, Color(20, 14, 20));
 
         drawSprite(fb, kHeroFrames[frame], palette, heroX, heroY, scale);
 
@@ -214,7 +216,7 @@ int main()
             saveTime = now;
             char path[64];
             std::snprintf(path, sizeof(path), "output/anim/frame_%03d.png", saved);
-            imagewriter::writeImage(path, fb);
+            sr::io::writeImage(path, fb);
             std::printf("saved %s\n", path);
             saved++;
         }

@@ -13,15 +13,17 @@
 #include <string>
 #include <vector>
 
-#include "core/framebuffer.h"
-#include "core/profiler.h"
-#include "core/tga.h"
-#include "math/transform.h"
-#include "raster/renderer.h"
-#include "scene/animation_player.h"
-#include "scene/camera.h"
-#include "scene/gltf_loader.h"
-#include "shader/shaders.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/runtime/profiler.h"
+#include "softrenderer/io/tga.h"
+#include "softrenderer/math/transform.h"
+#include "softrenderer/render/pipeline/renderer.h"
+#include "softrenderer/scene/animation_player.h"
+#include "softrenderer/scene/camera.h"
+#include "softrenderer/io/gltf_loader.h"
+#include "softrenderer/render/shader/shaders.h"
+
+using namespace sr;
 
 // Base64 编码
 static std::string base64Encode(const uint8_t* data, size_t len)
@@ -157,70 +159,41 @@ int main()
     }
     printf("已生成 output/skin_test.gltf (%zu bytes)\n", json.size());
 
-    // 用 tinygltf 直接解析（获取 Model 对象用于 animation_player）
-    tinygltf::Model model;
-    tinygltf::TinyGLTF loader;
-    std::string err, warn;
-    if (!loader.LoadASCIIFromFile(&model, &err, &warn, "output/skin_test.gltf"))
+    // ---- 2. 用自有加载器一次拿全：网格 / 节点 / 蒙皮 / 动画片段 ----
+    auto loaded = sr::io::loadGltfScene("output/skin_test.gltf");
+    if (!loaded.success || loaded.scene.meshes.empty() || loaded.scene.animations.empty())
     {
-        printf("加载失败: %s\n", err.c_str());
+        printf("加载失败: %s\n", loaded.error.c_str());
         return 1;
     }
-    printf("加载成功：%zu mesh, %zu animation, %zu node, %zu skin\n", model.meshes.size(), model.animations.size(),
-           model.nodes.size(), model.skins.size());
+    const sr::SceneAsset& scene = loaded.scene;
+    printf("加载成功：%zu mesh, %zu animation, %zu node, %zu skin\n", scene.meshes.size(),
+           scene.animations.size(), scene.nodes.size(), scene.skins.size());
+    Mesh baseMesh = scene.meshes[0];
 
-    // ---- 2. 加载为我们的 LoadResult（获取 meshes） ----
-    auto result = gltfloader::load("output/skin_test.gltf");
-    if (!result.success || result.meshes.empty())
-    {
-        printf("gltfloader 失败\n");
-        return 1;
-    }
-    Mesh baseMesh = result.meshes[0];
+    // 逆绑定矩阵已由加载阶段解码，这里直接用
+    const std::vector<Mat4> inverseBindMatrices =
+        scene.skins.empty() ? std::vector<Mat4>{} : scene.skins[0].inverseBindMatrices;
 
-    // ---- 3. 解析动画 + 皮肤 ----
-    // 从 model 直接解析 skins（因为 gltfloader 的 LoadResult 目前不解析 skins）
-    std::vector<Mat4> inverseBindMatrices;
-    if (!model.skins.empty())
-    {
-        const auto& skin = model.skins[0];
-        if (skin.inverseBindMatrices >= 0)
-        {
-            const auto matrices = sr::gltf::AccessorView::create(model, skin.inverseBindMatrices);
-            if (!matrices || matrices->type() != TINYGLTF_TYPE_MAT4 || matrices->hasStride() ||
-                matrices->count() != skin.joints.size())
-                return 1;
-            for (size_t j = 0; j < matrices->count(); ++j)
-            {
-                Mat4 m;
-                for (size_t r = 0; r < 4; ++r)
-                    for (size_t c = 0; c < 4; ++c)
-                        if (!matrices->readFloat(j, c * 4 + r, m.m[r][c]))
-                            return 1;
-                inverseBindMatrices.push_back(m);
-            }
-        }
-    }
-
-    // ---- 4. 逐帧渲染 ----
+    // ---- 3. 逐帧渲染 ----
     Framebuffer fb(W, H);
     Renderer renderer(W, H);
-    float duration = 3.0f;  // 动画总时长
+    const sr::AnimationClip& clip = scene.animations[0];
+    float duration = clip.duration(); // 动画总时长
     int totalFrames = 10;
 
     for (int frameIdx = 0; frameIdx < totalFrames; ++frameIdx)
     {
         float t = (duration * frameIdx) / (totalFrames - 1);
 
-        // 采样动画
-        auto anim = result.animations[0];
-        auto samples = sampleAnimation(model, anim, t);
+        // 采样动画（自有数据，不再需要解析器对象）
+        auto poses = sr::animation::sampleAnimation(scene.nodes, clip, t);
 
         // 构建蒙皮矩阵：jointTransform * inverseBind
-        std::vector<Mat4> skinMats(model.nodes.size(), Mat4::identity());
-        for (size_t i = 0; i < samples.size(); ++i)
+        std::vector<Mat4> skinMats(poses.size(), Mat4::identity());
+        for (size_t i = 0; i < poses.size(); ++i)
         {
-            Mat4 local = animSampleToMatrix(samples[i]);
+            Mat4 local = sr::animation::poseToMatrix(poses[i]);
             if (i < inverseBindMatrices.size())
                 skinMats[i] = local * inverseBindMatrices[i];
             else
@@ -258,7 +231,7 @@ int main()
 
         char path[64];
         std::snprintf(path, sizeof(path), "output/skin_frame_%02d.tga", frameIdx);
-        tga::write(path, fb);
+        sr::io::writeTga(path, fb);
     }
 
     printf("已生成 output/skin_frame_00~%02d.tga（共 %d 帧）\n", totalFrames - 1, totalFrames);

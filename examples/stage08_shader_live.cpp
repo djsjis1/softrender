@@ -11,13 +11,17 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
-#include "core/framebuffer.h"
+#include "softrenderer/core/framebuffer.h"
 #include "platform/win32_window.h"
-#include "raster/renderer.h"
-#include "scene/camera.h"
-#include "scene/mesh.h"
-#include "scene/texture.h"
-#include "shader/shaders.h"
+#include "softrenderer/render/pipeline/renderer.h"
+#include "softrenderer/scene/camera.h"
+#include "softrenderer/resource/mesh.h"
+#include "softrenderer/resource/texture.h"
+#include "softrenderer/render/shader/shaders.h"
+#include "softrenderer/resource/mesh_generator.h"
+#include "softrenderer/resource/texture_generator.h"
+
+using namespace sr;
 
 struct Object
 {
@@ -41,33 +45,33 @@ int main()
     cam.aspect = float(W) / H;
 
     // 纹理
-    Texture checker(texgen::checkerboard(256, 8, Color(220, 220, 220), Color(60, 60, 70)));
-    Texture uvgrid(texgen::uvGrid(256, 8));
+    Texture checker(sr::texgen::checkerboard(256, 8, Color(220, 220, 220), Color(60, 60, 70)));
+    Texture uvgrid(sr::texgen::uvGrid(256, 8));
 
     // 场景物体
     std::vector<Object> objects;
     {
         Object ground;
-        ground.mesh = meshgen::planeGrid(40.0f, 40, 20.0f);
+        ground.mesh = sr::meshgen::planeGrid(40.0f, 40, 20.0f);
         ground.position = {0, 0, 0};
         ground.texture = &checker;
         objects.push_back(ground);
 
         Object box;
-        box.mesh = meshgen::cube(1.6f);
+        box.mesh = sr::meshgen::cube(1.6f);
         box.position = {-2.2f, 0.9f, 0};
         box.baseColor = {0.9f, 0.4f, 0.35f};
         box.spin = 0.6f;
         objects.push_back(box);
 
         Object ball;
-        ball.mesh = meshgen::sphere(1.0f, 40, 28);
+        ball.mesh = sr::meshgen::sphere(1.0f, 40, 28);
         ball.position = {0.6f, 1.0f, 0};
         ball.texture = &uvgrid;
         objects.push_back(ball);
 
         Object box2;
-        box2.mesh = meshgen::cube(1.2f);
+        box2.mesh = sr::meshgen::cube(1.2f);
         box2.position = {2.6f, 0.7f, -0.5f};
         box2.baseColor = {0.4f, 0.6f, 0.95f};
         box2.spin = -0.9f;
@@ -78,7 +82,7 @@ int main()
     FlatShader flat;
     GouraudShader gouraud;
     PhongShader phong;
-    Shader *shaders[3] = {&flat, &gouraud, &phong};
+    SurfaceShader *shaders[3] = {&flat, &gouraud, &phong};
     const char *shaderNames[3] = {"Flat", "Gouraud", "Phong"};
     int current = 2; // 默认 Phong
 
@@ -135,7 +139,7 @@ int main()
         renderer.clear(fb, Color(30, 34, 44));
         Mat4 view = cam.viewMatrix();
         Mat4 proj = cam.projMatrix();
-        Shader *sh = shaders[current];
+        SurfaceShader *sh = shaders[current];
         sh->view = view;
         sh->proj = proj;
         sh->lightDir = lightDir;

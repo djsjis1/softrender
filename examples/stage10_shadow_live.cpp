@@ -10,14 +10,18 @@
 #include <chrono>
 #include <cstdio>
 #include <vector>
-#include "core/framebuffer.h"
-#include "core/log.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/runtime/log.h"
 #include "platform/win32_window.h"
-#include "raster/renderer.h"
-#include "scene/camera.h"
-#include "scene/mesh.h"
-#include "scene/texture.h"
-#include "shader/advanced_shaders.h"
+#include "softrenderer/render/pipeline/renderer.h"
+#include "softrenderer/scene/camera.h"
+#include "softrenderer/resource/mesh.h"
+#include "softrenderer/resource/texture.h"
+#include "softrenderer/render/shader/advanced_shaders.h"
+#include "softrenderer/resource/mesh_generator.h"
+#include "softrenderer/resource/texture_generator.h"
+
+using namespace sr;
 
 struct Object
 {
@@ -32,7 +36,7 @@ struct Object
 
 int main()
 {
-    sr_log_init();
+    sr::logInit();
     SR_LOG_INFO("Stage8 realtime starting");
     const int W = 900, H = 640;
     const int SM = 1024;
@@ -50,31 +54,31 @@ int main()
     cam.pitch = -0.4f;
     cam.aspect = float(W) / H;
 
-    Texture checker(texgen::checkerboard(512, 12, Color(210, 210, 210), Color(90, 100, 120)));
-    Texture bumps(texgen::normalMapBumps(256, 6, 1.2f));
+    Texture checker(sr::texgen::checkerboard(512, 12, Color(210, 210, 210), Color(90, 100, 120)));
+    Texture bumps(sr::texgen::normalMapBumps(256, 6, 1.2f));
 
     std::vector<Object> objects;
     {
-        Mesh ground = meshgen::planeGrid(24.0f, 24, 6.0f);
+        Mesh ground = sr::meshgen::planeGrid(24.0f, 24, 6.0f);
         computeTangents(ground);
         objects.push_back({ground, {0, 0, 0}, 0.0f, {1, 1, 1}, &checker, &bumps, true});
 
-        Mesh box = meshgen::cube(1.8f);
+        Mesh box = sr::meshgen::cube(1.8f);
         computeTangents(box);
         objects.push_back({box, {-2.6f, 0.9f, 0.5f}, 0.5f, {0.9f, 0.45f, 0.4f}, nullptr, nullptr, false});
 
-        Mesh ball = meshgen::sphere(1.1f, 48, 32);
+        Mesh ball = sr::meshgen::sphere(1.1f, 48, 32);
         computeTangents(ball);
         objects.push_back({ball, {0.6f, 1.1f, -0.3f}, 0.0f, {0.55f, 0.75f, 0.95f}, nullptr, &bumps, false});
 
-        Mesh box2 = meshgen::cube(1.2f);
+        Mesh box2 = sr::meshgen::cube(1.2f);
         computeTangents(box2);
         objects.push_back({box2, {2.8f, 0.6f, 1.0f}, -0.7f, {0.5f, 0.85f, 0.55f}, nullptr, nullptr, false});
     }
 
     Vec3f lightDir = Vec3f{0.5f, 0.5f, 0.32f}.normalized();
     Vec3f sceneCenter{0, 0.5f, 0};
-    Mat4 lightProj = transform::ortho(-9, 9, -9, 9, 0.1f, 30.0f);
+    Mat4 lightProj = sr::transform::ortho(-9, 9, -9, 9, 0.1f, 30.0f);
 
     bool useShadow = true, useNormalMap = true;
     bool prevB = false, prevN = false;
@@ -135,7 +139,7 @@ int main()
 
         // ---- Pass 1：阴影图 ----
         Vec3f lightPos = sceneCenter + lightDir * 12.0f;
-        Mat4 lightView = transform::lookAt(lightPos, sceneCenter, {0, 1, 0});
+        Mat4 lightView = sr::transform::lookAt(lightPos, sceneCenter, {0, 1, 0});
         Mat4 lightVP = lightProj * lightView;
         if (useShadow)
         {
@@ -198,6 +202,6 @@ int main()
             fpsTime = now;
         }
     }
-    sr_log_shutdown();
+    sr::logShutdown();
     return 0;
 }

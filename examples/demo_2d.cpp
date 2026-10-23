@@ -19,17 +19,21 @@
 #include <string>
 #include <vector>
 
-#include "core/framebuffer.h"
-#include "core/image_write.h"
-#include "core/tga.h"
-#include "raster/blit2d.h"
-#include "raster/renderer.h"     // 3D 渲染器
-#include "raster/renderer2d.h"   // 2D 渲染器
-#include "raster/shape2d.h"
-#include "scene/camera.h"
-#include "scene/mesh.h"
-#include "scene/texture.h"
-#include "shader/shaders.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/io/image_write.h"
+#include "softrenderer/io/tga.h"
+#include "softrenderer/render/draw2d/blit2d.h"
+#include "softrenderer/render/pipeline/renderer.h"     // 3D 渲染器
+#include "softrenderer/render/draw2d/renderer2d.h"   // 2D 渲染器
+#include "softrenderer/render/draw2d/shape2d.h"
+#include "softrenderer/scene/camera.h"
+#include "softrenderer/resource/mesh.h"
+#include "softrenderer/resource/texture.h"
+#include "softrenderer/render/shader/shaders.h"
+#include "softrenderer/resource/mesh_generator.h"
+#include "softrenderer/resource/texture_generator.h"
+
+using namespace sr;
 
 namespace
 {
@@ -82,14 +86,14 @@ void renderScene2D(Framebuffer& fb)
     r2d.fillRect(0, 0, (float)W, 120.0f);
 
     // ---- 5. 精灵：一排不同缩放/染色的侵略者 ----
-    std::vector<draw2d::SpritePalette> pal = {{'X', Color(120, 240, 140)}};
+    std::vector<sr::draw2d::SpritePalette> pal = {{'X', Color(120, 240, 140)}};
     for (int i = 0; i < 5; ++i)
     {
         r2d.setColor(Color(255, 255, 255, 255));
         // 逐个染色：从左到右由绿变黄
         Color tint = Color::lerp(Color(120, 240, 140), Color(240, 220, 90), i / 4.0f);
         pal[0].color = tint;
-        r2d.setColor(colors::white); // sprite 内部用调色板色 * 当前 tint(白=不变)
+        r2d.setColor(sr::colors::white); // sprite 内部用调色板色 * 当前 tint(白=不变)
         r2d.sprite(kInvader, pal, 60.0f + i * 90.0f, 40.0f, 4.0f);
     }
 
@@ -124,13 +128,13 @@ void renderScene2D(Framebuffer& fb)
     r2d.text(48.0f, 486.0f, "HP 72/100   SCORE 133700", 1.0f);
 
     // ---- 8. 位图：程序化棋盘图，缩放 + 旋转后贴到右侧 ----
-    tga::Image checker = texgen::checkerboard(64, 8, Color(240, 240, 250), Color(70, 90, 160));
-    r2d.setColor(colors::white);
+    sr::Image checker = sr::texgen::checkerboard(64, 8, Color(240, 240, 250), Color(70, 90, 160));
+    r2d.setColor(sr::colors::white);
     r2d.bilinear = true;
     {
         Mat3 xf = Mat3::translate(820.0f, 160.0f) * Mat3::rotate(0.4f) * Mat3::scale(1.6f) *
                   Mat3::translate(-32.0f, -32.0f);
-        draw2d::blitImageTransformed(fb, checker, xf, colors::white, true, BlendMode::AlphaBlend);
+        sr::draw2d::blitImageTransformed(fb, checker, xf, sr::colors::white, true, BlendMode::AlphaBlend);
     }
     r2d.bilinear = false;
 
@@ -174,7 +178,7 @@ void renderHudOver3D(Framebuffer& fb)
     cam.pitch = -0.22f;
     cam.aspect = (float)W / H;
 
-    Texture checker(texgen::checkerboard(256, 8, Color(210, 210, 220), Color(60, 64, 80)));
+    Texture checker(sr::texgen::checkerboard(256, 8, Color(210, 210, 220), Color(60, 64, 80)));
 
     PhongShader shader;
     shader.view = cam.viewMatrix();
@@ -192,9 +196,9 @@ void renderHudOver3D(Framebuffer& fb)
         const Texture* tex;
     };
     std::vector<Obj> objs = {
-        {meshgen::cube(1.6f), {-2.4f, 0.8f, 0}, {0.90f, 0.40f, 0.35f}, 0.6f, nullptr},
-        {meshgen::sphere(1.1f, 40, 28), {0.4f, 1.1f, 0}, {1, 1, 1}, 0.0f, &checker},
-        {meshgen::cube(1.2f), {2.8f, 0.6f, -0.5f}, {0.40f, 0.60f, 0.95f}, -0.5f, nullptr},
+        {sr::meshgen::cube(1.6f), {-2.4f, 0.8f, 0}, {0.90f, 0.40f, 0.35f}, 0.6f, nullptr},
+        {sr::meshgen::sphere(1.1f, 40, 28), {0.4f, 1.1f, 0}, {1, 1, 1}, 0.0f, &checker},
+        {sr::meshgen::cube(1.2f), {2.8f, 0.6f, -0.5f}, {0.40f, 0.60f, 0.95f}, -0.5f, nullptr},
     };
     for (const auto& o : objs)
     {
@@ -273,8 +277,8 @@ int main()
     {
         Framebuffer fb(W, H);
         renderScene2D(fb);
-        imagewriter::writeImage("output/demo_2d_scene.png", fb);
-        tga::write("output/demo_2d_scene.tga", fb);
+        sr::io::writeImage("output/demo_2d_scene.png", fb);
+        sr::io::writeTga("output/demo_2d_scene.tga", fb);
         std::printf("已生成 output/demo_2d_scene.png / .tga（纯 2D 场景）\n");
     }
 
@@ -282,8 +286,8 @@ int main()
     {
         Framebuffer fb(W, H);
         renderHudOver3D(fb);
-        imagewriter::writeImage("output/demo_2d_hud.png", fb);
-        tga::write("output/demo_2d_hud.tga", fb);
+        sr::io::writeImage("output/demo_2d_hud.png", fb);
+        sr::io::writeTga("output/demo_2d_hud.tga", fb);
         std::printf("已生成 output/demo_2d_hud.png / .tga（2D HUD + 3D 场景）\n");
     }
 

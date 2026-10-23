@@ -12,12 +12,15 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
-#include "core/framebuffer.h"
-#include "core/tga.h"
-#include "raster/renderer.h"
-#include "scene/camera.h"
-#include "scene/mesh.h"
-#include "shader/pbr_shader.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/io/tga.h"
+#include "softrenderer/render/pipeline/renderer.h"
+#include "softrenderer/scene/camera.h"
+#include "softrenderer/resource/mesh.h"
+#include "softrenderer/render/shader/pbr_shader.h"
+#include "softrenderer/resource/mesh_generator.h"
+
+using namespace sr;
 
 int main() {
     const int W = 900, H = 700;
@@ -30,7 +33,7 @@ int main() {
     cam.aspect = float(W) / H;
     cam.fovY = 3.14159265f / 3.0f;
 
-    Mesh sphere = meshgen::sphere(0.45f, 48, 32);
+    Mesh sphere = sr::meshgen::sphere(0.45f, 48, 32);
 
     PBRShader pbr;
     pbr.view = cam.viewMatrix();
@@ -65,7 +68,7 @@ int main() {
     }
 
     std::filesystem::create_directories("output");
-    tga::write("output/stage12_pbr.tga", fb);
+    sr::io::writeTga("output/stage12_pbr.tga", fb);
     std::printf("已生成 output/stage12_pbr.tga（行=粗糙度, 列=金属度）\n");
     return 0;
 }

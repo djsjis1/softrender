@@ -2,8 +2,13 @@
 
 #include <limits>
 
+#include "gltf_accessor.h"
+#include "gltf_convert.h"
+#include "gltf_mesh.h"
 #include "gltf_test_helpers.h"
-#include "scene/gltf_loader.h"
+#include "softrenderer/io/gltf_loader.h"
+
+using namespace sr;
 
 namespace sr::tests {
 using namespace gltfFixtures;
@@ -109,10 +114,10 @@ TEST(GltfMeshSafety, convert_interleavedVerticesAndNormalizedUV_readsStride)
     primitive.attributes["TEXCOORD_0"] = uv;
     auto result = gltf::convertModel(model);
     ASSERT_TRUE(result.success) << result.error;
-    EXPECT_FLOAT_EQ(result.meshes[0].vertices[1].position.x, 1);
-    EXPECT_FLOAT_EQ(result.meshes[0].vertices[0].uv.y, 1);
-    EXPECT_FLOAT_EQ(result.meshes[0].vertices[2].uv.x, 128.0f / 255);
-    EXPECT_FLOAT_EQ(result.meshes[0].vertices[0].normal.z, 1);
+    EXPECT_FLOAT_EQ(result.scene.meshes[0].vertices[1].position.x, 1);
+    EXPECT_FLOAT_EQ(result.scene.meshes[0].vertices[0].uv.y, 1);
+    EXPECT_FLOAT_EQ(result.scene.meshes[0].vertices[2].uv.x, 128.0f / 255);
+    EXPECT_FLOAT_EQ(result.scene.meshes[0].vertices[0].normal.z, 1);
 }
 TEST(GltfMeshSafety, convert_invalidIndex_doesNotPublishPartialMeshes)
 {
@@ -123,7 +128,7 @@ TEST(GltfMeshSafety, convert_invalidIndex_doesNotPublishPartialMeshes)
     auto result = gltf::convertModel(model);
     EXPECT_FALSE(result.success);
     EXPECT_FALSE(result.error.empty());
-    EXPECT_TRUE(result.meshes.empty());
+    EXPECT_TRUE(result.scene.meshes.empty());
 }
 TEST(GltfMeshSafety, convert_invalidAttributesTopologyAndNonfinite_rejects)
 {
@@ -173,12 +178,18 @@ TEST(GltfTextureSafety, convert_decodedPixelsAndMove_keepsMaterialTextureAlive)
     auto loaded = gltf::convertModel(model);
     ASSERT_TRUE(loaded.success) << loaded.error;
     auto moved = std::move(loaded);
-    EXPECT_TRUE(moved.textures[0].valid());
-    const auto pixel = moved.textures[0].sample(0.5f, 0.5f);
+    // 这个 primitive 没引材质，直接按索引取材质验证纹理引用
+    const sr::Material* pbr = moved.scene.material(0);
+    ASSERT_NE(pbr, nullptr);
+    const Texture* albedo = moved.scene.texture(pbr->baseColorTextureIndex);
+    ASSERT_NE(albedo, nullptr);
+    EXPECT_TRUE(albedo->valid());
+    const auto pixel = albedo->sample(0.5f, 0.5f);
     EXPECT_FLOAT_EQ(pixel.x, 1);
     EXPECT_FLOAT_EQ(pixel.y, 0);
     EXPECT_FLOAT_EQ(pixel.z, 0);
-    EXPECT_EQ(moved.materials[0].baseColorTexture, &moved.textures[0]);
+    // 索引引用在移动后仍然有效（不存在悬垂指针）
+    EXPECT_EQ(albedo, &moved.scene.textures[0]);
     model.images[0].as_is = true;
     EXPECT_FALSE(gltf::convertModel(model).success);
     model.images[0].as_is = false;
@@ -213,7 +224,7 @@ TEST(GltfMeshSafety, convert_unsignedIndexWidths_readsLittleEndian)
         model.meshes[0].primitives[0].indices = addBytes(model, bytes, TINYGLTF_TYPE_SCALAR, type, 3);
         auto result = gltf::convertModel(model);
         ASSERT_TRUE(result.success) << result.error;
-        EXPECT_EQ(result.meshes[0].indices, (std::vector<int>{0, 1, 2}));
+        EXPECT_EQ(result.scene.meshes[0].indices, (std::vector<int>{0, 1, 2}));
     }
 }
 TEST(GltfAnimationSafety, convert_laterNonfiniteKey_rejectsWholeModel)
@@ -233,6 +244,6 @@ TEST(GltfAnimationSafety, convert_laterNonfiniteKey_rejectsWholeModel)
     model.animations.push_back(animation);
     auto result = gltf::convertModel(model);
     EXPECT_FALSE(result.success);
-    EXPECT_TRUE(result.meshes.empty());
+    EXPECT_TRUE(result.scene.meshes.empty());
 }
 }  // namespace sr::tests

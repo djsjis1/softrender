@@ -15,9 +15,11 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
-#include "core/framebuffer.h"
-#include "core/tga.h"
-#include "raster/shape2d.h"
+#include "softrenderer/core/framebuffer.h"
+#include "softrenderer/io/tga.h"
+#include "softrenderer/render/draw2d/shape2d.h"
+
+using namespace sr;
 
 int main()
 {
@@ -38,7 +40,7 @@ int main()
             // 按角度着色，方便看出每根线的方向
             Color c = Color::fromFloat(0.5f + 0.5f * std::cos(angle),
                                        0.5f + 0.5f * std::sin(angle), 0.9f);
-            drawLine(fb, cx, cy, ex, ey, c);
+            sr::draw2d::drawLine(fb, cx, cy, ex, ey, c);
         }
     }
 
@@ -55,12 +57,12 @@ int main()
             py[i] = cy + int(r * std::sin(angle));
         }
         // 隔一个顶点连线（0-2-4-1-3-0）构成五角星
-        Color palette[5] = {colors::red, colors::yellow, colors::green,
-                            colors::cyan, colors::magenta};
+        Color palette[5] = {sr::colors::red, sr::colors::yellow, sr::colors::green,
+                            sr::colors::cyan, sr::colors::magenta};
         for (int i = 0; i < 5; ++i)
         {
             int j = (i * 2) % 5, k = ((i + 1) * 2) % 5;
-            draw2d::drawLineGradient(fb, px[j], py[j], px[k], py[k], palette[i],
+            sr::draw2d::drawLineGradient(fb, px[j], py[j], px[k], py[k], palette[i],
                              palette[(i + 1) % 5]);
         }
     }
@@ -69,19 +71,19 @@ int main()
     for (int x = 40; x < W - 40; ++x)
     {
         float t = float(x - 40) / float(W - 80);
-        Color c = Color::lerp(colors::blue, colors::red, t);
-        drawLine(fb, x, 40, x, 120, c);
+        Color c = Color::lerp(sr::colors::blue, sr::colors::red, t);
+        sr::draw2d::drawLine(fb, x, 40, x, 120, c);
     }
 
     // ---------- 4. 白色边框：验证四角坐标 ----------
-    drawLine(fb, 0, 0, W - 1, 0, colors::white);
-    drawLine(fb, W - 1, 0, W - 1, H - 1, colors::white);
-    drawLine(fb, W - 1, H - 1, 0, H - 1, colors::white);
-    drawLine(fb, 0, H - 1, 0, 0, colors::white);
+    sr::draw2d::drawLine(fb, 0, 0, W - 1, 0, sr::colors::white);
+    sr::draw2d::drawLine(fb, W - 1, 0, W - 1, H - 1, sr::colors::white);
+    sr::draw2d::drawLine(fb, W - 1, H - 1, 0, H - 1, sr::colors::white);
+    sr::draw2d::drawLine(fb, 0, H - 1, 0, 0, sr::colors::white);
 
     std::filesystem::create_directories("output");
     const char *path = "output/stage01_framebuffer.tga";
-    if (!tga::write(path, fb))
+    if (!sr::io::writeTga(path, fb))
     {
         std::printf("写文件失败: %s\n", path);
         return 1;

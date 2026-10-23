@@ -4,8 +4,11 @@
 #include <cstdio>
 #include <vector>
 
-#include "raster/renderer.h"
-#include "shader/shaders.h"
+#include "softrenderer/render/pipeline/renderer.h"
+#include "softrenderer/render/shader/shaders.h"
+#include "softrenderer/resource/mesh_generator.h"
+
+using namespace sr;
 
 namespace sr::benchmark {
 // 固定输入与线程数，整帧计时包含 clear/draw，不包含模型创建和哈希。
@@ -13,14 +16,14 @@ template <class ShaderType>
 void run(const char* name)
 {
     constexpr int width = 640, height = 360, warmup = 5, frames = 31;
-    const Mesh mesh = meshgen::sphere(1.0f, 64, 32);
+    const Mesh mesh = sr::meshgen::sphere(1.0f, 64, 32);
     Renderer renderer(width, height);
     Framebuffer fb(width, height);
     ShaderType shader;
     shader.model = Mat4::rotateY(0.37f) * Mat4::rotateX(0.21f);
     shader.cameraPos = {0, 0, 3};
-    shader.mvp = transform::perspective(0.9f, float(width) / height, 0.1f, 100.0f) *
-                 transform::lookAt(shader.cameraPos, {0, 0, 0}, {0, 1, 0}) * shader.model;
+    shader.mvp = sr::transform::perspective(0.9f, float(width) / height, 0.1f, 100.0f) *
+                 sr::transform::lookAt(shader.cameraPos, {0, 0, 0}, {0, 1, 0}) * shader.model;
     auto frame = [&] {
         renderer.clear(fb, Color(20, 30, 40));
         renderer.drawMesh(fb, mesh, shader);
@@ -56,7 +59,8 @@ void run(const char* name)
 }  // namespace sr::benchmark
 int main()
 {
-    sr::Profiler::instance().setEnabled(false);
+    // 基准只链接 render/core，不引入 runtime 的 Profiler：
+    // 计时由 run() 内的 steady_clock 完成，Profiler 在这里本来也没有被激活。
     sr::benchmark::run<FlatShader>("sphere_flat");
     sr::benchmark::run<PhongShader>("sphere_phong");
 }

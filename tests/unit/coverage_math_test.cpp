@@ -3,9 +3,11 @@
 #include <climits>
 #include <limits>
 
-#include "raster/coverage.h"
-#include "raster/msaa_renderer.h"
-#include "raster/rasterizer_fast.h"
+#include "softrenderer/render/raster/coverage.h"
+#include "softrenderer/render/pipeline/msaa_renderer.h"
+#include "softrenderer/render/raster/rasterizer_fast.h"
+
+using namespace sr;
 
 namespace sr::tests {
 TEST(SubpixelCoverage, contains_sharedRectangle_ownsEachSampleOnceInEitherWinding)
@@ -83,10 +85,10 @@ TEST(RasterCoverage, fillTriangleFast_scalarAndSIMD_agreeAcrossTailsAndWinding)
             Framebuffer scalar(width, 12), fast(width, 12);
             DepthBuffer scalarZ(width, 12), fastZ(width, 12);
             const Vec2f a{-0.125f, 0.375f}, b{float(width) + 5.25f, 1.125f}, c{2.875f, 10.75f};
-            raster_fast::fillTriangleIncremental(scalar, scalarZ, a, reverse ? c : b, reverse ? b : c, 0.1f,
-                                                 reverse ? 0.3f : 0.7f, reverse ? 0.7f : 0.3f, colors::red);
-            raster_fast::fillTriangleFast(fast, fastZ, a, reverse ? c : b, reverse ? b : c, 0.1f, reverse ? 0.3f : 0.7f,
-                                          reverse ? 0.7f : 0.3f, colors::red);
+            raster::fillTriangleIncremental(scalar, scalarZ, a, reverse ? c : b, reverse ? b : c, 0.1f,
+                                                 reverse ? 0.3f : 0.7f, reverse ? 0.7f : 0.3f, sr::colors::red);
+            raster::fillTriangleFast(fast, fastZ, a, reverse ? c : b, reverse ? b : c, 0.1f, reverse ? 0.3f : 0.7f,
+                                          reverse ? 0.7f : 0.3f, sr::colors::red);
             for (int y = 0; y < 12; ++y)
                 for (int x = 0; x < width; ++x)
                 {
@@ -104,9 +106,9 @@ TEST(RasterCoverage, fillTriangle_sharedDiagonal_isDrawOrderIndependent)
         auto draw = [&](Framebuffer& fb, DepthBuffer& depth, bool upper) {
             const Vec2f a{0, 0}, b = upper ? Vec2f{8, 8} : Vec2f{8, 0}, c = upper ? Vec2f{0, 8} : Vec2f{8, 8};
             if (fast)
-                raster_fast::fillTriangleFast(fb, depth, a, b, c, 0.3f, 0.3f, 0.3f, upper ? colors::blue : colors::red);
+                raster::fillTriangleFast(fb, depth, a, b, c, 0.3f, 0.3f, 0.3f, upper ? sr::colors::blue : sr::colors::red);
             else
-                fillTriangle(fb, a, b, c, upper ? colors::blue : colors::red);
+                fillTriangle(fb, a, b, c, upper ? sr::colors::blue : sr::colors::red);
         };
         draw(first, za, false);
         draw(first, za, true);
@@ -126,14 +128,14 @@ TEST(RasterCoverage, fillTriangle_invalidAndSmallerDepth_doesNotWriteOutside)
 {
     Framebuffer fb(4, 4);
     DepthBuffer depth(1, 1);
-    raster_fast::fillTriangleFast(fb, depth, {-2, -2}, {8, -2}, {-2, 8}, 0.1f, 0.2f, 0.3f, colors::red);
+    raster::fillTriangleFast(fb, depth, {-2, -2}, {8, -2}, {-2, 8}, 0.1f, 0.2f, 0.3f, sr::colors::red);
     EXPECT_EQ(fb.getPixel(0, 0).r, 255);
     EXPECT_EQ(fb.getPixel(1, 0).r, 0);
     for (float invalid : {NAN, INFINITY, 1e30f})
     {
-        fillTriangle(fb, {invalid, 0}, {1, 0}, {0, 1}, colors::blue);
-        fillTriangleGradient(fb, {invalid, 0}, {1, 0}, {0, 1}, colors::red, colors::green, colors::blue);
-        raster_fast::fillTriangleFast(fb, depth, {invalid, 0}, {1, 0}, {0, 1}, 0.1f, 0.2f, 0.3f, colors::blue);
+        fillTriangle(fb, {invalid, 0}, {1, 0}, {0, 1}, sr::colors::blue);
+        fillTriangleGradient(fb, {invalid, 0}, {1, 0}, {0, 1}, sr::colors::red, sr::colors::green, sr::colors::blue);
+        raster::fillTriangleFast(fb, depth, {invalid, 0}, {1, 0}, {0, 1}, 0.1f, 0.2f, 0.3f, sr::colors::blue);
     }
     EXPECT_EQ(fb.getPixel(0, 0).r, 255);
 }
@@ -143,12 +145,12 @@ TEST(MSAACoverage, buffer_invalidDimensionsAndSampleIndices_areRejected)
     EXPECT_THROW((MSAAFramebuffer<4>(0, 1)), std::invalid_argument);
     EXPECT_THROW((MSAAFramebuffer<4>(INT_MAX, INT_MAX)), std::length_error);
     MSAAFramebuffer<4> buffer(1, 1);
-    buffer.clear(colors::black);
+    buffer.clear(sr::colors::black);
     EXPECT_FALSE(buffer.testDepth(0, 0, -1, 0.1f));
     EXPECT_FALSE(buffer.testDepth(0, 0, 4, 0.1f));
     EXPECT_FALSE(buffer.testDepth(0, 0, 0, NAN));
-    buffer.setSample(0, 0, 4, colors::red);
-    buffer.setSample(0, 0, -1, colors::red);
+    buffer.setSample(0, 0, 4, sr::colors::red);
+    buffer.setSample(0, 0, -1, sr::colors::red);
     EXPECT_EQ(buffer.coverageCount(-1, 0), 0);
     EXPECT_EQ(buffer.coverageCount(1, 0), 0);
     std::vector<Color> output;
@@ -160,11 +162,11 @@ TEST(MSAACoverage, rasterize_partialOcclusion_isOrderIndependent)
     for (bool backgroundFirst : {false, true})
     {
         MSAAFlatRenderer<4> renderer(1, 1);
-        renderer.clear(colors::black);
-        auto background = [&] { renderer.rasterize({-2, -2}, {4, -2}, {-2, 4}, 0.6f, 0.8f, 0.9f, colors::blue); };
+        renderer.clear(sr::colors::black);
+        auto background = [&] { renderer.rasterize({-2, -2}, {4, -2}, {-2, 4}, 0.6f, 0.8f, 0.9f, sr::colors::blue); };
         if (backgroundFirst)
             background();
-        renderer.rasterize({0.75f, 0.5f}, {1, 0.5f}, {1, 1}, 0.1f, 0.2f, 0.3f, colors::red);
+        renderer.rasterize({0.75f, 0.5f}, {1, 0.5f}, {1, 1}, 0.1f, 0.2f, 0.3f, sr::colors::red);
         if (!backgroundFirst)
             background();
         Framebuffer fb(1, 1);
