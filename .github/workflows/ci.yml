@@ -23,15 +23,23 @@ jobs:
           submodules: false
 
       - name: Configure CMake
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        # 基准目标默认关闭，CI 显式打开：它只链接 render/core，是组件边界的活样本。
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DSR_BUILD_BENCHMARKS=ON
 
       - name: Build
         run: cmake --build build --config ${{ matrix.build_type }} --parallel
 
+      - name: Verify component isolation (core-only)
+        # 关闭 io / runtime / entt 后只配置核心库：不查找 Threads、不编译加载器。
+        run: >
+          cmake -S . -B build-core-only -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DSR_BUILD_IO=OFF -DSR_BUILD_RUNTIME=OFF -DSR_ENABLE_ENTT=OFF
+          -DSR_BUILD_EXAMPLES=OFF -DSR_BUILD_PRACTICE=OFF -DSR_BUILD_TESTS=OFF
+
       - name: Run Unit Tests
         # --parallel 必需：gtest_discover_tests 把每个用例注册为独立 ctest 项，
-        # 120 用例 = 120 次进程启动。串行实测约 40 秒，并行降到 ~14 秒，
-        # 而测试本身单进程只需 ~18 毫秒 —— 开销全在进程创建。
+        # 179 用例 = 179 次进程启动。串行实测约 40 秒，并行降到 ~15 秒，
+        # 而测试本身单进程只需 ~30 毫秒 —— 开销全在进程创建。
         #
         # -LE fast 排除 unit_tests_all：那是给本地开发用的单进程冒烟项
         # （ctest -L fast，0.4 秒），在 CI 里会把全部用例再跑一遍，纯冗余。
@@ -46,21 +54,21 @@ jobs:
           # CMakeLists.txt 必须用 if(WIN32) 守卫整个 add_executable，
           # 否则非 Windows 平台编译必然失败。
           if [ "$RUNNER_OS" != "Windows" ]; then
-            for t in stage6_realtime stage8_realtime stage1_sprite_anim; do
+            for t in stage03_sprite_anim stage08_shader_live stage10_shadow_live; do
               if [ -f "build/bin/$t" ]; then
                 echo "::error::$t 不应在非 Windows 平台产出（if(WIN32) 守卫失效）"
                 exit 1
               fi
             done
-            echo "平台守卫生效：三个 realtime 目标已正确跳过"
+            echo "平台守卫生效：三个窗口示例已正确跳过"
           else
-            for t in stage6_realtime stage8_realtime stage1_sprite_anim; do
+            for t in stage03_sprite_anim stage08_shader_live stage10_shadow_live; do
               if [ ! -f "build/bin/${{ matrix.build_type }}/$t.exe" ]; then
                 echo "::error::Windows 上缺少 $t.exe"
                 exit 1
               fi
             done
-            echo "Windows 目标齐备"
+            echo "Windows 窗口目标齐备"
           fi
 
       - name: Run Stage Examples (smoke test)
@@ -75,9 +83,9 @@ jobs:
           # 只跑离屏示例。三个 realtime 目标会开窗并进入消息循环，在 CI 上会挂死。
           # demo_gltf / demo_pbr_material / demo_skinning 是自产自销的往返测试
           # （运行时先写 .gltf 到 output/ 再读回），不需外部资产。
-          TARGETS="stage1_lines stage2_triangles stage3_cube stage4_zbuffer stage5_texture
-          stage6_offline stage7_clip stage8_offline stage9_msaa stage10_pbr
-          stage11_postprocess stage12_threaded stage1_sprite
+          TARGETS="stage01_framebuffer stage02_sprite stage04_triangle stage05_transform
+          stage06_depth stage07_texture stage08_shader stage09_clip stage10_shadow
+          stage11_msaa stage12_pbr stage13_postprocess stage14_threaded
           demo_2d demo_gltf demo_pbr_material demo_ibl_pbr demo_skinning demo_stars
           practice_hello_2d"
           RAN=0
@@ -99,7 +107,7 @@ jobs:
             RAN=$((RAN + 1))
           done
           echo "共运行 $RAN 个离屏示例"
-          # 防止「一个都没找到」也继续绿灯：至少应跑到 15 个
+          # 防止「一个都没找到」也继续绿灯：Windows 上应跑到 20 个（去掉三个窗口示例）
           if [ "$RAN" -lt 15 ]; then
             echo "::error::只运行了 $RAN 个示例，远低于预期，疑似构建产物缺失"
             exit 1
@@ -192,8 +200,8 @@ jobs:
           -DSR_BUILD_EXAMPLES=OFF -DSR_BUILD_PRACTICE=OFF
 
       - name: Build test targets
-        # 只构建两个测试目标，不构建 22 个示例（示例不参与覆盖率统计）
-        run: cmake --build build-cov --parallel --target unit_tests render_regression
+        # 只构建测试目标与架构门禁，不构建示例（示例不参与覆盖率统计）
+        run: cmake --build build-cov --parallel --target unit_tests render_regression public_headers_check namespace_sentinel
 
       - name: Run tests
         # 必须从仓库根目录运行：示例与回归测试的 output/ 依赖相对路径。
@@ -210,11 +218,13 @@ jobs:
         run: |
           lcov --capture --directory build-cov --output-file coverage.info \
                --ignore-errors mismatch,unused,empty,inconsistent,corrupt
-          # 只统计 src/：排除系统头、第三方库、测试代码本身、构建目录
-          lcov --extract coverage.info "${GITHUB_WORKSPACE}/src/*" \
+          # 只统计自有代码：公共头 include/softrenderer 与私有实现 src/
+          # （排除系统头、第三方库、测试代码本身、构建目录）
+          lcov --extract coverage.info "${GITHUB_WORKSPACE}/include/softrenderer/*" \
+               "${GITHUB_WORKSPACE}/src/*" \
                --output-file coverage-src.info \
                --ignore-errors mismatch,unused,empty,inconsistent
-          echo "===== 覆盖率基线（仅 src/）====="
+          echo "===== 覆盖率基线（include/softrenderer + src）====="
           lcov --summary coverage-src.info --ignore-errors mismatch,unused,empty
           genhtml coverage-src.info --output-directory coverage-report \
                   --ignore-errors mismatch,unused,empty,inconsistent,source
