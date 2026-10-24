@@ -19,8 +19,10 @@ namespace sr
 class Framebuffer
 {
    public:
+    // 初始化列表必须与成员声明顺序一致（pixels_ → width_ → height_），
+    // 否则 GCC/Clang 会以 -Wreorder -Werror 拒绝编译。
     Framebuffer(int width, int height, Color fill = sr::colors::black)
-        : width_(width), height_(height), pixels_(nullptr)
+        : pixels_(nullptr), width_(width), height_(height)
     {
         assert(width > 0 && height > 0);
         pixels_ = new Color[size_t(width) * height];

@@ -108,7 +108,9 @@ if(SR_ENABLE_ENTT)
     add_library(sr_entt INTERFACE)
     add_library(SoftRenderer::entt ALIAS sr_entt)
     set_target_properties(sr_entt PROPERTIES EXPORT_NAME entt)
-    target_include_directories(sr_entt INTERFACE
+    # SYSTEM：entt 以公共头形式进入使用者编译单元，第三方告警不应被
+    # 本仓的 /W4 /WX（或 -Werror）升级成错误。
+    target_include_directories(sr_entt SYSTEM INTERFACE
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third/entt/src>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/softrenderer>
     )
