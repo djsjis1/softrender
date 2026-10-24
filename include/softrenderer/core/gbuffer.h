@@ -1,4 +1,6 @@
 #pragma once
+#include <algorithm>
+#include <cstddef>
 #include <vector>
 #include "softrenderer/math/vec.h"
 #include "softrenderer/core/float_framebuffer.h"

@@ -1,4 +1,6 @@
 #pragma once
+#include <algorithm>
+#include <cstddef>
 #include <cassert>
 #include <cmath>
 #include <concepts>  // std::same_as（Vec2 模板约束）

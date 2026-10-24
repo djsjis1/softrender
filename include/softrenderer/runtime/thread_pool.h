@@ -1,4 +1,6 @@
 #pragma once
+#include <memory>
+#include <cstddef>
 #include <algorithm>
 #include <condition_variable>
 #include <exception>

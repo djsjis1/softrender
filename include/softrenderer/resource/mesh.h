@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <cmath>
 #include <vector>
 #include "softrenderer/math/vec.h"
