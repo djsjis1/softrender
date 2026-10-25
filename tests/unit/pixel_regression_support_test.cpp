@@ -94,6 +94,16 @@ TEST(PixelRegression, compare_sizeMismatch_failsSafely)
     EXPECT_EQ(r.totalPixels, 0);
 }
 
+// alpha 不同必须失败：旧比较只看 RGB，合成透明度错了也能全绿。
+TEST(PixelRegression, compare_detectsAlphaMismatch)
+{
+    Framebuffer a(8, 8, Color(100, 120, 140, 255));
+    Framebuffer b(8, 8, Color(100, 120, 140, 128));
+    const regression::CompareResult r = regression::compare(a, b);
+    EXPECT_EQ(r.mismatchedAlpha, 64);
+    EXPECT_FALSE(r.passed);
+}
+
 // goldenPath 必须用编译期注入的绝对路径，不能依赖工作目录。
 // ctest 的工作目录是 build/，若用相对路径会解析成 build/tests/golden/ →
 // 找不到基准图 → 旧逻辑自动创建并返回 passed → 测试永远假通过。
@@ -103,7 +113,7 @@ TEST(PixelRegression, goldenPath_isAbsoluteAndEndsWithSceneName)
     const std::string dir = regression::goldenDir();
     ASSERT_FALSE(dir.empty());
     const std::string path = regression::goldenPath("scene_x");
-    EXPECT_EQ(path, dir + "/scene_x.tga");
+    EXPECT_EQ(path, dir + "/scene_x.png");
 #ifdef SR_GOLDEN_DIR
     // Windows 盘符形式（C:/...）或 POSIX 根形式（/...）都算绝对路径
     const bool isAbsolute = (path.size() > 1 && path[1] == ':') || path[0] == '/';

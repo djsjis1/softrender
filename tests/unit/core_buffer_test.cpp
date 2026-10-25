@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include "softrenderer/core/arena.h"
@@ -14,6 +15,7 @@
 #include "softrenderer/core/depthbuffer.h"
 #include "softrenderer/core/framebuffer.h"
 #include "softrenderer/core/gbuffer.h"
+#include "softrenderer/render/shader/deferred_lighting.h"
 
 using namespace sr;
 
@@ -206,6 +208,119 @@ TEST(GBuffer, WriteAndRead)
     EXPECT_FALSE(gbuf.write(1, 1, 0.8f, Vec3f{0, 0, 0}, Vec3f{0, 1, 0}, 0.5f, Vec3f{1, 1, 1}, 1.0f));  // farther
     EXPECT_FLOAT_EQ(gbuf.depth[1 * 4 + 1], 0.5f);
     EXPECT_FLOAT_EQ(gbuf.worldPos[1 * 4 + 1].x, 1.0f);
+}
+
+// NaN 深度必须被拒绝：NaN 与任何值比较都为假，一旦写进去深度测试会整体失效。
+TEST(GBuffer, RejectsNonFiniteDepth)
+{
+    sr::GBuffer g;
+    g.resize(2, 1);
+    g.clear();
+    const Vec3f pos{0, 0, 0};
+    const Vec3f nrm{0, 0, 1};
+    const Vec3f alb{1, 1, 1};
+
+    EXPECT_FALSE(g.write(0, 0, std::numeric_limits<float>::quiet_NaN(), pos, nrm, 0.5f, alb, 0.0f));
+    EXPECT_FALSE(g.write(0, 0, std::numeric_limits<float>::infinity(), pos, nrm, 0.5f, alb, 0.0f));
+    EXPECT_TRUE(g.write(0, 0, 0.9f, pos, nrm, 0.5f, alb, 0.0f));
+    EXPECT_FALSE(g.write(0, 0, 0.95f, pos, nrm, 0.5f, alb, 0.0f)); // 更远，必须被拒
+    EXPECT_TRUE(g.write(0, 0, 0.5f, pos, nrm, 0.5f, alb, 0.0f));  // 更近，应接受
+}
+
+// G-Buffer 四路 RT 长度不一致时，光照 Pass 必须直接返回而不是越界读。
+TEST(GBuffer, LightingPassRejectsInconsistentBuffers)
+{
+    sr::GBuffer g;
+    g.resize(4, 4);
+    g.clear();
+    g.depth.resize(3); // 人为破坏一致性
+
+    std::vector<Vec3f> out(1, Vec3f{9, 9, 9});
+    sr::lightingPass(g, Vec3f{0, 1, 0}, Vec3f{1, 1, 1}, Vec3f{0, 0, 1}, Vec3f{0, 0, 0}, out);
+    EXPECT_TRUE(out.empty());
+}
+
+// ==================== 颜色转换的最后一道闸门 ====================
+
+// 着色器输出 NaN/Inf 时，fromFloat 必须把它们夹到 0/255，
+// 而不是把 NaN 交给 uint8_t（那是未定义行为）。
+TEST(Color, FromFloatClampsNonFinite)
+{
+    const Color c = Color::fromFloat(std::numeric_limits<float>::quiet_NaN(),
+                                     std::numeric_limits<float>::infinity(),
+                                     -std::numeric_limits<float>::infinity());
+    EXPECT_EQ(c.r, 0);
+    EXPECT_EQ(c.g, 255);
+    EXPECT_EQ(c.b, 0);
+    EXPECT_EQ(c.a, 255);
+}
+
+// t 为 NaN 时 lerp 夹到 0（返回 c0），不得产生未定义行为。
+TEST(Color, LerpClampsNonFiniteT)
+{
+    const Color c = Color::lerp(Color(10, 20, 30), Color(200, 210, 220),
+                                std::numeric_limits<float>::quiet_NaN());
+    EXPECT_EQ(c.r, 10);
+    EXPECT_EQ(c.g, 20);
+    EXPECT_EQ(c.b, 30);
+}
+
+// ==================== 混合的 alpha 合成与整数舍入 ====================
+
+// div255 必须是四舍五入：旧移位实现在 33023 上返回 129（应为 130）。
+TEST(Blend, div255RoundsToNearest)
+{
+    EXPECT_EQ(div255(0), 0);
+    EXPECT_EQ(div255(127), 0);
+    EXPECT_EQ(div255(128), 1);
+    EXPECT_EQ(div255(255), 1);
+    EXPECT_EQ(div255(33023), 130);   // 旧公式 (v + (v>>8) + 128) >> 8 = 129
+    EXPECT_EQ(div255(65025), 255);
+    EXPECT_EQ(div255(130050), 510);  // src*α + dst*(255−α) 的上界
+}
+
+// 半透明源盖在不透明目标上：结果必须仍不透明。
+// 旧实现把 alpha 当 RGB 再乘一次源 alpha，得到 191。
+TEST(Blend, AlphaBlendOverOpaqueKeepsFullAlpha)
+{
+    const Color src(200, 100, 50, 128);
+    const Color dst(10, 20, 30, 255);
+    const Color r = blendPixels(src, dst, BlendMode::AlphaBlend);
+    EXPECT_EQ(r.a, 255);
+}
+
+// 透明目标上的 source-over：颜色应等于源色本身，alpha 等于源 alpha。
+TEST(Blend, AlphaBlendOverTransparentKeepsSourceColor)
+{
+    const Color src(200, 100, 50, 128);
+    const Color dst(0, 0, 0, 0);
+    const Color r = blendPixels(src, dst, BlendMode::AlphaBlend);
+    EXPECT_EQ(r.a, 128);
+    EXPECT_EQ(r.r, 200);
+    EXPECT_EQ(r.g, 100);
+    EXPECT_EQ(r.b, 50);
+}
+
+// 连续两层半透明：alpha 按 source-over 递增，而不是 As×As。
+TEST(Blend, AlphaBlendStacksAlphaCorrectly)
+{
+    const Color base(0, 0, 0, 0);
+    const Color layer(255, 255, 255, 128);
+    const Color once = blendPixels(layer, base, BlendMode::AlphaBlend);
+    const Color twice = blendPixels(layer, once, BlendMode::AlphaBlend);
+    EXPECT_EQ(once.a, 128);
+    // 128 + round(128*127/255) = 128 + 64
+    EXPECT_EQ(twice.a, 192);
+}
+
+// Premultiplied 也必须保留合成后的 alpha（旧实现无条件写 255）。
+TEST(Blend, PremultipliedKeepsCompositeAlpha)
+{
+    const Color src(64, 32, 16, 128);  // 已预乘：各通道 ≤ alpha
+    const Color dst(0, 0, 0, 0);
+    const Color r = blendPixels(src, dst, BlendMode::Premultiplied);
+    EXPECT_EQ(r.a, 128);
+    EXPECT_EQ(r.r, 64);
 }
 
 // ==================== Cubemap ====================

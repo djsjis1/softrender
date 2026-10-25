@@ -79,4 +79,19 @@ TEST(MSAACoverage, rasterize_backgroundDoesNotOverwriteOccludedSample)
     EXPECT_EQ(fb.getPixel(0, 0).r, 64);
     EXPECT_EQ(fb.getPixel(0, 0).b, 191);
 }
+
+// 顶点屏幕坐标超出 coverage 的 ±2^20 上限时，必须先裁剪到视口，
+// 而不是把整块几何丢掉——否则相机贴地时地板三角形会整块消失。
+TEST(MSAACoverage, rasterize_hugeTriangleCoversViewport)
+{
+    const int size = 16;
+    MSAAFlatRenderer<4> renderer(size, size);
+    renderer.clear(sr::colors::black);
+    renderer.rasterize({-1e7f, -1e7f}, {1e7f, -1e7f}, {0.0f, 1e7f}, 0.5f, 0.5f, 0.5f, sr::colors::white);
+    Framebuffer fb(size, size);
+    renderer.resolveTo(fb);
+    for (int y = 0; y < size; ++y)
+        for (int x = 0; x < size; ++x)
+            EXPECT_EQ(fb.getPixel(x, y).r, 255) << "pixel (" << x << "," << y << ") not covered";
+}
 }  // namespace sr::tests

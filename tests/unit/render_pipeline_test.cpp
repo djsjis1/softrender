@@ -14,7 +14,9 @@
 #include "softrenderer/math/vec.h"
 #include "softrenderer/render/pipeline/clip.h"
 #include "softrenderer/render/pipeline/render_queue.h"
+#include "softrenderer/render/pipeline/renderer.h"
 #include "softrenderer/render/raster/rasterizer_fast.h"
+#include "softrenderer/resource/mesh.h"
 
 using namespace sr;
 
@@ -112,6 +114,97 @@ TEST(RenderQueue, LayerPriority)
     q.sort({0, 0, 0}, positions);
     EXPECT_EQ(q.items()[0].layer, RenderLayer::Opaque);
     EXPECT_EQ(q.items()[1].layer, RenderLayer::Transparent);
+}
+
+// 透明层必须距离优先：旧实现先按 materialId 排序，跨材质时远到近失效。
+// 本用例两个 item 材质号不同，距离更远的材质号反而更大。
+TEST(RenderQueue, TransparentIgnoresMaterialWhenDistanceDiffers)
+{
+    RenderQueue q;
+    DrawItem nearItem;
+    nearItem.layer = RenderLayer::Transparent;
+    nearItem.objectIndex = 0;
+    nearItem.materialId = 0;  // 材质号更小，旧实现会把它排在前面
+    DrawItem farItem;
+    farItem.layer = RenderLayer::Transparent;
+    farItem.objectIndex = 1;
+    farItem.materialId = 9;
+    q.add(nearItem);
+    q.add(farItem);
+
+    std::vector<Vec3f> positions = {{0, 0, 2}, {0, 0, 20}};
+    q.sort({0, 0, 0}, positions);
+
+    EXPECT_EQ(q.items()[0].objectIndex, 1);  // 更远者先画
+    EXPECT_EQ(q.items()[1].objectIndex, 0);
+}
+
+// sortKey 与 sort() 必须采用同一优先级（层 → 距离 → 材质）。
+TEST(RenderQueue, SortKeyAgreesWithComparatorOrder)
+{
+    DrawItem nearItem;
+    nearItem.layer = RenderLayer::Transparent;
+    nearItem.materialId = 0;
+    nearItem.sortDistance = 4.0f;
+    DrawItem farItem;
+    farItem.layer = RenderLayer::Transparent;
+    farItem.materialId = 9;
+    farItem.sortDistance = 400.0f;
+
+    // 透明层反转距离：更远的键更小（排在前面）
+    EXPECT_LT(farItem.sortKey(true), nearItem.sortKey(true));
+}
+
+// ==================== Mesh 索引越界 ====================
+
+namespace
+{
+struct CountingShader : Shader
+{
+    int vertexCalls = 0;
+    Mat4 mvp = Mat4::identity();
+    Vec4f vertex(const Vertex& in, Varyings& out) override
+    {
+        ++vertexCalls;
+        out.worldPos = in.position;
+        out.normal = Vec3f{0, 0, 1};
+        out.uv = in.uv;
+        return mvp * Vec4f(in.position, 1.0f);
+    }
+    bool fragment(const Varyings&, Vec3f& color) override
+    {
+        color = Vec3f{1, 1, 1};
+        return true;
+    }
+};
+} // namespace
+
+// Mesh 是公共结构：越界索引必须在 drawMesh 内被丢弃，而不是读越界内存。
+TEST(Renderer, OutOfRangeIndicesAreSkipped)
+{
+    Framebuffer fb(16, 16, Color(0, 0, 0));
+    Renderer renderer(16, 16);
+    renderer.clear(fb, Color(0, 0, 0));
+
+    Mesh mesh;
+    mesh.vertices.resize(3);
+    mesh.vertices[0].position = {-1.0f, -1.0f, 0.0f};
+    mesh.vertices[1].position = {1.0f, -1.0f, 0.0f};
+    mesh.vertices[2].position = {0.0f, 1.0f, 0.0f};
+
+    CountingShader shader;
+    shader.mvp = Mat4::identity();
+    mesh.indices = {0, 1, 999}; // 第三个索引越界
+    renderer.drawMesh(fb, mesh, shader);
+    EXPECT_EQ(shader.vertexCalls, 0);
+
+    mesh.indices = {0, 1, -1}; // 负索引
+    renderer.drawMesh(fb, mesh, shader);
+    EXPECT_EQ(shader.vertexCalls, 0);
+
+    mesh.indices = {0, 1, 2}; // 合法三角形应正常处理
+    renderer.drawMesh(fb, mesh, shader);
+    EXPECT_EQ(shader.vertexCalls, 3);
 }
 
 // ==================== Arena 内存池 ====================

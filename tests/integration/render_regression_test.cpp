@@ -18,7 +18,7 @@
 // 因此刻意**不**回归 demo_stars（含随机星点）与 stage14_threaded（线程顺序不定）。
 //
 // 【基准图维护】
-//   基准图在 tests/fixtures/golden/<场景名>.tga，已纳入版本控制。
+//   基准图在 tests/fixtures/golden/<场景名>.png（含 alpha），已纳入版本控制。
 //   有意变更视觉输出时：配置加 -DSR_UPDATE_GOLDEN=ON → 跑一次测试 → 提交新基准图，
 //   并在 commit 信息中说明视觉变更原因。
 //   基准图缺失时测试**直接失败**（而非静默创建），避免 CI 假通过。

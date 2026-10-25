@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 #include <type_traits>
 
 #include "softrenderer/math/barycentric.h"
@@ -14,6 +15,7 @@
 #include "softrenderer/math/mat4.h"
 #include "softrenderer/math/quat.h"
 #include "softrenderer/math/rect.h"
+#include "softrenderer/math/scalar.h"
 #include "softrenderer/math/transform.h"
 #include "softrenderer/math/transform2d.h"
 #include "softrenderer/math/vec.h"
@@ -46,6 +48,43 @@ TEST(Vec, NormalizeLength)
     Vec3f v{3, 4, 0};
     Vec3f n = v.normalized();
     EXPECT_NEAR(n.length(), 1.0f, 1e-5f);
+}
+
+// normalizedOr：零向量与 NaN 退回 fallback（否则 Debug 断言、Release 产出 NaN），
+// 正常输入与 normalized() 逐分量一致。
+TEST(Vec, NormalizedOrFallsBackOnDegenerateInput)
+{
+    const Vec3f fallback{0, 0, 1};
+    const Vec3f zero{0, 0, 0};
+    EXPECT_FLOAT_EQ(zero.normalizedOr(fallback).z, 1.0f);
+
+    const Vec3f withNan{std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f};
+    EXPECT_FLOAT_EQ(withNan.normalizedOr(fallback).z, 1.0f);
+
+    const Vec3f withInf{std::numeric_limits<float>::infinity(), 0.0f, 0.0f};
+    EXPECT_FLOAT_EQ(withInf.normalizedOr(fallback).z, 1.0f);
+
+    const Vec3f unit{3, 0, 4};
+    const Vec3f exact = unit.normalized();
+    const Vec3f safe = unit.normalizedOr(fallback);
+    EXPECT_FLOAT_EQ(safe.x, exact.x);
+    EXPECT_FLOAT_EQ(safe.z, exact.z);
+}
+
+// pow5 必须与 std::pow(x, 5) 数值一致（着色器的菲涅尔项用它替代库调用）。
+TEST(ScalarMath, Pow5MatchesStdPow)
+{
+    float maxError = 0.0f;
+    for (int i = 0; i <= 10000; ++i)
+    {
+        const float x = float(i) / 10000.0f;
+        maxError = std::max(maxError, std::abs(pow5(x) - std::pow(x, 5.0f)));
+    }
+    EXPECT_LT(maxError, 1e-6f);
+    EXPECT_FLOAT_EQ(pow5(0.0f), 0.0f);
+    EXPECT_FLOAT_EQ(pow5(1.0f), 1.0f);
+    // 奇次幂保留符号（调用方已 clamp，但函数本身不应改变符号语义）
+    EXPECT_LT(pow5(-0.5f), 0.0f);
 }
 
 TEST(Vec, LerpMidpoint)
@@ -377,6 +416,15 @@ TEST(Rect, ContainsAndIntersect)
     EXPECT_TRUE(a.intersects(b));
     Recti c(20, 20, 5, 5);
     EXPECT_FALSE(a.intersects(c));
+}
+
+// 空矩形不得与任何矩形相交（旧实现只看边界，零面积矩形会判为相交）。
+TEST(Rect, EmptyRectNeverIntersects)
+{
+    const Recti a(0, 0, 10, 10);
+    EXPECT_FALSE(a.intersects(Recti(5, 5, 0, 0)));
+    EXPECT_FALSE(a.intersects(Recti(5, 5, 0, 4)));
+    EXPECT_FALSE(Recti(5, 5, -2, 4).intersects(a));
 }
 
 TEST(Rect, IntersectionAndMerge)

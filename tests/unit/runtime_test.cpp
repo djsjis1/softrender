@@ -163,6 +163,39 @@ TEST(ResourceCache, FailedFactoryResultIsNotCached)
     EXPECT_EQ(sr::ResourceCache::instance().size(), 0u);
 }
 
+// 并发首次加载同一资源只能构建一次（single-flight）。
+// 构建一份大贴图/模型可能要几百毫秒，8 个线程各自 miss 一次就是 8 倍。
+TEST(ResourceCache, ConcurrentFirstLoadBuildsOnce)
+{
+    sr::ResourceCache::instance().clear();
+    std::atomic<int> builds{0};
+    const int threads = 8;
+    std::vector<std::shared_ptr<Texture>> results(static_cast<size_t>(threads));
+    std::vector<std::thread> workers;
+    workers.reserve(static_cast<size_t>(threads));
+    for (int t = 0; t < threads; ++t)
+        workers.emplace_back([&, t] {
+            results[size_t(t)] = sr::ResourceCache::instance().load<Texture>("concurrent", [&] {
+                builds.fetch_add(1, std::memory_order_relaxed);
+                // 拉大 miss 窗口，让所有线程都落在“未命中”分支上
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                return std::make_shared<Texture>();
+            });
+        });
+    for (std::thread& worker : workers)
+        worker.join();
+
+    EXPECT_EQ(builds.load(), 1);
+    ASSERT_NE(results.front(), nullptr);
+    for (const auto& result : results)
+    {
+        ASSERT_NE(result, nullptr);
+        EXPECT_EQ(result.get(), results.front().get());
+    }
+    results.clear();
+    sr::ResourceCache::instance().clear();
+}
+
 // ==================== 命令缓冲 ====================
 
 TEST(CommandBuffer, SequentialExecution)

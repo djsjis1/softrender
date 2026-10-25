@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 
 #include "softrenderer/core/color.h"
 #include "softrenderer/core/framebuffer.h"
@@ -153,5 +154,189 @@ TEST(Renderer2D, TextDrawsPixels)
                 ++lit;
     EXPECT_GT(lit, 10);
     r.end();
+}
+
+// 字体无关的不变量：scale=2 必须恰好等于把每个字模点放大成 2×2，
+// 即亮像素数刚好是 scale=1 的 4 倍。轴对齐快速路径写错一个方向就会破坏它。
+TEST(Renderer2D, TextScaleAmplifiesGlyphPixels)
+{
+    auto countLit = [](const Framebuffer& fb) {
+        int lit = 0;
+        for (int y = 0; y < fb.height(); ++y)
+            for (int x = 0; x < fb.width(); ++x)
+                if (fb.getPixel(x, y).r > 0)
+                    ++lit;
+        return lit;
+    };
+
+    Framebuffer small(64, 64, sr::colors::black);
+    Framebuffer large(64, 64, sr::colors::black);
+    Renderer2D a;
+    a.begin(small);
+    a.setBlend(BlendMode::Opaque);
+    a.setColor(sr::colors::white);
+    a.text(4.0f, 4.0f, "A", 1.0f);
+    a.end();
+
+    Renderer2D b;
+    b.begin(large);
+    b.setBlend(BlendMode::Opaque);
+    b.setColor(sr::colors::white);
+    b.text(4.0f, 4.0f, "A", 2.0f);
+    b.end();
+
+    const int smallLit = countLit(small);
+    ASSERT_GT(smallLit, 0);
+    EXPECT_EQ(countLit(large), smallLit * 4);
+}
+
+// 非有限的坐标/半径不得进入 int(floor(...))，也不得画出任何像素。
+TEST(Shape2D, NonFiniteParametersAreIgnored)
+{
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    Framebuffer fb(32, 32, sr::colors::black);
+
+    sr::draw2d::fillCircle(fb, nan, 16.0f, 8.0f, sr::colors::white);
+    sr::draw2d::fillCircle(fb, 16.0f, 16.0f, nan, sr::colors::white);
+    sr::draw2d::fillEllipse(fb, inf, 16.0f, 6.0f, 4.0f, sr::colors::white);
+    sr::draw2d::fillRoundedRect(fb, 4.0f, 4.0f, nan, 12.0f, 3.0f, sr::colors::white);
+    sr::draw2d::drawRoundedRect(fb, 4.0f, 4.0f, 12.0f, inf, 3.0f, sr::colors::white);
+    sr::draw2d::drawEllipse(fb, 16.0f, 16.0f, 1e30f, nan, sr::colors::white);
+
+    int painted = 0;
+    for (int y = 0; y < 32; ++y)
+        for (int x = 0; x < 32; ++x)
+            if (fb.getPixel(x, y).r != 0)
+                ++painted;
+    EXPECT_EQ(painted, 0);
+}
+
+// 完全透明的 AA 线段不得画出任何像素（旧实现未把源 alpha 乘进边缘权重）。
+TEST(Shape2D, AntiAliasedLineRespectsSourceAlpha)
+{
+    Framebuffer fb(32, 32, sr::colors::black);
+    sr::draw2d::drawLineAA(fb, 0, 0, 31, 13, Color(255, 255, 255, 0));
+
+    int lit = 0;
+    for (int y = 0; y < 32; ++y)
+        for (int x = 0; x < 32; ++x)
+            if (fb.getPixel(x, y).r != 0 || fb.getPixel(x, y).g != 0 || fb.getPixel(x, y).b != 0)
+                ++lit;
+    EXPECT_EQ(lit, 0) << "完全透明的线不应画出任何像素";
+}
+
+// 旋转态下的贴图与渐变不得静默丢弃（旧实现 texture 直接 return、渐变退化纯色）。
+TEST(Blit2D, RotatedTextureAndGradientAreDrawn)
+{
+    sr::Image img;
+    img.width = 2;
+    img.height = 2;
+    img.pixels.assign(4, Color(255, 0, 0, 255));
+    const Texture tex(img);
+
+    Framebuffer fb(64, 64, Color(0, 0, 0));
+    const Mat3 xf = Mat3::translate(32.0f, 32.0f) * Mat3::rotate(0.6f) * Mat3::scale(40.0f, 40.0f) *
+                    Mat3::translate(-0.5f, -0.5f);
+    sr::draw2d::blitTextureTransformed(fb, tex, xf);
+    int lit = 0;
+    for (int y = 0; y < 64; ++y)
+        for (int x = 0; x < 64; ++x)
+            if (fb.getPixel(x, y).r > 0)
+                ++lit;
+    EXPECT_GT(lit, 800) << "旋转贴图未绘制";
+
+    // Renderer2D 层：旋转后渐变必须仍有两种颜色，而不是纯色
+    Framebuffer fb2(64, 64, Color(0, 0, 0));
+    Renderer2D r2d;
+    r2d.begin(fb2);
+    r2d.translate(32.0f, 32.0f);
+    r2d.rotate(0.5f);
+    r2d.rectGradient(-20.0f, -20.0f, 40.0f, 40.0f, Color(0, 0, 0), Color(255, 255, 255), false);
+    r2d.end();
+    int minV = 255, maxV = 0;
+    for (int y = 0; y < 64; ++y)
+        for (int x = 0; x < 64; ++x)
+        {
+            const int v = fb2.getPixel(x, y).r;
+            minV = std::min(minV, v);
+            maxV = std::max(maxV, v);
+        }
+    EXPECT_LT(minV, 40) << "渐变暗端缺失";
+    EXPECT_GT(maxV, 200) << "渐变亮端缺失（旧实现会退化成纯色）";
+}
+
+// 目标矩形远超屏幕时必须先裁剪：既不能漏画可见部分，也不能重复/越界写入。
+TEST(Blit2D, BlitTextureClipsToTarget)
+{
+    sr::Image img;
+    img.width = 2;
+    img.height = 2;
+    img.pixels.assign(4, Color(10, 20, 30, 255));
+    const Texture tex(img);
+
+    Framebuffer fb(4, 4, Color(0, 0, 0));
+    sr::draw2d::blitTexture(fb, tex, -100, -100, 1000, 1000);
+    for (int y = 0; y < 4; ++y)
+        for (int x = 0; x < 4; ++x)
+            EXPECT_EQ(fb.getPixel(x, y).r, 10) << x << "," << y;
+
+    // 完全在屏外的贴图不得改动任何像素
+    Framebuffer untouched(4, 4, Color(7, 7, 7));
+    sr::draw2d::blitTexture(untouched, tex, 1000, 1000, 8, 8);
+    EXPECT_EQ(untouched.getPixel(0, 0).r, 7);
+    EXPECT_EQ(untouched.getPixel(3, 3).r, 7);
+
+    // 部分重叠：只画重叠区
+    Framebuffer partial(4, 4, Color(0, 0, 0));
+    sr::draw2d::blitTexture(partial, tex, 2, 2, 8, 8);
+    EXPECT_EQ(partial.getPixel(2, 2).r, 10);
+    EXPECT_EQ(partial.getPixel(3, 3).r, 10);
+    EXPECT_EQ(partial.getPixel(1, 1).r, 0);
+}
+
+// 纹理贴图必须保留自身 alpha 参与混合（旧实现走 Vec3f 采样后当成不透明）。
+TEST(Blit2D, BlitTexturePreservesAlpha)
+{
+    sr::Image img;
+    img.width = 2;
+    img.height = 2;
+    img.pixels.assign(4, Color(255, 0, 0, 128));
+    const Texture tex(img);
+
+    Framebuffer fb(4, 4, Color(0, 0, 255, 255));
+    sr::draw2d::blitTexture(fb, tex, 0, 0, 4, 4, sr::colors::white, BlendMode::AlphaBlend);
+
+    const Color c = fb.getPixel(1, 1);
+    EXPECT_GT(c.r, 0) << "前景红未混入";
+    EXPECT_GT(c.b, 0) << "背景蓝被完全覆盖，说明纹理 alpha 丢失";
+}
+
+// 2D 合成必须用 ClampToEdge：2×2 四色图放大到 8×8 时，
+// Repeat 会把对边颜色带进边缘列（图集直接串色），四角应保持各自的纯色。
+TEST(Blit2D, EdgeSamplingDoesNotWrapToOppositeSide)
+{
+    sr::Image img;
+    img.width = 2;
+    img.height = 2;
+    // 行 0：左红、右绿；行 1：左蓝、右白
+    img.pixels = {Color(255, 0, 0), Color(0, 255, 0), Color(0, 0, 255), Color(255, 255, 255)};
+    const Texture tex(img);
+
+    Framebuffer fb(8, 8, Color(0, 0, 0));
+    sr::draw2d::blitTexture(fb, tex, 0, 0, 8, 8);
+
+    const Color leftBottom = fb.getPixel(0, 0);
+    EXPECT_GT(leftBottom.r, 200) << "左下应为红";
+    EXPECT_LT(leftBottom.g, 60) << "左下混入了右侧绿（Repeat 绕回）";
+
+    const Color rightBottom = fb.getPixel(7, 0);
+    EXPECT_GT(rightBottom.g, 200) << "右下应为绿";
+    EXPECT_LT(rightBottom.r, 60) << "右下混入了左侧红（Repeat 绕回）";
+
+    const Color rightTop = fb.getPixel(7, 7);
+    EXPECT_GT(rightTop.r, 200) << "右上应为白";
+    EXPECT_GT(rightTop.g, 200);
+    EXPECT_GT(rightTop.b, 200);
 }
 

@@ -246,4 +246,64 @@ TEST(GltfAnimationSafety, convert_laterNonfiniteKey_rejectsWholeModel)
     EXPECT_FALSE(result.success);
     EXPECT_TRUE(result.scene.meshes.empty());
 }
+
+// 一个源 mesh 含两个 primitive 时，节点必须引用展平后的两个网格。
+// 旧实现直接保存原始 node.mesh 索引，第二个 primitive 会丢失。
+TEST(GltfMeshMapping, convert_multiPrimitiveNodeMapsAllFlattenedMeshes)
+{
+    tinygltf::Model model;
+    tinygltf::Primitive first;
+    first.attributes["POSITION"] = addFloats(model, {0, 0, 0, 1, 0, 0, 0, 1, 0}, TINYGLTF_TYPE_VEC3, 3);
+    tinygltf::Primitive second;
+    second.attributes["POSITION"] = addFloats(model, {2, 0, 0, 3, 0, 0, 2, 1, 0}, TINYGLTF_TYPE_VEC3, 3);
+    tinygltf::Mesh mesh;
+    mesh.primitives.push_back(first);
+    mesh.primitives.push_back(second);
+    model.meshes.push_back(mesh);
+
+    // 第二个源 mesh 只有一个 primitive，用于验证索引偏移不会错位
+    tinygltf::Primitive third;
+    third.attributes["POSITION"] = addFloats(model, {5, 0, 0, 6, 0, 0, 5, 1, 0}, TINYGLTF_TYPE_VEC3, 3);
+    tinygltf::Mesh other;
+    other.primitives.push_back(third);
+    model.meshes.push_back(other);
+
+    model.nodes.resize(2);
+    model.nodes[0].mesh = 0;
+    model.nodes[1].mesh = 1;
+
+    const auto result = gltf::convertModel(model);
+    ASSERT_TRUE(result.success) << result.error;
+    ASSERT_EQ(result.scene.meshes.size(), 3u);
+
+    ASSERT_EQ(result.scene.nodes[0].meshIndices.size(), 2u);
+    EXPECT_EQ(result.scene.nodes[0].meshIndices[0], 0);
+    EXPECT_EQ(result.scene.nodes[0].meshIndices[1], 1);
+    EXPECT_EQ(result.scene.nodes[0].meshIndex, 0);  // 首元素快捷值
+
+    ASSERT_EQ(result.scene.nodes[1].meshIndices.size(), 1u);
+    EXPECT_EQ(result.scene.nodes[1].meshIndices[0], 2);
+    EXPECT_EQ(result.scene.nodes[1].meshIndex, 2);
+}
+
+// 节点引用不存在的 mesh 必须在转换阶段就失败。
+TEST(GltfMeshMapping, convert_nodeWithInvalidMeshIndexFails)
+{
+    auto model = triangle();
+    model.nodes.resize(1);
+    model.nodes[0].mesh = 99;
+    const auto result = gltf::convertModel(model);
+    EXPECT_FALSE(result.success);
+}
+
+// 没有 mesh 的节点不应凭空得到 meshIndex。
+TEST(GltfMeshMapping, convert_nodeWithoutMeshHasNegativeIndex)
+{
+    auto model = triangle();
+    model.nodes.resize(1);  // mesh 默认为 -1
+    const auto result = gltf::convertModel(model);
+    ASSERT_TRUE(result.success) << result.error;
+    EXPECT_TRUE(result.scene.nodes[0].meshIndices.empty());
+    EXPECT_EQ(result.scene.nodes[0].meshIndex, -1);
+}
 }  // namespace sr::tests

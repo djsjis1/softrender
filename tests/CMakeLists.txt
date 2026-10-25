@@ -1,14 +1,12 @@
-# 测试需要 io（加载真实文件）与 runtime（线程池/缓存）。
-if(NOT SR_BUILD_IO OR NOT SR_BUILD_RUNTIME)
-    message(STATUS "SR_BUILD_IO/SR_BUILD_RUNTIME 关闭：跳过测试")
-    return()
-endif()
-
 # ============================================================
 # 架构门禁
 #   1. 每个公共头单独编译（不依赖 include 顺序）
 #   2. 命名空间冲突哨兵
 #   3. 模块 include 白名单（render 不可见 io/runtime/scene；core 无文件/日志/线程）
+#
+# 这三项只依赖公共头，与可选组件开关无关，因此必须放在下面的
+# 「关闭 io/runtime 就整体 return」之前：否则裁剪构建下核心库与
+# 命名空间约定完全失去校验。
 # ============================================================
 file(GLOB_RECURSE SR_PUBLIC_HEADERS RELATIVE "${PROJECT_SOURCE_DIR}/include"
     "${PROJECT_SOURCE_DIR}/include/softrenderer/*.h")
@@ -25,10 +23,17 @@ target_link_libraries(public_headers_check PRIVATE SoftRenderer::softrenderer sr
 add_library(namespace_sentinel OBJECT architecture/namespace_sentinel.cpp)
 target_link_libraries(namespace_sentinel PRIVATE SoftRenderer::softrenderer sr_dev_flags)
 
+enable_testing()
 add_test(NAME architecture_boundaries
     COMMAND "${CMAKE_COMMAND}" "-DSR_INCLUDE_DIR=${PROJECT_SOURCE_DIR}/include"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/architecture/check_boundaries.cmake")
 set_tests_properties(architecture_boundaries PROPERTIES LABELS "packaging" TIMEOUT 60)
+
+# 单元测试与像素回归需要 io（加载真实文件）与 runtime（线程池/缓存）。
+if(NOT SR_BUILD_IO OR NOT SR_BUILD_RUNTIME)
+    message(STATUS "SR_BUILD_IO/SR_BUILD_RUNTIME 关闭：只跑架构门禁，跳过单元测试与像素回归")
+    return()
+endif()
 
 if(NOT TARGET GTest::gtest_main)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)

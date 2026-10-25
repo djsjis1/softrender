@@ -5,7 +5,8 @@
 #include <vector>
 
 #include "softrenderer/core/framebuffer.h"
-#include "softrenderer/io/tga.h"
+#include "softrenderer/io/image_loader.h"
+#include "softrenderer/io/image_write.h"
 
 // ============================================================
 // 像素级回归测试工具
@@ -23,7 +24,8 @@
 //   2. 后续回归：compareWithGolden("test_scene", fb, threshold)
 //      返回 passed=true 即通过
 //
-// 基准图存放：tests/fixtures/golden/<name>.tga（路径由编译期 SR_GOLDEN_DIR 注入）
+// 基准图存放：tests/fixtures/golden/<name>.png（路径由编译期 SR_GOLDEN_DIR 注入）
+// 比较包含 alpha：2D 混合场景的颜色可能相同而合成透明度已错。
 // ============================================================
 namespace regression {
 using sr::Color;
@@ -46,10 +48,12 @@ inline std::string goldenDir()
 #endif
 }
 
-// 基准图完整路径
+// 基准图完整路径。
+// 用 PNG 而不是 TGA：TGA 写出是 24 位，会丢掉 alpha 通道，
+// 而 2D 混合场景的回归必须能比 alpha。
 inline std::string goldenPath(const std::string& name)
 {
-    return goldenDir() + "/" + name + ".tga";
+    return goldenDir() + "/" + name + ".png";
 }
 
 struct CompareResult
@@ -57,6 +61,7 @@ struct CompareResult
     bool passed;
     int totalPixels;
     int mismatchedPixels;
+    int mismatchedAlpha;  // alpha 不符的像素数（RGB 可能全对而合成透明度已错）
     float maxDelta;       // 单通道最大差值 [0,255]
     float avgDelta;       // 平均差值
     float mismatchRatio;  // 不匹配像素占比
@@ -76,6 +81,7 @@ inline CompareResult compare(const Framebuffer& a, const Framebuffer& b, float p
     float sumDelta = 0;
     r.maxDelta = 0;
     r.mismatchedPixels = 0;
+    r.mismatchedAlpha = 0;
 
     for (int y = 0; y < a.height(); ++y)
     {
@@ -86,24 +92,27 @@ inline CompareResult compare(const Framebuffer& a, const Framebuffer& b, float p
             float dr = std::abs(float(ca.r) - float(cb.r));
             float dg = std::abs(float(ca.g) - float(cb.g));
             float db = std::abs(float(ca.b) - float(cb.b));
-            float d = std::max({dr, dg, db});
+            float da = std::abs(float(ca.a) - float(cb.a));
+            float d = std::max({dr, dg, db, da});
             r.maxDelta = std::max(r.maxDelta, d);
             sumDelta += d;
             if (d > pixelThreshold)
                 ++r.mismatchedPixels;
+            if (da > 0.5f)
+                ++r.mismatchedAlpha;
         }
     }
     r.avgDelta = sumDelta / float(r.totalPixels);
     r.mismatchRatio = float(r.mismatchedPixels) / float(r.totalPixels);
-    // 通过条件：不匹配像素 < 0.1% 且平均差 < 0.5
-    r.passed = (r.mismatchRatio < 0.001f && r.avgDelta < 0.5f);
+    // 通过条件：不匹配像素 < 0.1%、平均差 < 0.5，且 alpha 完全一致。
+    r.passed = (r.mismatchRatio < 0.001f && r.avgDelta < 0.5f && r.mismatchedAlpha == 0);
     return r;
 }
 
 // 保存基准图
 inline bool saveGolden(const std::string& name, const Framebuffer& fb)
 {
-    return sr::io::writeTga(goldenPath(name), fb);
+    return sr::io::writeImage(goldenPath(name), fb);
 }
 
 // 加载基准图并比较
@@ -111,22 +120,27 @@ inline CompareResult compareWithGolden(const std::string& name, const Framebuffe
 {
     CompareResult r{};
     const std::string path = goldenPath(name);
-    sr::Image img;
-    if (!sr::io::readTga(path, img))
-    {
+
 #ifdef SR_UPDATE_GOLDEN
-        // 本地开发：只有显式要求更新基准时才自动创建。
-        // 配置时加 -DSR_UPDATE_GOLDEN=ON，提交前记得关掉。
-        saveGolden(name, fb);
-        r.passed = true;
-        r.totalPixels = fb.width() * fb.height();
-        r.mismatchedPixels = 0;
-        r.maxDelta = 0;
-        r.avgDelta = 0;
-        r.mismatchRatio = 0;
-        std::printf("[REGRESSION] Golden created: %s\n", path.c_str());
-        return r;
+    // 维护模式：无论基准图是否存在都用当前结果覆写。
+    //
+    // 旧实现只在 readTga 失败时写入，已存在但内容不符的基准图永远无法更新；
+    // 且不检查 saveGolden 的返回值，写失败也报通过。
+    const bool saved = saveGolden(name, fb);
+    (void)pixelThreshold; // 覆写模式不做比较
+    r.totalPixels = fb.width() * fb.height();
+    r.mismatchedPixels = 0;
+    r.mismatchedAlpha = 0;
+    r.maxDelta = 0;
+    r.avgDelta = 0;
+    r.mismatchRatio = 0;
+    r.passed = saved;
+    std::printf("[REGRESSION] Golden %s: %s\n", saved ? "written" : "WRITE FAILED", path.c_str());
+    return r;
 #else
+    sr::Image img;
+    if (!sr::io::loadImage(path, img))
+    {
         // CI / 默认：基准图缺失必须**直接失败**。
         //
         // 旧实现在这里自动创建并返回 passed，是典型的静默失败：
@@ -135,6 +149,7 @@ inline CompareResult compareWithGolden(const std::string& name, const Framebuffe
         r.passed = false;
         r.totalPixels = fb.width() * fb.height();
         r.mismatchedPixels = r.totalPixels;
+        r.mismatchedAlpha = r.totalPixels;
         r.maxDelta = 255.0f;
         r.avgDelta = 255.0f;
         r.mismatchRatio = 1.0f;
@@ -142,7 +157,6 @@ inline CompareResult compareWithGolden(const std::string& name, const Framebuffe
         std::printf("[REGRESSION] 若为首次建立基准，请用 -DSR_UPDATE_GOLDEN=ON 重新配置；\n"
                     "[REGRESSION] 并确认 goldenDir() 解析出的路径与实际仓库位置一致。\n");
         return r;
-#endif
     }
     // 尺寸不一致时 compare() 会直接判失败（totalPixels=0），这里不重复检查
     Framebuffer golden(img.width, img.height);
@@ -150,6 +164,7 @@ inline CompareResult compareWithGolden(const std::string& name, const Framebuffe
         for (int x = 0; x < img.width; ++x)
             golden.setPixel(x, y, img.at(x, y));
     return compare(golden, fb, pixelThreshold);
+#endif
 }
 
 }  // namespace regression
