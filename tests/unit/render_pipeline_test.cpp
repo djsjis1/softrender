@@ -16,10 +16,41 @@
 #include "softrenderer/render/pipeline/render_queue.h"
 #include "softrenderer/render/pipeline/renderer.h"
 #include "softrenderer/render/raster/rasterizer_fast.h"
+#include "softrenderer/render/shader/advanced_shaders.h"
 #include "softrenderer/render/shader/pbr_shader.h"
 #include "softrenderer/resource/mesh.h"
 
 using namespace sr;
+
+// ==================== 阴影采样范围 ====================
+// shadowW/H 是调用方另设的成员，shadowMap 是另一个对象：两者不一致时，
+// computeShadow 若用 shadowW/H 做边界检查，会向 8×8 的 map 要 (44,44)。
+// DepthBuffer::get 在 Release 下靠自身兜底返回 kFar（碰巧正确），
+// 但 Debug 下断言直接中止进程。采样范围必须以 map 自身尺寸为准。
+TEST(AdvancedShader, ShadowSamplingUsesMapOwnSize)
+{
+    DepthBuffer map(8, 8);
+    map.clear();
+
+    FinalShader shader;
+    shader.shadowMap = &map;
+    shader.shadowW = 64; // 与 map 的 8×8 不一致
+    shader.shadowH = 64;
+    shader.lightVP = Mat4::identity();
+    shader.lightDir = Vec3f{0, 0, 1};
+    shader.cameraPos = Vec3f{0, 0, 5};
+    shader.baseColor = Vec3f{1, 1, 1};
+
+    Varyings v;
+    v.worldPos = Vec3f{0.9f, 0.9f, 0.0f}; // ndc 0.9 → 64 网格下落在 (44,44)
+    v.normal = Vec3f{0, 0, 1};
+    v.uv = Vec2f{0.5f, 0.5f};
+
+    Vec3f color;
+    ASSERT_TRUE(shader.fragment(v, color));
+    EXPECT_TRUE(std::isfinite(color.x));
+    EXPECT_GT(color.x, 0.0f); // 地图外视为全亮，仍然着色
+}
 
 // ==================== PBR：粗糙度边界 ====================
 // 成员注释写「0=镜面」，但 roughness = 0 时 a = 0、a2 = 0，GGX 的 D 恒为 0，

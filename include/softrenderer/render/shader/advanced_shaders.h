@@ -96,6 +96,15 @@ private:
     // 返回 [0,1] 的可见度（PCF 平均）：1 全亮，0 全遮挡
     float computeShadow(const Vec3f &worldPos, const Vec3f &N, const Vec3f &L) const
     {
+        // 采样范围必须以 shadowMap 自身的尺寸为准：shadowW/H 是调用方另设的成员
+        // （用于构造 lightVP 的宽高比），两者不一致时下面的边界检查会“通过”，
+        // 而 get() 拿到的是越界坐标——Release 下它靠自身兜底返回 kFar（结果碰巧正确），
+        // Debug 下则直接断言中止进程。
+        const int mapW = shadowMap->width();
+        const int mapH = shadowMap->height();
+        if (mapW <= 0 || mapH <= 0)
+            return 1.0f;
+
         // 世界坐标 -> 光源裁剪空间 -> NDC
         Vec4f lc = lightVP * Vec4f(worldPos, 1.0f);
         if (lc.w <= 0.0f)
@@ -106,8 +115,8 @@ private:
             return 1.0f;
 
         // NDC -> 阴影图像素坐标 + 深度 [0,1]
-        float sx = (ndc.x * 0.5f + 0.5f) * shadowW;
-        float sy = (ndc.y * 0.5f + 0.5f) * shadowH;
+        float sx = (ndc.x * 0.5f + 0.5f) * float(mapW);
+        float sy = (ndc.y * 0.5f + 0.5f) * float(mapH);
         float curDepth = ndc.z * 0.5f + 0.5f;
 
         // 斜率相关偏移：表面越斜（N·L 越小）越容易自阴影(acne)，加大 bias
@@ -119,7 +128,7 @@ private:
             for (int dx = -1; dx <= 1; ++dx)
             {
                 int px = int(sx) + dx, py = int(sy) + dy;
-                if (px < 0 || px >= shadowW || py < 0 || py >= shadowH)
+                if (px < 0 || px >= mapW || py < 0 || py >= mapH)
                 {
                     lit++;
                     total++;
