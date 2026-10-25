@@ -396,6 +396,23 @@ TEST(Draw2D, BezierCubicHitsEndpoints)
     EXPECT_GT(fb.getPixel(30, 30).r, 0); // 终点
 }
 
+// 粗线的实际宽度必须等于请求的 thickness。旧实现用 -half..half 铺平行线，
+// 偶数厚度会多出一条（thickness=4 画出 5 像素宽），与注释「thickness×thickness」不符。
+TEST(Draw2D, LineThickMatchesRequestedWidth)
+{
+    for (int thickness = 2; thickness <= 5; ++thickness)
+    {
+        Framebuffer fb(32, 16, colors::black);
+        draw2d::drawLineThick(fb, 4, 8, 20, 8, colors::white, thickness);
+
+        int rows = 0;
+        for (int y = 0; y < 16; ++y)
+            if (fb.getPixel(10, y).r > 0)
+                ++rows;
+        EXPECT_EQ(rows, thickness) << "thickness=" << thickness;
+    }
+}
+
 // dash + gap == 0 时 period 为 0，`step % period` 是整数除零。
 // drawLineDashed 此前零调用，所以这个入口一次都没被验证过。
 TEST(Draw2D, DashedLineHandlesZeroPeriod)

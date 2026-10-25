@@ -138,9 +138,15 @@ inline void drawLineThick(Framebuffer& fb, int x0, int y0, int x1, int y1,
                           const ClipRect* clip = nullptr)
 {
     if (thickness <= 1) { drawLine(fb, x0, y0, x1, y1, c, mode, clip); return; }
-    int half = thickness / 2;
-    for (int oy = -half; oy <= half; ++oy)
-        for (int ox = -half; ox <= half; ++ox)
+    // 两根约束：
+    // 1. 用 -half..half 铺平行线时，偶数厚度会多画一条（thickness=4 画出 5 像素宽），
+    //    与「thickness×thickness」的注释不符。换成 lo..hi 后总行数恰为 thickness。
+    // 2. 本函数是 O(thickness²) 条 Bresenham，超过画布尺寸只会白烧时间。
+    thickness = std::min(thickness, std::max(fb.width(), fb.height()));
+    const int lo = -(thickness - 1) / 2;
+    const int hi = thickness / 2;
+    for (int oy = lo; oy <= hi; ++oy)
+        for (int ox = lo; ox <= hi; ++ox)
             drawLine(fb, x0 + ox, y0 + oy, x1 + ox, y1 + oy, c, mode, clip);
 }
 
