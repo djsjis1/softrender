@@ -7,6 +7,25 @@
 
 ## 2026-10-25
 
+### 缺陷审查：相机退化参数与排序键一致性
+
+- `scene/camera.h`：`projMatrix()` 对退化参数无防护（窗口最小化时 `aspect = width/height = 0`、
+  远近平被推到重合），会产出 inf/NaN 投影矩阵，让整帧几何被管线静默丢弃——
+  画面全黑但不报错。现夹到可用范围，`math::perspective` 保持纯计算不变。
+  （修之前仅编译测试就会触发 MSVC C4723「潜在被 0 除」，常量传播已能算出来。）
+- `scene/camera.h`：`right()` 在 `pitch = ±90°` 时叉积为零向量，归一化得 NaN；
+  改用 `normalizedOr` 回退世界 X 轴。
+- `render/pipeline/render_queue.h`：`sortKey()` 按 uint16 截断 `materialId`（-1 → 65535），
+  而比较器用有符号比较（-1 最小），两个入口对同一队列给出相反顺序。
+  比较器改为同口径（uint16），并补上注释说明为何不能用有符号比较。
+- 新增 4 个单元测试：`RenderQueue.SortKeyAgreesWithComparatorForNegativeMaterial`、
+  `Camera.DegenerateAspectKeepsProjectionFinite`、`Camera.CoincidentNearFarKeepsProjectionFinite`、
+  `Camera.RightVectorFiniteWhenLookingStraightUp`。
+- `engineering/48` 新增「当前瓶颈」与「两条提速路线」（SIMD 接主链路 / 后处理降分辨率，均未实施）；
+  `ACTIVE.md` 待继续表补性能路线行。
+
+**验证**：构建 0/0；`unit_tests` **250/250**（246 → 250）；像素回归 3/3；压测 105/105。
+
 ### 压测体系重构与第二十二轮扩展
 
 **压测代码结构**
