@@ -17,7 +17,7 @@ SoftRenderer 是 C++23 教学型 CPU 渲染器，同时作为可被外部工程�
 | 独立工程 Release | 20 个离屏示例 + 3 个窗口示例 + 1 个练习 + 2 个测试程序 = 25 个默认可执行目标；另有两个可选基准/压测目标（`SR_BUILD_BENCHMARKS=ON`） |
 | 单元测试 | 246 用例 / 56 套件，Release 全通过（全量构建 0 错误 0 警告） |
 | 集成测试 | 3 场景像素回归通过（PNG 基准图，比较含 alpha）；下游消费工程 2 项通过 |
-| 压测探针 | `renderer_stress` 98 个场景（敌意输入/并发/性能）全通过；Release 全量约 8 s、`--quick` 78 个约 1.7 s；Debug+ASAN 同样干净 |
+| 压测探针 | `renderer_stress` 105 个场景（敌意输入/并发/性能）全通过；Release 全量约 8.2 s、`--quick` 85 个约 1.8 s；Debug+ASAN 同样干净 |
 | 架构门禁 | 逐头独立编译 + 命名空间哨兵（全局声明 60 个同名类型）+ include 白名单 + 循环依赖检查 |
 | 外部消费 | 聚合 / core-only / render-only 三类工程 × `add_subdirectory` 与安装后迁移 `find_package` 均通过；断言安装产物只含公共头 |
 | Debug ASAN | 单元测试与压测探针在 Debug+ASAN 下无断言、无 ASAN 报告（Debug 下两个越界用例按约定 GTEST_SKIP） |
@@ -33,7 +33,9 @@ SoftRenderer 是 C++23 教学型 CPU 渲染器，同时作为可被外部工程�
 - 性能：MSAA 4x 364→110 ms、全屏 blit 335→94 ms、Profiler flush 946→368 ms、
   SSAO 727→589 ms（半分辨率 218 ms）、FXAA 213→156 ms、PBR 1024²×30 253→186 ms、
   文字 5k 字形 78→37 ms、OBJ 50k 面 190→158 ms。
-- 压测：注册表驱动（`--filter` / `--quick` / `--json` / `--baseline` / `--strict-baseline`），场景 49 → 98。
+- 压测：注册表驱动（`--filter` / `--quick` / `--json` / `--baseline` / `--strict-baseline`），场景 49 → 105。
+- 压测代码分层：`stress_main.cpp` 只留 CLI，场景在 `benchmarks/stress/` 下按文件分编译，
+  `SR_SCENARIO()` 静态登记，新增场景不再修改注册表。
 
 ## 2026-10-23 分层解耦（TASK-014~018）
 

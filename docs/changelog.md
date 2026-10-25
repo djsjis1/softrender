@@ -7,6 +7,33 @@
 
 ## 2026-10-25
 
+### 压测体系重构与第二十二轮扩展
+
+**压测代码结构**
+
+- `stress_main.cpp` 从 4661 行单文件拆为“框架 + 场景”：CLI / 汇总 / JSON / 基线留在入口，
+  98 个既有场景迁到 `benchmarks/stress/stress_scenarios.cpp`，新增场景进 `stress_ext.cpp`。
+- 注册表从手写 98 行数组改为 `SR_SCENARIO()` 静态登记（`stress/stress_common.h`）：
+  场景顺序即执行顺序，新增场景不再需要改注册表，也不会漏登记。
+- 场景数 98 → **105**。新增：`log_format_contract`、`gbuffer_write_contract`、
+  `camera2d_roundtrip`、`render_queue_order`、`buffer_size_contract`、
+  `clip_boundary_contract`、`polygon_fill_robustness`。
+
+**修复**
+
+- `core/depthbuffer.h` / `core/float_framebuffer.h`：构造器对非法尺寸无校验，
+  `size_t(width) * height` 把负数转成 ~2^64，在容器分配处抛 `length_error`；
+  而 `resize()` 对同类输入只是忽略——两条路径口径不一致。现统一为“任一边非正 → 0×0”。
+- `render/draw2d/shape2d.h`：`fillPolygon` 缺少 `fillCircle` / `fillRoundedRect` 都有的
+  `allFinite` 前置校验，NaN 顶点会让 `(int)std::floor(NaN)` 进入 UB；屏幕外 ±1e30 的顶点
+  同样有 float→int 溢出风险。补校验并把扫描线范围夹到屏幕范围（最初夹到 1e7，
+  导致 64×64 场景跑 1.2 s；收紧后 0.12 ms）。
+
+**验证**
+
+- Release：构建 0/0；`unit_tests` 246/246；像素回归 3/3；压测 **105/105**（8.2 s，`--quick` 85 个 / 1.8 s）。
+- Debug + ASAN：压测 **105/105** 无断言无越界（171 s）。
+
 ### 文档体系整理（仅 docs/ 与根 README，无代码变更）
 
 - 新增 `docs/README.md` 作为唯一文档入口：目录职责表、权威数字优先级（project_context → ACTIVE → changelog）、三条阅读路线。
