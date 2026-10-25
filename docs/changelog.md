@@ -7,6 +7,26 @@
 
 ## 2026-10-25
 
+### 缺陷审查（续）：四元数退化轴与压测判据
+
+- `math/quat.h`：`fromAxisAngle` 对零/非有限轴无防护，而 `Vec3::normalized()` 只有
+  `assert` 守卫，Release 下是除零——产出的 NaN 四元数会沿蒙皮链污染整帧矩阵。
+  现退化输入返回单位四元数（与 `Quat::normalized()` 的零长度兜底同口径），
+  非有限角度同样按无旋转处理。
+- 压测场景 `draw_call_overhead` 用固定 200 μs/draw 判定，而 Debug+ASAN 下实测
+  217 μs（Release 1.3 μs），慢构建下必然误报。改为验证“绘制确实发生”
+  （屏幕中心像素被覆盖），性能回退交给 `--baseline`——与 `profiler_disabled_overhead`
+  按构建类型分阈值是两种正确的写法，这里选前者因为无可断言的语义差异。
+- 新增 `Quat.FromAxisAngleWithDegenerateAxisStaysFinite`。
+- 同期复查但未发现问题的模块：`skeleton.h`（越界/零权重/零向量均有兜底）、
+  `arena.h`（对齐与溢出检查完整）、`msaa_framebuffer.h`（写入与 resolve 边界完整）、
+  `animation_player.h`（targetNode 有上界检查、零时长 alpha=0、结果有限性校验）、
+  `barycentric.h`、`rect.h`、`transform2d.h`、`surface_shader.h`、
+  以及 8 处 `assert` 均已确认用于“调用方保证”的约定而非唯一校验。
+
+**验证**：构建 0/0；`unit_tests` **251/251**；像素回归 3/3；
+压测 Release **105/105**、Debug+ASAN **105/105**（198 s）。
+
 ### 缺陷审查：相机退化参数与排序键一致性
 
 - `scene/camera.h`：`projMatrix()` 对退化参数无防护（窗口最小化时 `aspect = width/height = 0`、
