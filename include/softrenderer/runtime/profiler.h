@@ -177,6 +177,11 @@ class Profiler
 
     // 启用/禁用 profiling。默认关闭（零开销）；需要 trace 时显式开启。
     // 关闭后 beginScope/endScope 只做一次原子读，不碰时钟、不加锁、不分配。
+    //
+    // 【限制】enabled 应在启动时一次性设定。运行期反复切换会让 scope 栈失衡：
+    // 关闭期间 beginScope 不入栈，而 endScope 无法察觉这一点，重新开启后会弹到
+    // 外层的记录帧——表现为外层时长偏大、内层事件完全丢失。要彻底修就得让关闭
+    // 路径也入栈，那会破坏上面“不分配”的零开销目标，属于有意取舍。
     void setEnabled(bool e) { enabled_.store(e, std::memory_order_relaxed); }
     bool isEnabled() const { return enabled_.load(std::memory_order_relaxed); }
 

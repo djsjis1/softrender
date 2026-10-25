@@ -12,6 +12,7 @@
 
 #include "softrenderer/runtime/command_buffer.h"
 #include "softrenderer/runtime/log.h"
+#include "softrenderer/runtime/profiler.h"
 #include "softrenderer/runtime/resource_cache.h"
 #include "softrenderer/runtime/thread_pool.h"
 #include "softrenderer/resource/texture.h"
@@ -244,6 +245,82 @@ TEST(ThreadPool, SubmitAndWait)
         pool.submit([&]() { sum.fetch_add(1); });
     pool.waitAll();
     EXPECT_EQ(sum.load(), 50);
+}
+
+// ==================== Profiler ====================
+// Profiler 此前只有压测场景覆盖，单元测试里一条都没有。它是进程级单例，
+// 每个用例用 RAII 守卫恢复 enabled 并清空事件，避免相互污染。
+namespace
+{
+struct ProfilerTestGuard
+{
+    bool previous = sr::Profiler::instance().isEnabled();
+    ProfilerTestGuard()
+    {
+        sr::Profiler::instance().clear();
+        sr::Profiler::instance().setEnabled(true);
+    }
+    ~ProfilerTestGuard()
+    {
+        sr::Profiler::instance().setEnabled(previous);
+        sr::Profiler::instance().clear();
+    }
+    ProfilerTestGuard(const ProfilerTestGuard&) = delete;
+    ProfilerTestGuard& operator=(const ProfilerTestGuard&) = delete;
+};
+} // namespace
+
+TEST(Profiler, EnabledRecordsOneEventPerScope)
+{
+    ProfilerTestGuard guard;
+    {
+        SR_PROFILE_SCOPE("unit_scope");
+    }
+    EXPECT_EQ(Profiler::instance().eventCount(), 1u);
+}
+
+TEST(Profiler, DisabledRecordsNothing)
+{
+    ProfilerTestGuard guard;
+    Profiler::instance().setEnabled(false);
+    {
+        SR_PROFILE_SCOPE("unit_scope");
+    }
+    EXPECT_EQ(Profiler::instance().eventCount(), 0u);
+}
+
+TEST(Profiler, NestedScopesRecordEachLevel)
+{
+    ProfilerTestGuard guard;
+    {
+        SR_PROFILE_SCOPE("outer");
+        {
+            SR_PROFILE_SCOPE("inner");
+        }
+    }
+    EXPECT_EQ(Profiler::instance().eventCount(), 2u);
+}
+
+TEST(Profiler, UnpairedEndScopeIsIgnored)
+{
+    ProfilerTestGuard guard;
+    EXPECT_NO_THROW(Profiler::instance().endScope());
+    EXPECT_EQ(Profiler::instance().eventCount(), 0u);
+}
+
+TEST(Profiler, MaxEventsDropsAndCounts)
+{
+    ProfilerTestGuard guard;
+    Profiler::instance().setMaxEvents(2);
+    for (int i = 0; i < 5; ++i)
+    {
+        SR_PROFILE_SCOPE("scope");
+    }
+    const size_t kept = Profiler::instance().eventCount();
+    const size_t dropped = Profiler::instance().droppedEvents();
+    Profiler::instance().setMaxEvents(1000000);
+    EXPECT_EQ(kept, 2u);
+    EXPECT_EQ(dropped, 3u);
 }
 
 // ==================== Mat3（2D 仿射）====================
