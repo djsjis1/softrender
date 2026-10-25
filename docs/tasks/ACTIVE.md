@@ -12,7 +12,7 @@
 | TASK-002 | 已完成 | 快速光栅化深度权重与顺时针修复 | [档案](DONE/TASK-002-光栅化器缺陷修复.md) |
 | TASK-003 | 已完成 | 边界安全、图像输入、混合和日志 | [档案](DONE/TASK-003-输入校验与边界安全.md) |
 | TASK-004 | 本地完成，远端待验收 | 跨平台目标守卫与像素回归 | [任务](TASK-004-CI跨平台与测试基础设施.md) |
-| TASK-005 | 部分完成 | CMake、Sanitizer、零警告已落地；静态分析待实跑 | [任务](TASK-005-构建系统现代化.md) |
+| TASK-005 | 已完成（clang-format 未跑） | CMake、Sanitizer、零警告、clang-tidy 全仓扫描已落地 | [任务](TASK-005-构建系统现代化.md) |
 | TASK-006 | 已完成 | 测试目录分层 + `test_core.cpp` 拆成 10 个文件；覆盖率待工具链 | [任务](TASK-006-测试目录重构与覆盖率.md) |
 | TASK-007 | 已完成 | 60 个全局类型全部迁入 sr，无别名桥；命名空间哨兵独立编译 | [任务](TASK-007-全局命名空间收敛.md) |
 | TASK-008 | 已完成 | 构建职责拆分、安装和真实消费工程验证 | [档案](DONE/TASK-008-library-integration.md) |
@@ -59,7 +59,8 @@
 **验证（Release）**：构建 0 错误 0 警告；`unit_tests` **281/281**；像素回归 **3/3**；
 压测 **105/105**；19 个离屏示例加 1 个练习共 **20 个离屏程序**退出码 0。Debug + ASAN 全量 **105/105** 无断言无越界（171 s）。
 
-**未完成**：覆盖率基线需 CI 工具链（本地无 `llvm-cov` / `gcov` / `OpenCppCoverage`）。
+**未完成**：覆盖率基线需可用的插桩工具链（BuildTools 无 `CodeCoverage.exe`；`dotnet-coverage` 对原生进程探查器不初始化；LLVM 组件仅含 clang-tidy/format）。
+**已补充**：clang-tidy 19.1.5（VS BuildTools 自带）已扫全部 65 个公共头，139 条诊断→ 1 项真缺陷已修；窗口示例已用桌面自动化验证（WASD 引起 61.7% 像素变化）。
 
 ## 2026-10-23 分层解耦（阶段 1–5）
 
@@ -85,7 +86,7 @@
 | 任务 | 当前状态 | 下一步与验收 |
 | --- | --- | --- |
 | TASK-004 跨平台 CI | 本地验证与 CI 配置已有；远端待验收 | 执行 Windows/Linux/macOS 作业，记录真实结果 |
-| TASK-005 构建现代化 | target-based、`/WX`、安装集成、Debug ASAN 已落地；静态分析未实跑 | 运行 clang-tidy 并处理实际诊断 |
+| TASK-005 构建现代化 | target-based、`/WX`、安装集成、Debug ASAN、clang-tidy 全仓扫描均已完成 | 仅剩 clang-format 全仓格式化（需在所有功能修改之后单独提交） |
 | TASK-006 覆盖率 | 拆分完成；覆盖率未实测 | 接入 llvm-cov/gcov 后取基线 |
 | 压测遗留 | 小三角形光栅 3.0 Mtris/s；OBJ 50k 面 155 ms | 包围盒建立开销、tinyobj 替换评估 |
 | 性能路线 | 后处理占 1080p 整帧 81%（157/193 ms） | 两条路线见 [性能优化指南](../engineering/48-性能优化指南.md) §4：后处理降分辨率（参数级、可回滚）与主链路 SIMD（接口级、需先立 ADR）；均未实施 |

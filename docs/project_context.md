@@ -22,7 +22,9 @@ SoftRenderer 是 C++23 教学型 CPU 渲染器，同时作为可被外部工程�
 | 外部消费 | 聚合 / core-only / render-only 三类工程 × `add_subdirectory` 与安装后迁移 `find_package` 均通过；断言安装产物只含公共头 |
 | Debug ASAN | 单元测试与压测探针在 Debug+ASAN 下无断言、无 ASAN 报告（Debug 下两个越界用例按约定 GTEST_SKIP） |
 | Linux/macOS | 三平台 CI 配置已同步（stage 目标名、覆盖率范围 `include/softrenderer` + `src`）；本轮未执行远端作业 |
-| 覆盖率 / clang-tidy | 本机无 gcov/lcov/clang 工具链（已实测）；无覆盖率数值与静态分析结论 |
+| 静态分析 | clang-tidy 19.1.5（VS BuildTools 自带，路径 `VC/Tools/Llvm/x64/bin`）已扫全部 65 个公共头：139 条诊断 → 1 项真实缺陷已修、16 项核实为范围受控的误报、122 条 narrow-conversions 为刻意的 float→int |
+| 覆盖率 | 本机不可得：BuildTools 无 CodeCoverage.exe；dotnet-coverage 18.12 对原生进程报「探查器未初始化」；LLVM 组件仅含 clang-tidy/format，无 clang 编译器与 llvm-cov |
+| 窗口示例 | 已用桌面自动化实跑 `stage10_shadow_live`：窗口正常创建、WASD 引起 61.7% 像素变化（无输入基线仅 4.7% 自转）、B 键切换阴影生效、Alt+F4 正常退出 |
 
 ## 2026-10-24 缺陷修复与压测扩展
 

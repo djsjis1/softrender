@@ -242,19 +242,29 @@ $env:PATH = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MS
 **格式化与静态检查**
 
 ```powershell
-# 需先安装 LLVM 工具链（当前环境未安装，见 docs/tasks/TASK-005）
-clang-format -i <files>          # 配置见根目录 .clang-format
-clang-tidy <files>               # 配置见根目录 .clang-tidy（待建立）
+# 工具随 VS BuildTools 一起安装，未在 PATH 中，需用完整路径
+$llvm = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\Llvm\x64\bin"
+& "$llvm\clang-tidy.exe" include/softrenderer/math/vec.h -- -x c++ -std=c++23 -I include
+& "$llvm\clang-format.exe" -i <files>   # 配置见根目录 .clang-format
 ```
 
-> `.clang-format` 已存在但**从未被执行过**：实测 60 个 `include/softrenderer/` 头文件的 namespace 体
-> 缩进 4 空格，违反配置第 92 行的 `NamespaceIndentation: None`。
-> 全仓格式化必须排在所有功能性修改之后、单独一个 commit 执行，
-> 并配合 `.git-blame-ignore-revs`。详见 `docs/tasks/TASK-005`。
+> 实测版本 **clang-tidy / clang-format 19.1.5**（2026-10-25）。该组件**没有** clang 编译器与
+> `llvm-cov`，因此覆盖率不能用 LLVM 路线。
+>
+> 头文件检查必须带 `-x c++`：否则 `.h` 被当成 C 处理，报 `-std=c++23 not allowed with C`。
+> 静态分析目标聚焦 `clang-analyzer-*` 与 `bugprone-*`（`-*,` 前缀覆盖 `.clang-tidy` 的检查集）：
+> 已扫全部 65 个公共头，139 条诊断中 1 项真实缺陷、16 项范围受控的误报、
+> 122 条是刻意的 `float→int`。
+>
+> `.clang-format` 仍**从未全仓执行**：实测 60 个 `include/softrenderer/` 头文件的 namespace 体
+> 缩进 4 空格，违反配置的 `NamespaceIndentation: None`。全仓格式化必须排在所有功能性修改之后、
+> 单独一个 commit 执行，并配合 `.git-blame-ignore-revs`。详见 `docs/tasks/TASK-005`。
 
 **覆盖率**
 
-当前**未配置**。`testing_rules.md` 要求核心模块行覆盖率 ≥ 80%、分支 ≥ 60%，
+当前**未配置**。已排除三条路径（都有实测证据）：BuildTools 无 `CodeCoverage.exe`；
+`dotnet-coverage 18.12` 对原生进程报「探查器未初始化」（补 PDB 后仍如此）；LLVM 组件无
+`clang-cl` 与 `llvm-cov`。`testing_rules.md` 要求核心模块行覆盖率 ≥ 80%、分支 ≥ 60%，
 接入方案见 `docs/tasks/TASK-006`。
 
 **DoD 最小验证集**（宣称完成前必须全部通过）

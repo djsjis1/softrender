@@ -7,6 +7,39 @@
 
 ## 2026-10-25
 
+### 把两项「未完成的验证」做完，并修掉它暴露的缺陷
+
+先纠正一条错误结论：之前多份文档写「本机无 LLVM 工具链」，那是沿用旧记录、没有实际查找。
+`VC/Tools/Llvm/x64/bin` 下有 **clang-tidy 19.1.5**（只是没装 clang 编译器）。
+
+**clang-tidy 全仓扫描（已完成）**
+
+- 65 个公共头逐个扫（`-x c++ -std=c++23`，启用 `clang-analyzer-*` 与 `bugprone-*`），139 条诊断。
+- 发现并修复 **1 项真实缺陷**：`~ProfileScope` 调 `endScope()`，后者内部的字符串拷贝与
+  `push_back` 可能抛 `bad_alloc`；析构是隐式 `noexcept`，异常逸出直接 `std::terminate`
+  且无法被调用方捕获。现改为析构内捕获全部异常——剖析是辅助功能，不能因此终止进程。
+- 其余 16 条逐条核实为**范围受控的误报**：8 条 `incorrect-roundings` 都是
+  `int(x + 0.5f)` 且输入已被 clamp 到非负区间；4 条 `implicit-widening` 的乘积
+  （`2*1024*1024`、`2*x` 且 x < 8192）都在 `int` 范围内；3 条 `misplaced-widening-cast`
+  的 `size_t(i + radius)` 已保证非负；1 条 `branch-clone` 的两个分支体相同但语义不同。
+- 122 条 `narrowing-conversions` 为刻意的 `float→int` 像素取整，不动。
+
+**Windows 窗口示例交互（已完成）**
+
+- 桌面自动化实跑 `stage10_shadow_live`：窗口正常创建，标题动态刷新帧率；
+  WASD 后 **61.7%** 像素变化（无输入基线仅 4.7% 的自转），B 键切换阴影且帧率 5.2→7.3，
+  Alt+F4 正常退出、无残留进程。
+
+**仍不可得的两项（已把排除路径记录在案）**
+
+| 项 | 具体证据 |
+|---|---|
+| 覆盖率 | BuildTools 无 `CodeCoverage.exe`；`dotnet-coverage 18.12` 已安装但对原生进程报「探查器未初始化」（补 PDB 后仍如此）；LLVM 组件无 `clang-cl` 与 `llvm-cov` |
+| 远端 CI | GitHub API 只读可用（能查历史 run），但 `git push` 两次失败：`Recv failure: Connection was reset`、`Failed to connect to github.com:443` |
+
+**验证**：构建 0/0；`unit_tests` **281/281**；像素回归 3/3；压测 --quick 85/105；
+clang-tidy 对 `profiler.h` 的 `bugprone-exception-escape` 已消失。
+
 ### 文档数字校验：离屏示例的真实数量
 
 把 `docs/` 里所有「N 个示例 / N 个用例 / N 个场景」类断言逐个与实测比对，
