@@ -7,6 +7,23 @@
 
 ## 2026-10-25
 
+### 缺陷审查（十）：阴影采样用了错误的尺寸来源
+
+- `render/shader/advanced_shaders.h` 的 `FinalShader::computeShadow`：边界检查用成员
+  `shadowW/H`，但实际访问的是 `shadowMap`。两者不一致时（调用方只改了一个），
+  检查“通过”、`get()` 拿到越界坐标：
+  - Release：`DepthBuffer::get` 自身兜底返回 `kFar`，结果碰巧正确；
+  - **Debug：`assert(x < width_)` 直接中止进程**（实测 exit=3）。
+  现采样范围一律取 `shadowMap->width()/height()`，`shadowW/H` 仍保留给调用方
+  构造 `lightVP` 的宽高比。
+- 新增 `AdvancedShader.ShadowSamplingUsesMapOwnSize`（Debug 下修前断言中止，修后通过）。
+- 本例的价值在于：它是一条**只在 Debug 暴露**的缺陷，Release 全量与像素回归
+  永远发现不了。为此本轮把 `build/asan` 的 `SR_BUILD_TESTS` 打开，
+  跑了一次 Debug 全量：**267 通过 + 2 按约定跳过**。
+
+**验证**：Release 构建 0/0；`unit_tests` **269/269**；像素回归 3/3；压测 105/105；
+Debug（ASAN）单测 267 通过 + 2 跳过。
+
 ### 缺陷审查（九）：场景节点与资产容器
 
 逐个读了 `scene/scene_node.h`、`material.h`、`scene_asset.h` 与加载器的节点段，
