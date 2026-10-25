@@ -7,6 +7,21 @@
 
 ## 2026-10-25
 
+### 缺陷审查（十五）：computeTangents 的越界写
+
+- `resource/mesh.h` 的 `computeTangents` 直接 `mesh.vertices[indices[i]]`，
+  **不检查索引范围**。`drawMesh` 会丢弃越界三角形，但本函数是独立公共 API：
+  对手写 Mesh 或解析异常的数据会越界写——Debug 下 MSVC 直接报
+  `vector subscript out of range`，Release 下则是静默内存破坏。
+  现逐三角形先校验三个索引，越界整体跳过。
+- 退化兜底口径统一：原实现在“切向为零”时构造与法线正交的向量，但
+  “切线与法线几乎平行（去完法线分量后接近零）”时兜底成固定 `(1,0,0)`——
+  若法线也接近 +X，切线与法线仍然平行，TBN 依旧退化。现两处共用 `orthogonalTangent`。
+- 新增 `Mesh.ComputeTangentsIgnoresOutOfRangeIndices`（Debug 下修前断言中止）。
+
+**验证**：构建 0/0；`unit_tests` **280/280**（64 套件）；像素回归 3/3；压测 105/105；
+Debug（ASAN）**278 通过 + 2 跳过**（实测）。
+
 ### 缺陷审查（十四）：法线贴图生成器的强度上溢
 
 - `resource/texture_generator.h` 的 `normalMapBumps`：`strength` 只检查了 `isfinite`。
