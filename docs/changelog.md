@@ -7,6 +7,31 @@
 
 ## 2026-10-25
 
+### 补齐：三个窗口示例全部实跑，覆盖率与 CI 再排除两条路径
+
+**窗口示例（3/3 完成）**
+
+| 示例 | 验证方式与结果 |
+|---|---|
+| `stage10_shadow_live` | WASD 引起 61.7% 像素变化（无输入基线 4.7%）；B 键切换阴影，帧率 5.2→7.3 |
+| `stage03_sprite_anim` | 空格跳跃使铠甲上移 112px（源码峰值 90px，含窗口缩放换算），随后落地、脚下阴影恢复；相对路径写出 40 帧 PNG |
+| `stage08_shader_live` | 1/2/3 切换使标题在 Phong→Flat→Gouraud→Phong 间变化，画面差异 34–37%，同模式往返基线仅 3.4%；W 前进也使画面明显变化 |
+
+三者均用 **Esc** 退出（非 Alt+F4）。其中 stage08 在 15–55 FPS 下，60 ms 的瞬时敲击会被轮询漏掉，需按住 ≥300 ms——这是“按键看似无响应”类问题的常见诱因。
+
+**覆盖率：新增一条排除证据**
+
+`winget` 源更新失败，装不上 OpenCppCoverage。至此四条路径全部排除（CodeCoverage.exe 缺失、dotnet-coverage 对原生无效、LLVM 无 llvm-cov、winget 源不可用）。
+
+**远端 CI：定位到更准确的原因**
+
+`git push` 三种方式（默认、`HTTP/1.1`+大缓冲、`sslBackend=schannel`）全部报 `Could not connect to github.com:443`。但同时刻：
+
+- `Test-NetConnection github.com -Port 443` → **True**
+- `Invoke-RestMethod api.github.com`（查 Actions runs）→ 成功
+
+说明不是全链路断网，而是 **git.exe 进程无法建立到 github.com:443 的连接**，本机没有可配置的代理可绕。
+
 ### 把两项「未完成的验证」做完，并修掉它暴露的缺陷
 
 先纠正一条错误结论：之前多份文档写「本机无 LLVM 工具链」，那是沿用旧记录、没有实际查找。
