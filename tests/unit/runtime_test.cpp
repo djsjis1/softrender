@@ -219,6 +219,23 @@ TEST(CommandBuffer, ParallelExecution)
     EXPECT_EQ(counter.load(), 100);
 }
 
+// 串行与并行的异常语义不同，且都是有意的：
+//   串行 → 遇异常立即中止，后续命令不执行（本用例）
+//   并行 → 一个失败不阻止其他命令，全部跑完后再抛
+//          （ThreadFailures.executeParallel_failure_attemptsAllCommandsEvenWithOneThread）
+// 两种语义都需被锁定，否则改一处就可能静默改变另一处的行为。
+TEST(CommandBuffer, SequentialStopsAtFirstFailure)
+{
+    sr::CommandBuffer cmd;
+    std::atomic<int> executed{0};
+    cmd.record([&]() { executed.fetch_add(1); });
+    cmd.record([]() { throw std::runtime_error("boom"); });
+    cmd.record([&]() { executed.fetch_add(1); });
+
+    EXPECT_THROW(cmd.executeSequential(), std::runtime_error);
+    EXPECT_EQ(executed.load(), 1); // 第三个命令不应执行
+}
+
 TEST(ThreadPool, SubmitAndWait)
 {
     sr::ThreadPool pool(4);

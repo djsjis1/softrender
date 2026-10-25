@@ -53,13 +53,20 @@ class CommandBuffer
     size_t size() const { return commands_.size(); }
 
     // 单线程顺序执行
+    // 串行：按记录顺序执行；**遇异常立即中止**，剩余命令不执行。
     void executeSequential()
     {
         for (auto& cmd : commands_)
             cmd();
     }
 
-    // 多线程并行执行（命令间无依赖时安全）
+    // 并行：命令间无依赖时安全。
+    //
+    // 【异常语义与串行不同，是有意的】一个命令失败**不会阻止其他命令执行**：
+    // 并行命令通常是互不相干的区域，各自完成更有用；第一个异常会在全部
+    // 命令跑完后抛给调用方。串行路径则相反（见 executeSequential）。
+    // 两者差异由 ThreadFailures.executeParallel_failure_attemptsAllCommandsEvenWithOneThread
+    // 与 CommandBuffer.SequentialStopsAtFirstFailure 两个用例锁定。
     void executeParallel(int numThreads = 0)
     {
         if (numThreads <= 0)
