@@ -157,7 +157,12 @@ inline void drawLineDashed(Framebuffer& fb, int x0, int y0, int x1, int y1,
     const int dx = x1 - x0;
     const int dy = std::abs(y1 - y0);
     const int ystep = (y1 > y0) ? 1 : -1;
-    const int period = dash + gap;
+    // dash/gap 是调用方可直接传的整数：period 为 0 时 `step % period` 是整数除零，
+    // 负 gap 又会让周期变成负数。两者都是未定义行为，编译器可对结果做任意优化
+    // （实测传入 (0,0) 时一个像素都不画）。dash <= 0 退化为实线，gap < 0 视为 0。
+    if (dash <= 0)
+        dash = 1;
+    const int period = dash + std::max(0, gap);
     int error2 = 0;
     int y = y0;
     int step = 0;

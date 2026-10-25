@@ -368,3 +368,59 @@ TEST(Draw2D, BlitFramebufferRespectsOffset)
     EXPECT_EQ(dst.getPixel(6, 6).r, 0);   // 4x4 只覆盖 [2,6)
 }
 
+// 缩放 blit 的源坐标必须落回图内，且象限对应不翻转（图像与帧缓冲都是 y 向上）。
+TEST(Draw2D, BlitImageScaledMapsQuadrants)
+{
+    Image img;
+    img.width = 2;
+    img.height = 2;
+    // 行优先、第 0 行在底部：(0,0)=左下，(1,0)=右下，(0,1)=左上，(1,1)=右上
+    img.pixels = {colors::red, colors::green, colors::blue, colors::white};
+
+    Framebuffer fb(8, 8, colors::black);
+    draw2d::blitImageScaled(fb, img, 0, 0, 8, 8);
+
+    EXPECT_EQ(fb.getPixel(1, 1).r, 255); // 左下 → 红
+    EXPECT_EQ(fb.getPixel(1, 1).g, 0);
+    EXPECT_EQ(fb.getPixel(6, 1).g, 255); // 右下 → 绿
+    EXPECT_EQ(fb.getPixel(1, 6).b, 255); // 左上 → 蓝
+}
+
+// 三次贝塞尔必须命中两个端点（分段数不为 1 时容易只画到中间）。
+TEST(Draw2D, BezierCubicHitsEndpoints)
+{
+    Framebuffer fb(32, 32, colors::black);
+    draw2d::drawBezierCubic(fb, 2, 2, 10, 28, 20, 4, 30, 30, colors::white, 40);
+
+    EXPECT_GT(fb.getPixel(2, 2).r, 0);   // 起点
+    EXPECT_GT(fb.getPixel(30, 30).r, 0); // 终点
+}
+
+// dash + gap == 0 时 period 为 0，`step % period` 是整数除零。
+// drawLineDashed 此前零调用，所以这个入口一次都没被验证过。
+TEST(Draw2D, DashedLineHandlesZeroPeriod)
+{
+    Framebuffer fb(16, 16, colors::black);
+    draw2d::drawLineDashed(fb, 0, 8, 15, 8, colors::white, 0, 0);
+
+    int lit = 0;
+    for (int x = 0; x < 16; ++x)
+        if (fb.getPixel(x, 8).r > 0)
+            ++lit;
+    EXPECT_GT(lit, 0); // 退化为实线，而不是什么都不画
+}
+
+// 负 gap 会被夹到 0：此时 dash=2、period=2，`step % 2` 恒小于 dash，
+// 结果退化为实线（与 dash=2、gap=0 等价），而不是周期为负数。
+TEST(Draw2D, DashedLineTreatsNegativeGapAsZero)
+{
+    Framebuffer fb(16, 16, colors::black);
+    draw2d::drawLineDashed(fb, 0, 8, 15, 8, colors::white, 2, -5);
+
+    int lit = 0;
+    for (int x = 0; x < 16; ++x)
+        if (fb.getPixel(x, 8).r > 0)
+            ++lit;
+    EXPECT_EQ(lit, 16);
+}
+
