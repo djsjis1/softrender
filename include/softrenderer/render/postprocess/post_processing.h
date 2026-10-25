@@ -724,8 +724,18 @@ inline void chromaticAberration(const FloatFramebuffer& src,
                                 FloatFramebuffer& out)
 {
     // offset 参与 int(x + dx * offset)，NaN/Inf 会让转换成为未定义行为。
-    if (!std::isfinite(offset))
+    if (!std::isfinite(offset) || W <= 0 || H <= 0)
         return;
+    // W/H 是尺寸参数而不是像素来源：用调用方传的值直接索引 src.getPixel，
+    // 在它与实际尺寸不一致时会越界读；输出也不会被重建，只会写出左上角一块。
+    // 以 src 的实际尺寸为准，并按该尺寸重建输出。
+    const int srcW = src.width(), srcH = src.height();
+    if (srcW <= 0 || srcH <= 0)
+        return;
+    W = srcW;
+    H = srcH;
+    if (out.width() != W || out.height() != H)
+        out.resize(W, H);
     float cx = W * 0.5f, cy = H * 0.5f;
     for (int y = 0; y < H; ++y)
     {

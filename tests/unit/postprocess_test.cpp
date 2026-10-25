@@ -413,3 +413,37 @@ TEST(PostProcess, DepthOfFieldMatchesNaiveBoxBlur)
             EXPECT_NEAR(got.z, expected.z, 1e-4f) << x << "," << y;
         }
 }
+
+// ==================== 未集成效果的契约 ====================
+// vignette 与 chromaticAberration 此前没有任何调用方（示例/测试/压测都没有），
+// 属于从未被执行过的公共 API。这里固定它们的基本行为与尺寸契约。
+
+TEST(PostProcess, VignetteDarkensEdgesAndKeepsCenter)
+{
+    FloatFramebuffer fb(17, 17);
+    fb.clear(Vec3f{1, 1, 1});
+    postprocess::vignette(fb, 0.5f);
+
+    const Vec3f center = fb.getPixel(8, 8);
+    const Vec3f corner = fb.getPixel(0, 0);
+    EXPECT_GT(center.x, 0.99f);    // 中心几乎不变
+    EXPECT_LT(corner.x, center.x); // 边角被压暗
+    EXPECT_GE(corner.x, 0.0f);
+    EXPECT_TRUE(std::isfinite(corner.x));
+}
+
+// W/H 与 src 不一致时，旧实现用调用方传的 W/H 直接索引 src.getPixel，会越界读；
+// 输出也不会按输入尺寸重建，结果只有左上角一块被写。
+TEST(PostProcess, ChromaticAberrationRebuildsMismatchedOutput)
+{
+    FloatFramebuffer src(8, 6);
+    src.clear(Vec3f{0.5f, 0.5f, 0.5f});
+    FloatFramebuffer out(2, 2);
+
+    postprocess::chromaticAberration(src, 32, 24, 1.0f, out);
+
+    EXPECT_EQ(out.width(), 8);
+    EXPECT_EQ(out.height(), 6);
+    const Vec3f p = out.getPixel(7, 5);
+    EXPECT_TRUE(std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z));
+}
