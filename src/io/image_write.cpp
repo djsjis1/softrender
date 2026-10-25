@@ -70,4 +70,4 @@ bool writeHDR(const std::string& path, const float* rgbData, int w, int h)
     return stbi_write_hdr(path.c_str(), w, h, 3, rgbData) != 0;
 }
 
-}  // namespace imagewriter
+} // namespace sr::io

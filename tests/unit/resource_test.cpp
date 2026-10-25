@@ -295,6 +295,45 @@ TEST(Mesh, AllGeneratorsWindingMatchesNormals)
     expectWindingMatchesNormals(sr::meshgen::sphere(1.0f, 12, 8), "sphere");
 }
 
+// 法线贴图的不变量：每个像素解码回来必须是单位法线。strength 极大时
+// dx*strength 会上溢成 inf，归一化得 NaN，随后 uint8_t(NaN) 是未定义行为。
+TEST(TextureGenerator, ExtremeStrengthKeepsNormalsUnitLength)
+{
+    const Image img = sr::texgen::normalMapBumps(16, 2, 3.0e38f);
+    ASSERT_TRUE(img.valid());
+
+    int bad = 0;
+    for (int y = 0; y < img.height; ++y)
+        for (int x = 0; x < img.width; ++x)
+        {
+            const Color c = img.at(x, y);
+            const Vec3f n{c.r / 255.0f * 2.0f - 1.0f, c.g / 255.0f * 2.0f - 1.0f,
+                          c.b / 255.0f * 2.0f - 1.0f};
+            if (std::abs(n.length() - 1.0f) > 0.05f)
+                ++bad;
+        }
+    EXPECT_EQ(bad, 0) << "解码后不是单位法线的像素数";
+}
+
+// 正常强度下也应满足同一个不变量（防止修复只覆盖极端值）。
+TEST(TextureGenerator, DefaultStrengthKeepsNormalsUnitLength)
+{
+    const Image img = sr::texgen::normalMapBumps(32, 4, 1.0f);
+    ASSERT_TRUE(img.valid());
+
+    int bad = 0;
+    for (int y = 0; y < img.height; ++y)
+        for (int x = 0; x < img.width; ++x)
+        {
+            const Color c = img.at(x, y);
+            const Vec3f n{c.r / 255.0f * 2.0f - 1.0f, c.g / 255.0f * 2.0f - 1.0f,
+                          c.b / 255.0f * 2.0f - 1.0f};
+            if (std::abs(n.length() - 1.0f) > 0.05f)
+                ++bad;
+        }
+    EXPECT_EQ(bad, 0);
+}
+
 // 退化参数不得触发整数除零。
 TEST(TextureGenerator, DegenerateParametersReturnInvalidImage)
 {

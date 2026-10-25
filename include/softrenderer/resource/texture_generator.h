@@ -86,6 +86,10 @@ namespace sr::texgen
         sr::Image img;
         if (size <= 0 || cells <= 0 || !std::isfinite(strength))
             return img;
+        // strength 只检查了 isfinite：极大值（如 3e38）会让 dx*strength 上溢成 inf，
+        // normalized() 得到 NaN，随后 uint8_t(NaN) 是未定义行为——实测部分像素解码后
+        // 不再是单位法线。凹凸强度的实用范围远小于 100，夹取即可。
+        strength = std::clamp(strength, 0.0f, 100.0f);
         img.width = size;
         img.height = size;
         img.pixels.resize(size_t(size) * size);
