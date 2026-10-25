@@ -7,6 +7,21 @@
 
 ## 2026-10-25
 
+### 缺陷审查（五）：两个从未被执行的公共效果
+
+- 清点后处理的所有导出函数发现：`vignette` 与 `chromaticAberration` 除了定义之外
+  **没有任何调用方**（示例、单元测试、压测都没有）——属于从未被执行过的公共 API。
+- 给两者补上用例后，`chromaticAberration` 当场变红：它用调用方传入的 `W/H` 去索引
+  `src.getPixel`，与实际尺寸不一致时会**越界读**；而且不重建输出，只写出左上角一块。
+  现以 `src` 的实际尺寸为准并按要求重建 `out`，同时拒绝非正的 W/H。
+- 新增 `PostProcess.VignetteDarkensEdgesAndKeepsCenter` 与
+  `PostProcess.ChromaticAberrationRebuildsMismatchedOutput`。
+- 同期复查未发现问题的：`src/io/obj_loader.cpp`（索引范围、去重、非有限值、
+  索引数非 3 倍数的检查链）、`runtime/thread_pool.h`（构造失败回滚、析构不丢弃
+  已提交任务、自等检测、首个异常的归属）。
+
+**验证**：构建 0/0；`unit_tests` **259/259**；像素回归 3/3；压测 105/105。
+
 ### 缺陷审查（四）：主光栅循环与输入解析
 
 本轮逐函数读了以下模块，**未发现新缺陷**，结论记录如下以免重复审查：
