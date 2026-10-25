@@ -17,6 +17,7 @@
 #include "softrenderer/render/pipeline/renderer.h"
 #include "softrenderer/render/raster/rasterizer_fast.h"
 #include "softrenderer/render/shader/advanced_shaders.h"
+#include "softrenderer/render/shader/deferred_lighting.h"
 #include "softrenderer/render/shader/pbr_shader.h"
 #include "softrenderer/resource/mesh.h"
 
@@ -50,6 +51,23 @@ TEST(AdvancedShader, ShadowSamplingUsesMapOwnSize)
     ASSERT_TRUE(shader.fragment(v, color));
     EXPECT_TRUE(std::isfinite(color.x));
     EXPECT_GT(color.x, 0.0f); // 地图外视为全亮，仍然着色
+}
+
+// ==================== 延迟光照：粗糙度边界 ====================
+// lightingPass 里的 BRDF 与 PBRShader 同源：roughness = 0 时 a2 = 0，D 恒为 0，
+// 完美镜面反而完全没有高光。修 PBRShader 时漏了这处复制品。
+TEST(DeferredLighting, ZeroRoughnessStillProducesSpecular)
+{
+    GBuffer gb;
+    gb.resize(1, 1);
+    ASSERT_TRUE(gb.write(0, 0, 0.5f, Vec3f{0, 0, 0}, Vec3f{0, 0, 1}, 0.0f, Vec3f{0, 0, 0}, 0.0f));
+
+    std::vector<Vec3f> out;
+    lightingPass(gb, Vec3f{0, 0, 1}, Vec3f{1, 1, 1}, Vec3f{0, 0, 5}, Vec3f{0, 0, 0}, out);
+
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_TRUE(std::isfinite(out[0].x));
+    EXPECT_GT(out[0].x, 0.01f); // albedo 为 0，只剩镜面项
 }
 
 // ==================== PBR：粗糙度边界 ====================

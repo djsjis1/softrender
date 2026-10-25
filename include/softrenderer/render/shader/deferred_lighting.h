@@ -43,6 +43,10 @@ inline void lightingPass(const GBuffer &gbuf, const Vec3f &lightDir,
         Vec3f albedo = Vec3f{gbuf.albedoMetal[i].x, gbuf.albedoMetal[i].y, gbuf.albedoMetal[i].z};
         float metallic = gbuf.albedoMetal[i].w;
         float roughness = gbuf.normalRough[i].w;
+        // 与 PBRShader 同源：roughness = 0 时 a2 = 0，GGX 的 D 恒为 0，
+        // 完美镜面反而完全没有高光。取感知粗糙度下限 0.04（Filament 同款），
+        // D 与 k 共用同一个夹取值，否则两者的分布对不上。
+        roughness = std::clamp(roughness, 0.04f, 1.0f);
         Vec3f P = gbuf.worldPos[i];
 
         Vec3f L = lightDir;

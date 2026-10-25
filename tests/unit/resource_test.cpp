@@ -261,6 +261,40 @@ TEST(Mesh, SphereWindingMatchesOutwardNormals)
     EXPECT_GT(checked, sphere.triangleCount() / 2);
 }
 
+namespace
+{
+// 逐三角形：面法线（右手定则）应与顶点法线同向，否则默认背面剔除会剔掉正面。
+// 零面积三角形跳过（球体两极会产生）。
+void expectWindingMatchesNormals(const Mesh& mesh, const char* label)
+{
+    int checked = 0;
+    int bad = 0;
+    for (int t = 0; t < mesh.triangleCount(); ++t)
+    {
+        const Vertex& v0 = mesh.vertices[mesh.indices[t * 3 + 0]];
+        const Vertex& v1 = mesh.vertices[mesh.indices[t * 3 + 1]];
+        const Vertex& v2 = mesh.vertices[mesh.indices[t * 3 + 2]];
+        const Vec3f faceNormal = cross(v1.position - v0.position, v2.position - v0.position);
+        if (faceNormal.lengthSq() < 1e-12f)
+            continue;
+        if (dot(faceNormal, v0.normal + v1.normal + v2.normal) <= 0.0f)
+            ++bad;
+        ++checked;
+    }
+    EXPECT_GT(checked, 0) << label;
+    EXPECT_EQ(bad, 0) << label << " 有三角形绕序与法线相反";
+}
+} // namespace
+
+// 绕序错误会被背面剔除静默吃掉：画面少一半但不报错。四个生成器都要满足「面法线朝外」。
+TEST(Mesh, AllGeneratorsWindingMatchesNormals)
+{
+    expectWindingMatchesNormals(sr::meshgen::cube(1.0f), "cube");
+    expectWindingMatchesNormals(sr::meshgen::plane(2.0f), "plane");
+    expectWindingMatchesNormals(sr::meshgen::planeGrid(4.0f, 4, 1.0f), "planeGrid");
+    expectWindingMatchesNormals(sr::meshgen::sphere(1.0f, 12, 8), "sphere");
+}
+
 // 退化参数不得触发整数除零。
 TEST(TextureGenerator, DegenerateParametersReturnInvalidImage)
 {
