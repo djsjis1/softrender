@@ -7,6 +7,21 @@
 
 ## 2026-10-25
 
+### 缺陷审查（十四）：法线贴图生成器的强度上溢
+
+- `resource/texture_generator.h` 的 `normalMapBumps`：`strength` 只检查了 `isfinite`。
+  极大值（如 `3e38`）会让 `dx * strength` 上溢成 inf，`normalized()` 得到 NaN，
+  随后 `uint8_t(NaN)` 是未定义行为——实测部分像素解码后不再是单位法线。
+  现把强度夹到 `[0, 100]`（凹凸强度的实用范围远小于此）。
+- 补两条不变量用例：极端强度与默认强度下，把每个像素解码回向量都必须接近单位长度
+  （极端那条修前为红，默认那条防止修复只覆盖极端值）。
+- 复查 `src/io/image_write.cpp` 与 `src/io/tga.cpp`：TGA 写出已有 16 位尺寸上限检查
+  与 `fclose` 返回值检查；stb 内部会把 JPG quality 夹到 `[1,100]`。只修了
+  `image_write.cpp` 末尾的命名空间注释（写成 `imagewriter`，与文件头的 `sr::io` 不符）。
+
+**验证**：构建 0/0；`unit_tests` **279/279**（64 套件）；像素回归 3/3；压测 105/105；
+Debug（ASAN）**277 通过 + 2 跳过**（实测）。
+
 ### 缺陷审查（十三）：Profiler 的零覆盖与一条已知限制
 
 - `runtime/resource_cache.h` 复查**未发现缺陷**：双检锁 + 64 分片锁保证同 key 串行构建、
