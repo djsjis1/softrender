@@ -14,7 +14,7 @@ SoftRenderer 是 C++23 教学型 CPU 渲染器，同时作为可被外部工程�
 | 项目 | 结果 |
 | --- | --- |
 | Windows 工具链 | VS Build Tools 2022，MSVC 19.44，CMake 3.31.6 |
-| 独立工程 Release | 20 个离屏示例 + 3 个窗口示例 + 1 个练习 + 2 个测试程序 = 25 个默认可执行目标；另有两个可选基准/压测目标（`SR_BUILD_BENCHMARKS=ON`） |
+| 独立工程 Release | 19 个离屏示例 + 3 个窗口示例 + 1 个练习 + 2 个测试程序 = 25 个默认可执行目标；另有两个可选基准/压测目标（`SR_BUILD_BENCHMARKS=ON`） |
 | 单元测试 | 281 用例 / 64 套件，Release 全通过；Debug（ASAN）279 通过 + 2 跳过 |
 | 集成测试 | 3 场景像素回归通过（PNG 基准图，比较含 alpha）；下游消费工程 2 项通过 |
 | 压测探针 | `renderer_stress` 105 个场景（敌意输入/并发/性能）全通过；Release 全量约 8.2 s、`--quick` 85 个约 1.8 s；Debug+ASAN 同样干净 |
