@@ -78,7 +78,7 @@
 | 文件 | 关键内容 |
 | --- | --- |
 | `blend.h` | `enum class BlendMode`（Opaque / AlphaBlend / Additive / Multiply / Premultiplied）、`blendPixels(src, dst, mode)` |
-| `include/softrenderer/io/tga.h` | `namespace tga`：`Image`、`read` / `write`。按 y-up 约定设置 TGA 原点标志位 |
+| `include/softrenderer/io/tga.h` | `sr::io::readTga` / `writeTga`。按 y-up 约定设置原点标志；读取前校验像素上限与声明字节数，不按头部尺寸盲分配 |
 | `include/softrenderer/io/image_write.h` | `namespace imagewriter`：`writeImage`（PNG/JPG/BMP/TGA，基于 stb_image_write） |
 | `include/softrenderer/render/postprocess/post_processing.h` | `namespace postprocess`：统一后处理入口——FXAA 抗锯齿、DOF 景深、径向模糊、暗角、色差、SSAO 环境光遮蔽 |
 
@@ -89,7 +89,7 @@
 | `arena.h` | `sr::ArenaAllocator`：安全对齐与长度校验，reset 保留并复用块；used/capacity 分别观测当前使用和保留容量 |
 | `include/softrenderer/runtime/command_buffer.h` | `sr::CommandBuffer` / `sr::ThreadPool`：任务分发、waitAll 异常报告和 submitFuture 结果 |
 | `include/softrenderer/runtime/profiler.h` | `sr::Profiler`（Meyers 单例）、`SR_PROFILE_SCOPE` 宏，输出 Chrome Tracing JSON |
-| `include/softrenderer/runtime/resource_manager.h` | `sr::ResourceManager`：引用计数缓存，用 C++20 `concepts`（`has_loadFromFile`）约束资源类型（阶段 4 改为 `ResourceCache`） |
+| `include/softrenderer/runtime/resource_cache.h` | `sr::ResourceCache`：弱引用缓存，同一 key 并发首次加载只构建一次（64 分片锁 single-flight）；工厂失败不入缓存 |
 | `benchmarks/support/benchmark.h` | `sr::` 基准测试工具（阶段 5 迁往 benchmarks 支持目录） |
 | `include/softrenderer/runtime/log.h` | `SR_LOG_*` 宏 + `sr_log_init` / `sr_log_shutdown`。双模式条件编译，见 `architecture.md` §6.2 |
 
@@ -274,8 +274,8 @@ struct Shader {
 |---|---|---|
 | `pixel_regression.h` | `namespace regression`：`CompareResult`、`compare`、`saveGolden`、`compareWithGolden` | ✅ 已接线（TASK-004），3 个回归场景 + 7 个单元用例 |
 
-`pixel_regression` 的通过判据：不匹配像素占比 < 0.1% **且** 平均差值 < 0.5。
-基准图存放于 `tests/fixtures/golden/<name>.tga`。
+`pixel_regression` 的通过判据：不匹配像素占比 < 0.1%、平均差值 < 0.5，**且 alpha 完全一致**。
+基准图存放于 `tests/fixtures/golden/<name>.png`（RGBA，含 alpha）。
 
 > `test_framework.h`（自研 minitest）已删除（TASK-004），项目统一使用 GoogleTest。
 

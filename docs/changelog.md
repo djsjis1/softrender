@@ -5,6 +5,311 @@
 > 按 `documentation_rules.md` 要求，每次有意义的变更都必须在此登记。
 > 重大接口变更需同时在变更内容中标注版本号。
 
+## 2026-10-24
+
+### 全仓缺陷修复（审查驱动，未升版本）
+
+**正确性**
+
+- `resource/texture.h`：默认构造 / 无效图像的采样不再访问空 `mips_`；新增 `sampleLevel`、带 alpha 的 `sampleColor`。
+- `core/image.h`：`valid()` 同时要求存储长度与尺寸一致；新增 `pixelCount()`（含溢出保护）。
+- `resource/cubemap.h`：`valid()` 校验六面；零方向向量返回 0；`sampleReflection` 按 roughness 选 mip 层（此前完全忽略该参数）。
+- `core/blend.h`：`div255` 改为精确四舍五入；AlphaBlend 分开计算颜色与 alpha（原实现算出 As×As + Ad×(1−As)）；Premultiplied 先把目标预乘并保留合成 alpha。
+- `resource/mesh_generator.h`：球体三角形绕序改为与向外法线一致，并跳过两极退化三角形（此前默认背面剔除会剔掉正面）。
+- `render/shader/pbr_shader.h`：环境反射方向改用 `reflect(-V, N)`（原式把 V 与 N 写反）。
+- `render/postprocess/post_processing.h`：FXAA 改真正的亚像素双线性采样；SSAO `configure()` 重建噪声、参数收敛、每帧重置输出；DOF / 径向模糊 / 高斯 / 亮部提取补尺寸与别名校验。
+- `render/pipeline/render_queue.h`：透明层改为距离优先、材质次级；`sortKey` 同步；非有限距离归零。
+- `render/raster/coverage.h` + `render/pipeline/renderer.h`：覆盖判定与属性插值分离，重心坐标改用无偏边函数与真实面积。
+- `render/draw2d/*`：AA 边缘 alpha 乘源 alpha；`blitTexture` 取像素中心、传导数、保留纹理 alpha。
+- `scene/skeleton.h`：全局变换与骨骼数组顺序无关，父索引越界 / 成环返回空；蒙皮越界索引被忽略，零权重不回退成零向量或 NaN。
+- `scene/particle_system.h`：`sizeMin` 生效（新增 `Particle::sizeStart`），运行期改 `maxParticles` 真实扩容，非有限 dt 被忽略，零方向向量有兜底。
+- `scene/scene_node.h` + `src/io/gltf_loader.cpp`：新增 `meshIndices`，多 primitive 展平后节点引用全部网格；越界 mesh 索引在转换期失败。
+- `src/io/obj_loader.cpp`：独立校验位置/法线/UV 索引上界，失败不修改输出。
+- `src/io/image_loader.cpp`：不再使用 stb 全局垂直翻转开关（会污染 tinygltf 贴图方向且存在并发竞态），改为逐行拷贝翻转。
+- `src/io/tga.cpp`：检查 `fwrite`/`fclose` 返回值，宽高超出 16 位直接失败。
+- `math/rect.h`：空矩形不再判为与任何矩形相交。
+- `core/float_framebuffer.h`、`core/gbuffer.h`：`resize` 先构造后发布，异常时不再留下尺寸与数据失配。
+
+**运行时与平台**
+
+- `runtime/resource_cache.h`：并发同 key 发布前二次检查，保证对外只存在一个活跃实例。
+- `runtime/profiler.h`：JSON 字符串转义、写盘移出锁、开关改原子、`ProfileScope` 禁复制、时钟改 `steady_clock`。
+- `third/log/Logger.cpp`：异步线程池只初始化一次（不再替换全局池致旧 logger 失效）；补 `std::exception` 捕获；移动语义清理源对象；单例未初始化时返回空实现。
+- `platform/win32_window.h`：禁止复制/移动，`present` 校验源尺寸，创建失败即关闭，UTF-8 标题正确转 UTF-16。
+
+**测试与 CI**
+
+- 单元测试 179 → **218 用例 / 52 套件**，新增覆盖上述缺陷的回归用例。
+- 像素回归基准图改为 **PNG（RGBA）**，比较纳入 alpha；`SR_UPDATE_GOLDEN` 改为覆写已有基准并检查写失败。
+- 示例去重：`stage02/03` 改用 `draw2d::drawCharSprite`，`demo_stars` 改用 `postprocess::resolveToLdr`，`demo_gltf` 加载失败不再回退伪造成功。
+- `tests/CMakeLists.txt`：架构门禁移到组件开关之前，裁剪构建不再丢失校验。
+- CI：缺失示例目标即失败、离屏示例必须跑满 20 个、新增 benchmark 实际运行、TSAN 覆盖 `ResourceCache`。
+- `.clang-tidy`：`HeaderFilterRegex` 补上 `include/softrenderer`。
+
+### 压测发现并修复（同日）
+
+用 `build/stress` 独立消费工程跑了 28 个高负载/敌意输入场景，修复：
+
+- `resource/texture.h`：UV 或导数为 NaN/Inf 时不再进入 float→int（UB）与 NaN 插值；非有限 UV 返回兜底色、非有限导数按第 0 层；mipmap 生成把 alpha 一起平均（此前半透明纹理一旦采到低层 mip 就变不透明）。
+- `scene/particle_system.h`：发射改为游标扫描 + 存活计数，且发射量受剩余空槽限制；10 万粒子 20 帧从 27.5 s 降到约 36 ms。
+- `render/draw2d/blit2d.h`：所有 blit 先与帧缓冲、裁剪区求交，超屏目标不再逐像素空转；4000×4000 目标从 3.5 s 降到约 0.3 s。
+- `render/pipeline/renderer.h`：`drawMesh` 丢弃索引越界或为负的三角形（`Mesh` 是公共结构，越界读是 UB）。
+- `src/io/obj_loader.cpp`：拒绝 nan/inf 顶点（文本可被解析成 NaN，会让包围盒、平滑法线、蒙皮全变 NaN）。
+- `render/postprocess/post_processing.h`：DOF 的 `maxBlur` 夹到画面尺寸量级，避免 `maxBlur=1e6` 时的 (2e6)² 循环。
+- 新增 9 个回归用例（219 → 228）：纹理非有限输入、mip alpha、blit 裁剪、粒子容量上限、Mesh 越界索引、OBJ 非有限顶点、DOF 语义锁与半径上限。
+- 已否决的优化：把 DOF 二维窗口改成可分离两趟。半径逐像素不同时两者并不等价，被新增的语义锁用例当场抓住，已回退。
+
+### 压测二轮：性能与容量（同日）
+
+- `render/postprocess/post_processing.h`：DOF 改为**按半径分桶 + 增量列窗口 + 行内前缀和**。对每个出现的半径 r 逐行维护列窗口（增/减端点行），水平窗口用前缀和，两层 clamp 可交换所以与逐像素二维窗口**严格相等**（由语义锁用例坐实）。128²、maxBlur=48：122 ms → 0.4 ms；1920×1080、maxBlur=48：1.58 s → 0.60 s。
+- `resource/texture.h`：mip 生成改用行指针 + 预计算列索引。**实测无可测收益**（2048² 仍约 38–42 ms/张，best-of-3 与改前差异在噪声内）；瓶颈在分配与 box filter 本身而不在索引计算，故此次只作为可读性整理保留，不计作性能提升。
+- `runtime/profiler.h`：新增事件上限 `setMaxEvents()`（默认 100 万）与 `droppedEvents()`，溢出计数写入 trace JSON 的 `droppedEvents` 字段；`clear()` 一并清零。
+- 压测从 28 个场景扩到 **35 个**：新增 `dof_1080p_r48`、`profiler_event_cap`、`draw2d_scissor_edges`、`math_singular_inverse`、`msaa_resolve_size_mismatch`、`threadpool_64_threads`、`gltf_empty_model`。全部通过，无新缺陷。
+- 已验证安全、不需修改：`MSAAFlatRenderer::resolveTo` 已对目标尺寸取 min；奇异矩阵 `inversed()` 返回有限值（不产生 NaN）；反向 scissor 不绘制任何像素。
+
+### 压测三轮：2D 静默降级与长时稳定性（同日）
+
+- `render/draw2d/blit2d.h`：新增 `blitTextureTransformed()`——纹理四边形支持任意仿射（逆映射 + 包围盒预裁剪 + 图空间越界不绕回）。
+- `render/draw2d/renderer2d.h`：
+  - `Renderer2D::texture()` 在旋转/斜切下不再 `return` 静默不画，改走上面的四边形路径（与 `image()` 行为一致）。
+  - `Renderer2D::rectGradient()` 在旋转下不再退化为纯色，改为逐像素逆映射取渐变参数（`c1` 不再被丢弃）。
+- 压测场景 35 → **38**：新增 `soak_1200_frames`（进程私有内存采样）、`render_path_consistency`（主 Renderer vs `rasterizer_fast` 覆盖集合对比）、`renderer2d_rotated_texture`。
+- 实测：soak 1200 帧后私有内存 **0 KB 增长**（无逐帧泄漏）；两条光栅路径在相同三角形下覆盖像素 **完全一致**（`diff=0`）。
+- 压测自身修正：一致性用例最初用自写视口公式换算屏幕坐标，造成 2 像素假差异；改用库的 `transform::viewport` 后归零，避免把压测误差报成库内缺陷。
+
+### 压测四轮：动画采样与大尺寸后处理（同日）
+
+- `scene/animation_player.h`：关键帧区间定位由**逐帧扫描 O(n)** 改为 `std::upper_bound` 二分；`samplerIsValid` 新增 `trusted` 参数。
+- `scene/animation_clip.h`：新增 `validated` 标记（加载期已校验）。`src/io/gltf_loader.cpp` 在 `decodeSampler` 完成后置 true；手工构造的片段保持 false，仍走完整校验（现有非法时间轴用例全部保留）。
+- 实测（1 万关键帧、2 万次采样）：**1 426 ms → 18.8 ms**。
+- 压测场景 38 → **43**：新增 `command_buffer_50k`、`animation_10k_keys`、`msaa4x_1080p`、`renderer2d_transforms_2k`、`sceneasset_deep_copy`。
+- 实测：`CommandBuffer` 5 万命令并行/顺序/重复执行均为 50000 且异常正常传播；`MSAA 4x 1920×1080` 388 ms；`Renderer2D` 2000 组随机变换+渐变+贴图 281 ms；`SceneAsset` 含 4 张 256² 带 mip 纹理的深拷贝 40 次 58.6 ms（值语义代价，非缺陷）。
+
+### 压测五轮：DOF 二维积分图（同日）
+
+- `render/postprocess/post_processing.h`：DOF 新增 **SAT（二维积分图）快路径**，每像素窗口和 = 四个角点相减，与半径数无关。边界 clamp 拆成「中间矩形 + 左右列带 + 上下行带 + 四角」；内部像素走无补齐分支。半径 < 4 或图像过大（> 160MB 临时内存）时仍用分桶路径。
+- 实测 1920×1080、maxBlur=48：**573 ms → 240 ms**（相对最初逐像素二维窗口为数十倍）；128² 小图仍走分桶路径，约 1 ms。
+- 实现期被测试抓住的两个公式错误（均已修，保留注释作警示）：右列带写成 `at(W,·)-at(W,·)`（实际需减 `at(W-1,·)`，结果偏大 2.4 倍）；上行带写成 `at(·,H)-at(·,0)`（实际需减 `at(·,H-1)`，偏大 2.6 倍）。
+- 新增测试 `DepthOfFieldPreservesUniformImage`：均匀色图经任意模糊必须等于原值——上面两个错误正是被它一眼定位。
+
+### 压测六轮：压测入库与纹理生成（同日）
+
+- **压测程序入库**：`benchmarks/stress_main.cpp` + 新目标 `renderer_stress`（`SR_BUILD_BENCHMARKS=ON` 时构建）。之前它只存在于 `build/`（被 gitignore），无法沉淀。现共 **46 个场景**，退出码即结果（`failures=0` 时返回 0），可直接接入 CI。
+- `resource/texture.h`：mip 生成新增无边界分支的快路径（宽高 >1 时倍率索引必然在界内），并把 `/4` 改 `>>2`。
+- `resource/texture_generator.h`：`checkerboard` / `uvGrid` 用行/列 LUT 消除百万级逐像素整数除法。
+- 实测 2048²：程序化生成 **20 ms → 9 ms**；mip 链构建约 21 ms/张，图像拷贝 3 ms/张（拷贝属调用方传入方式，非库开销）。
+- 新增 3 个场景：`render_4k_sphere`（3840×2160，171 ms，6016 三角形）、`renderer2d_text_5k`（5000 个不同字符串，78 ms）、`tga_1920x1080_roundtrip`（写+读 6.2 MB，42 ms）。均通过，无新缺陷。
+- CI 新增 `Run stress probe` 步骤：三平台矩阵上构建并运行 `renderer_stress`，失败即红灯。
+
+### 压测七轮：延迟渲染防 NaN（同日）
+
+- `core/gbuffer.h`：`write()` 拒绝非有限深度。此前 NaN 深度能穿过 `z >= depth[idx]`（NaN 比较恒假），一旦写入，后续所有像素与 NaN 比较也是假，**深度测试整体失效**。
+- `render/shader/deferred_lighting.h`：`lightingPass()` 先校验四路 RT（worldPos/normalRough/albedoMetal/depth）长度一致，不一致直接返回；深度非有限按背景处理。
+- 压测场景 46 → **47**：新增 `deferred_1080p`（1920×1080、掺 1/1000 的 NaN 深度、637k 次写入 + 全屏光照）。实测 175 ms，NaN 被拒、深度次序保持、输出无 NaN。
+- 新增 2 个单元用例：`GBuffer.RejectsNonFiniteDepth`、`GBuffer.LightingPassRejectsInconsistentBuffers`（230 → 232）。
+
+### 压测八轮：颜色转换的最后一道闸门（同日）
+
+- `core/color.h`：`fromFloat()` 的 `clamp01` 改为 NaN 安全写法（`v > 0 ? (v < 1 ? v : 1) : 0`）。旧写法两个比较对 NaN 都是假，NaN 原样传入 `uint8_t(NaN * 255 + 0.5f)` —— 未定义行为。现在着色器输出 NaN → 0、+Inf → 255、−Inf → 0。
+- `core/color.h`：`lerp()` 的 t 同样夹到 [0,1]，避免 NaN 的 t 进入 `uint8_t` 转换。
+- 压测场景 47 → **48**：新增 `nan_fragment_color`——着色器直接输出 (NaN, +Inf, −Inf)，断言屏幕像素恰为 (0,255,0,255)。
+- 新增 2 个单元用例：`Color.FromFloatClampsNonFinite`、`Color.LerpClampsNonFiniteT`（232 → 234）。
+- 顺带核实：`DepthBuffer::testAndSet` 与 `Renderer` 行内深度测试均用 `z < slot`，NaN 会被自然拒绝，无需修改。
+
+### 压测九轮：2D / 后处理的浮转整闸门（同日）
+
+- `render/draw2d/shape2d.h`：新增 `draw2d::allFinite({...})`，并在 `fillCircle` / `fillEllipse` / `drawEllipse` / `fillRoundedRect` / `drawRoundedRect` 入口统一拒绝非有限参数。旧实现的 `r <= 0` / `w <= 0` 对 NaN 恒为假，拦不住后面的 `int(std::floor(NaN))`（未定义行为）。`drawEllipse` 的细分段数也增加了上界（`rx` 极大时 span 可能是 inf）。
+- `render/postprocess/post_processing.h`：`depthOfField` 拒绝非有限 `focusDist`；`radialMotionBlur` 拒绝非有限 `strength`；`chromaticAberration` 拒绝非有限 `offset`——三者都直接接到 `int(...)` 转换。
+- 压测场景 48 → **49**：新增 `nonfinite_2d_api`，用 NaN/±Inf 调用上述 8 个 API，断言画面保持纯黑（全部被闸门拦住）。
+- 新增单元用例 `Shape2D.NonFiniteParametersAreIgnored`（234 → 235）。
+
+### 压测十轮：框架化 + 资产语义 / 并发 / IO / 吞吐（同日）
+
+**压测程序框架**（`benchmarks/stress_main.cpp`）
+
+- 改为**场景注册表**驱动：每行 `{id, fn, heavy}`，新增场景只加一行；支持 `--list` / `--filter=<substr>` / `--quick` / `--json=<path>` / `--baseline=<path>` / `--strict-baseline`。
+- `--baseline` 读上一轮 JSON，超过 `1.5× + 5 ms` 打印 `[SLOW]`，把「性能回退」变成可机械判定的信号；`--quick` 跳过 11 个重型场景，1.8 s 跑完 64 个。
+- 场景 49 → **75**，全绿，全量 7.4 s。新增分组：资产语义（glTF 多 primitive / 非三角 mode、骨骼层级、Cubemap 粗糙度）、并发（ResourceCache single-flight、纹理只读并发、Profiler 多线程、线程池析构清空队列）、数值边界（超大三角形、退化三角形、极端投影、深度次序、MSAA 边缘覆盖、PBR 极端材质、动画损坏数据、粒子极端配置、帧缓冲越界读）、IO（TGA RLE/16bit/调色板/顶部原点/超大头部、OBJ 2 MB 单行、PNG 解码）、吞吐（blit / fill / 采样 / 小三角形 / 图像解码）。
+
+**压测发现的缺陷（已修）**
+
+- `runtime/resource_cache.h`：同一 key 的并发首次加载会**各自构建一份**（16 线程 + 2 ms 工厂 = 92 次重复构建，实测 452 次）。改为 64 分片锁实现 single-flight：同 key 串行构建，不同 key 仅哈希冲突时短暂互斥；锁序固定为「分片 → 全局」。实测并发构建 **452 → 1**。
+- `render/pipeline/msaa_renderer.h`：屏幕坐标超过 `TriangleCoverage` 的 ±2^20 上限时**整块几何被静默丢弃**（相机贴地的地板三角形会整块消失，16384 像素变成 0）。新增视口矩形 Sutherland-Hodgman 2D 裁剪，颜色与深度线性插值后逐三角扇光栅化。
+- `src/io/tga.cpp`：先按头部声明的宽高分配缓冲再读文件，`8192×8192` 的 118 字节文件会触发 192 MB 分配（耗时 49 ms 的纯放大攻击）。改为先卡像素上限（8192²）并对未压缩类型校验「剩余文件长度 ≥ 声明长度」，通过后才分配。
+
+**性能优化（均有压测数值支撑）**
+
+- `resource/texture.h`：新增 `lodForPixel` / `sampleColorWithLod` 公开入口；`bilinearSpan` 用分支代替每像素 4 次整数取模；`floorFast` 在 |x| < 2^23 时用截断+修正代替 `std::floor`（x64 基线无 `roundsrd`）；lod 为整数时跳过层间插值（1:1 blit 的常见情形）。双线性采样 11.2 → 18.3 M/s，三线性 3.8 → 5.1 M/s。
+- `render/draw2d/blit2d.h`：轴的 blit 屏幕空间导数是常量，mip 层改为循环外算一次。`blitTexture` 1024² 全屏 **335 ms → 94 ms**（3.1 → 11.2 Mpix/s）；`draw2d_20k_rects` 中的 4000×4000 目标 282 → 84 ms。
+- `runtime/profiler.h`：`flush` 改为内存拼装 + 单次 `fwrite`，时间戳用整数微秒，其余字段手写十进制追加。200k 事件：记录 82 ms + 写盘 285 ms（原合计 946 ms）。
+- `render/pipeline/msaa_renderer.h` + `render/raster/coverage.h`：`MSAAFlatRenderer` 复用覆盖计算的整数边函数算重心，不再每样本调一次浮点 `barycentric`。
+
+**验证**
+
+- 构建 0 错误 0 警告；`unit_tests` **239/239**；`render_regression` **3/3**；`renderer_stress` **75/75**（`--quick` 1.8 s）。
+- 新增 4 个单元用例（235 → 239）：`ResourceCache.ConcurrentFirstLoadBuildsOnce`、`MSAACoverage.rasterize_hugeTriangleCoversViewport`、`TgaLoader.oversizedHeader_rejectedWithoutLargeAllocation`、`TgaLoader.rle24_decodesBgrToRgbaWithBottomOrigin`。
+- `.gitignore` 新增 `stress-out/`（trace.json 单文件可达 25 MB）。
+
+### 压测十一轮：默认零开销 + 大画面链路（同日）
+
+**压测发现的缺陷（已修）**
+
+- `runtime/profiler.h`：`setEnabled(false)` **无效**——`beginScope/endScope` 从不检查开关，关闭后仍在记录（实测 100 万次 scope 仍产出 100 万事件、耗时 480 ms）。现在两者入口都先读原子标志，关闭时只做一次原子读（12 ms / 100 万对）。
+- `runtime/profiler.h`：默认值从**开启**改为**关闭**。库内部不自动打点，默认开启只会让使用方的 scope 白担锁与内存；四个依赖 trace 的示例（`demo_gltf` / `demo_ibl_pbr` / `demo_pbr_material` / `demo_skinning`）改为显式 `setEnabled(true)`。
+- `endScope` 在关闭状态下仍会把 thread_local 栈弹干净，避免开关中途切换时留下错配条目。
+
+**压测程序改进**
+
+- 每个场景运行包 try/catch：单个场景抛 `bad_alloc` 不再终止整个探针进程（84 个场景共用一个进程，死在中间会让后面全部失去覆盖）。
+- `--filter` 无匹配时返回码 2 并提示，避免拼错过滤词时“静默全绿”；帮助文本改为只描述场景 id（实际匹配的就是 id）。
+- 修正压测自身失真：`obj_50k_faces` 的 434 ms 实际花在测试自己逐行 `ofstream <<` 写 20 万行上，改为内存拼装后一次写出（434 → 49 ms），并把写/解析分开报告。
+- 场景 75 → **84**（`--quick` 68 个 / 1.8 s，全量 9.3 s），新增大类：场景图更新（1 万节点× 50 帧）、并发渲染（4 线程自拓 Framebuffer，speedup 3.17）、1080p 后处理链、纹理生命周期（1000 张带 mip 纹理，私有内存 0 MB 增长）、Profiler 关闭开销、MSAA resolve 吞吐、非法 Mesh、Arena 边界、粒子运行期扩缩容。
+
+**性能优化（均有压测数值）**
+
+- `render/pipeline/msaa_renderer.h`：样本偏移是像素内的固定 1/8 值，改为「像素中心边函数 + 每样本常量增量」——每样本从“2 次坐标量化 + 9 次整数乘法”降到 3 次加法，按行用 `advanceX/advanceY` 推进。`msaa4x_1080p` **364 → 133 ms**，`msaa4x_1024_sphere` **99 → 33 ms**；5 个 MSAA 用例的精确期望值不变（覆盖集合与深度逐位一致）。
+- `render/postprocess/post_processing.h`：
+  - `gaussianBlur` 垂直 pass 改为按核偏移逐行累加（内层循环在连续内存上），`231 → 185 ms`。
+  - `resolveToLdr` 改用 sqrt 索引的 1024 段 gamma LUT（误差 < 1e-4，8 位下 0.03 LSB），`160 → 110 ms`；新增用例 `PostProcess.GammaCorrectFastMatchesPowWithinLsbTolerance` 锁定精度。
+  - `brightPass` / `addBlend` 改行指针，不再逐像素做边界检查。
+  - 1080p bloom 链 `366 → 313 ms`。
+- `src/io/obj_loader.cpp`：`indexCache` / `vertices` / `indices` 按索引总数预留，避免 15 万次插入的多次 rehash，`50k 面解析 190 → 158 ms`。
+
+**验证**
+
+- 构建 0/0；`unit_tests` **240/240**（+1 gamma LUT 精度）；`render_regression` **3/3**；`renderer_stress` **84/84**。
+
+### 压测十二轮：Debug/ASAN 构建下的退化向量（同日）
+
+**用 Debug + ASAN 构建跑同一套压测**，暴露了 Release 下被静默掩盖的退化输入问题：
+
+- `math/vec.h`：新增 `normalizedOr(fallback)`。`normalized()` 保留“调用方保证非零”的严格契约（Debug 有 `assert(len > 0)`），外部顶点属性必须用新函数。
+- `render/pipeline/surface_shader.h`：`toWorldNormal` 改用 `normalizedOr({0,0,1})`。零法线/NaN 法线会让 Debug 构建直接断言中止（Release 则把 NaN 传进光照）。
+- `render/shader/*`：`pbr_shader` / `shaders` / `advanced_shaders` / `deferred_lighting` 的法线、视向量、半程向量、切线统一改用 `normalizedOr`；零光向兑底为 (0,1,0)；`FlatShader` 的退化面法线给稳定方向。正常输入的计算路径（`x / len`）未变。
+- `resource/mesh.h`：`computeTangents` 对零法线兑底。全退化三角形（共线/重复顶点）叠加无法线时，原实现会在 Debug 断言。
+- 压测场景适配 Debug：`framebuffer_bounds` 的越界读写属“调用方错误”（库用 assert 强制契约），只在 `NDEBUG` 下验证；吞吐/内存阈值在 Debug 下另给一档，只用于发现数量级崩坏。
+
+**验证**
+
+- Debug + ASAN 全量 **84/84** 通过，无断言、无 AddressSanitizer 报告（耗时 147 s）。
+- Release：`unit_tests` **242/242**（+2：`Vec.NormalizedOrFallsBackOnDegenerateInput`、`Mesh.ComputeTangentsHandlesDegenerateNormals`）；`render_regression` **3/3**；`renderer_stress` **84/84**；**20** 个离屏示例退出码 0（另 3 个窗口示例仅构建、不参与自动运行）。
+
+### 压测十三轮：图集寻址 / 大场景 / SSAO 成本（同日）
+
+**发现的缺陷（已修）**
+
+- `render/draw2d/blit2d.h` + `resource/texture.h`：2D 贴图用 Repeat 寻址，放大小图时边缘列会混入对边颜色（2×2 放大到 8×8，右边缘混入 37.5% 的左边缘颜色，图集直接串色）。新增 `Texture::sampleNearestClamped` / `sampleColorClamped`（ClampToEdge），`blitTexture` 与 `blitTextureTransformed` 全面改用它；3D 表面纹理仍走 Repeat。修复后四角恢复纯色（实测 255/0、0/255、255/255）。
+
+**性能**
+
+- `render/postprocess/post_processing.h`：SSAO 每样本 3 次除法→ 1 次除法 + 乘法（1080p × 16 样本是 3300 万次），全分辨率 **727 → 589 ms**。
+- 新增 `SSAO::computeHalfResolution`：半分辨率计算（取 2×2 代表像素，不平均法线）+ 双线性上采样。1080p **218 ms**（全分辨率的 1/3），与全分辨率平均偏差 4e-6。
+
+**压测扩展（84 → 89）**
+
+- `gltf_large_scene`：500 个 mesh + 500 个 node 的 glTF，验证展平与节点映射不错位（500 mesh / 22 ms 导入）。
+- `draw_call_overhead`：2000 次“clear + 极小三角形”，1.45 μs/draw（含 clear）。
+- `texture_atlas_edges`：2×2 四色放大到 8×8，锁定 Edge 寻址不被 Repeat 污染。
+- `ssao_1080p` / `ssao_half_res_1080p`：用自洽透视矩阵 + 柱状遮挡构造真实遮蔽（minAo 0.94），并比较两条路径的速度与质量。
+- 新增单元用例 `Blit2D.EdgeSamplingDoesNotWrapToOppositeSide`（242 → 243）。
+
+**验证**
+
+- 构建 0/0；`unit_tests` **243/243**；`render_regression` **3/3**；`renderer_stress` **89/89**（`--quick` 71 个 / 1.9 s，全量 9.9 s）。
+
+### 压测十四轮：帧间隔离 / 图像格式 / 阴影成本（同日）
+
+本轮主要补齐三条未覆盖的链路，并把测试自身的失真改正：
+
+- `renderer_frame_isolation`：验证 `Renderer::clear()` **同时重置深度**（否则第二帧远端几何会被上一帧遮挡），以及两个 `Renderer` 实例的深度互不干涉。实测通过——这是回归保护，不是新缺陷。
+- `image_formats_roundtrip`：PNG / BMP / TGA 写出再读回 **逐像素无损**（含坐标朝向），JPG 大色块主色正确，不可写路径返回 false。
+- `shadow_map_pcf`：1024² 深度图渲染（4 个球 31 ms）+ 512² 全屏 3×3 PCF（9 ms），平均受光率 0.53，作为阴影链路的成本基线。
+- 修正测试设计：JPG 用例最初用 16×12 图 + 单像素断言，而 16×12 只有 2×2 个 8×8 DCT 块，整图会被有损压缩糊掉——那是否式特性不是缺陷。改为 64×64 大色块 + 区域均值。
+
+**验证**：构建 0/0；`unit_tests` **243/243**；`render_regression` **3/3**；`renderer_stress` **92/92**（`--quick` 73 个 / 1.6 s，全量 8.3 s）。
+
+### 压测十五轮：样本写入合并 + 异步生命周期（同日）
+
+**性能**
+
+- `core/msaa_framebuffer.h`：新增 `testAndWriteSample(x, y, sample, z, color)`。原来 `testDepth()` + `setSample()` 会各自做一遍边界检查与一次索引乘法，而两者用的是同一个样本索引；合并后每样本只算一次，语义不变（仍然只有深度通过才写颜色）。
+- 实测（多次取中位）：`msaa4x_1080p` **133 → 约 105–120 ms**；`bench_raster_small_tris` **2.0 → 约 2.8 Mtris/s**。5 个 MSAA 用例的精确期望值不变。
+
+**压测扩展（92 → 93）**
+
+- `async_lifecycle`：验证 CommandBuffer 析构时释放未执行命令捕获的 `shared_ptr`（`use_count` 回到 1）、执行后不消费命令、ThreadPool 析构时未取的 future 仍执行完、未观测异常不会让析构崩溃。实测全部通过。
+
+**验证**：构建 0/0；`unit_tests` **243/243**；`render_regression` **3/3**；`renderer_stress` **93/93**（`--quick` 74 个 / 1.7 s，全量 9.1 s）。
+
+### 压测十六轮：文字渲染快速路径（同日）
+
+- `render/draw2d/renderer2d.h`：`text()` 在轴对齐且未翻转时走**字符级包围盒 + 逐像素查字模**，不再对每个亮点调一次 `fillUserRectMat`（一个字符 15~20 个亮点 → 15~20 次四角变换 + 裁剪）。旋转/翻转/镜像仍走原路径。
+- 实测：`renderer2d_text_5k` **78 → 36–40 ms**，且 `lit` 计数与优化前**逐像素一致**（39744）。
+- 新增用例 `Renderer2D.TextScaleAmplifiesGlyphPixels`：与字体内容无关的不变量——scale=2 的亮像素数必须恰好是 scale=1 的 4 倍（244）。
+
+**验证**：构建 0/0；`unit_tests` **244/244**；`render_regression` **3/3**；`renderer_stress` **93/93**；**20** 个离屏示例退出码 0。
+
+### 压测十七轮：动画→蒙皮→渲染端到端（同日）
+
+- 新增 `animation_skinning_pipeline`：三骨骼链 + 四元数旋转动画 → `sampleAnimation` → 写回 `localTransform` → `computeSkinMatrices` → 逐顶点 `skinPosition/skinNormal` → 光栅化。两个时间点的画面哈希不同（lit 108/59），顶点无 NaN。此前采样、骨骼、渲染是分三段测的，这一轮把接缝也盖上了。
+- 新增用例 `Skeleton.BindPoseLeavesVerticesUnchanged`：绑定姿态下 `global * inverseBind` 应为单位矩阵、顶点不动。矩阵乘法顺序写反会立即失败（245）。
+
+**验证**：`unit_tests` **245/245**；`render_regression` **3/3**；`renderer_stress` **94/94**（`--quick` 75 个 / 1.8 s，全量 9.3 s）。
+
+### 压测十八轮：Cubemap 面映射 / 2D 状态隔离（同日）
+
+- **覆盖率工具链本地不可用**：`llvm-cov` / `llvm-profdata` / `gcov` / `OpenCppCoverage` 均不在 PATH，VS BuildTools 也未安装 LLVM 工具；本机无法取覆盖率基线，只能依靠 CI 的 coverage job。已记入 ACTIVE 作为环境限制。
+- 新增 `cubemap_face_mapping`：六面各涂一色，验证 6 个轴向 + 24 个面内方向都采样到对应面，以及 `generateSkyCubemap` 的天顶/地平线公式。此前 Cubemap 只测过“中心方向不越界”，faceFor 的面选择与 u/v 翻转没有任何用例。实测通过。
+- 新增 `renderer2d_state_reset`：`begin()` 必须清掉上一帧的 scissor（否则第二帧被默默截断），空栈 `pop()` / 重复 `end()` 不得崩。实测 scissor 正确清除（16 / 1024 像素）。
+- 加固 `texture_lifecycle` 判据：改用“预热 200 张 + 两轮各 500 张、看第二轮增长”代替单次绝对增长。首轮包含分配器保留策略，不是泄漏，原先的绝对阈值在系统内存压力下会间歇误报。
+
+**验证**：`unit_tests` **245/245**；`render_regression` **3/3**；`renderer_stress` **96/96**（`--quick` 77 个 / 1.6–2.0 s，全量 9.9 s）。
+
+### 压测十九轮：节点层级 / 固定次幂 / 示例计数修正（同日）
+
+**性能**
+
+- 新增 `math/scalar.h`：`pow5(x)` = `((x²)²)·x`。PBR 的 Schlick 菲涅尔项（直接光与 IBL 两处）和延迟光照的同一项原来都调 `std::pow(x, 5.0f)`，逐片元两次库调用。
+- 实测：`render_1024x1024_x30` **253 → 185–189 ms**；`render_4k_sphere` **161 → 136 ms**。新增用例 `ScalarMath.Pow5MatchesStdPow` 锁定与 `std::pow` 的差异 < 1e-6。
+
+**压测扩展（96 → 97）**
+
+- `gltf_node_hierarchy`：200 级链式 `children` 的 glTF，验证 `convertModel` 的 children 映射、末节点 meshIndex，并用迭代方式累乘世界矩阵（叶子 x = 2.0，误差 < 0.05）。此前只测过平铺节点。
+
+**修正一处文档错误**
+
+- 此前多轮写“21 个离屏示例”。实际 `stage03_sprite_anim` 是窗口程序（`while (pumpMessages())`），虽无 `_live` 后缀但一直被 CI 归入窗口目标。离屏示例真实数量是 **20**，另 3 个窗口示例（stage03 / stage08_shader_live / stage10_shadow_live）只构建、不自动运行。已回头修正这处数字。
+
+**验证**：`unit_tests` **246/246**；`render_regression` **3/3**；`renderer_stress` **97/97**（`--quick` 78 个，全量 7.9 s）；20 个离屏示例退出码 0。
+
+### 压测二十轮：整帧预算 / FXAA 优化 / 文档对齐（同日）
+
+**整帧预算（新增场景）**
+
+- `frame_budget_1080p`：一帧 = 清屏 + PBR 球（2976 三角形）+ 20 个 2D 面板 + 5 条文本 + 全屏 FXAA。
+- 首次测量：3D **30 ms**、2D **5 ms**、**FXAA 213 ms**，整帧 252 ms——后处理占 85%，与“3D 是主力”的直觉相反。
+
+**FXAA 优化（数学等价重构）**
+
+- 预计算亮度图：原实现每像素算 9 次亮度（3×3 邻域），而每个亮度又被周围 9 个像素各算一次，整体 9 倍冗余；1080p 下等于 1800 万次 `getPixel + luminance`。
+- 低对比度像素先整行拷贝，不再逐像素 `setPixel`；只有确认是边缘后才读 4 个角落；行指针提前算好，y 方向完全不用 clamp。
+- 实测 FXAA 1080p（UI 密集画面）：**213 → 156 ms**；PostProcess 20 个用例全过。注：该场景包含大量 UI/文字边缘，真实 3D 画面的边缘更少、会更快。
+
+**文档对齐**（历史 changelog 条目保留为当时快照）：
+
+- `docs/project_context.md`：用例数 218/52 → **246/56**；ASAN 行改为“无断言、无 ASAN 报告”；新增压测探针状态行；可执行目标说明补上 `renderer_stress`。
+- `docs/engineering/21`：两处 218/52 → **246/56**，补上压测场景。
+- `docs/engineering/58`：顶部声明性能数字为 2026-10-06 快照，当前数据用 `renderer_stress --json` 采集。
+
+**验证**：构建 0/0；`unit_tests` **246/246**；`render_regression` **3/3**；`renderer_stress` **98/98**（7.7 s）。
+
+### 压测二十一轮：ASAN 全量 + 阈值修正（同日）
+
+- **Debug + ASAN 全量 98/98** 跑通，无断言、无 AddressSanitizer 报告（150 s）。
+- 过程中发现 `frame_budget_1080p` 有一个硬编码的 `total < 500 ms` 阈值：在 ASAN 下 FXAA 慢 12 倍（整帧 2.5 s）会误报失败。性能断言不应写死绝对时间——已改为“三段都真的跑了 + 输出非全黑”，性能回归交给 `--baseline`（同构建对比同构建）。
+
+**最终 DoD（Release）**：构建 0/0；`unit_tests` **246/246**；`render_regression` **3/3**；`renderer_stress` **98/98**；**20** 个离屏示例退出码 0。
+
 ## 2026-10-23
 
 ### 2.0.0 分层解耦重构（TASK-014 阶段 2–5）

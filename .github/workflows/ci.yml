@@ -98,8 +98,11 @@ jobs:
             elif [ -f "$BIN/$stage.exe" ]; then
               EXE="$BIN/$stage.exe"
             else
-              echo "::warning::未找到 $stage，跳过"
-              continue
+              # 目标缺失说明构建产物不完整（或 target 被误删），必须失败：
+              # 旧实现只 warning + continue，加上末尾允许少量缺失，
+              # 实际上把「示例没跑」伪装成了绿灯。
+              echo "::error::未找到 $stage，构建产物缺失或 target 已失效"
+              exit 1
             fi
             echo "Running $stage..."
             # 不加 || true：shell: bash 默认 -e，非零退出码会正常使步骤失败
@@ -107,11 +110,36 @@ jobs:
             RAN=$((RAN + 1))
           done
           echo "共运行 $RAN 个离屏示例"
-          # 防止「一个都没找到」也继续绿灯：Windows 上应跑到 20 个（去掉三个窗口示例）
-          if [ "$RAN" -lt 15 ]; then
-            echo "::error::只运行了 $RAN 个示例，远低于预期，疑似构建产物缺失"
+          # 名单固定为 20 个（示例总数减去三个窗口示例），必须全部跑到：
+          # 允许少量缺失会把「平台守卫失效 / 目标被删」这类问题吞掉。
+          if [ "$RAN" -ne 20 ]; then
+            echo "::error::只运行了 $RAN 个示例，预期 20 个"
             exit 1
           fi
+
+      - name: Run benchmark
+        shell: bash
+        # 只构建不运行的话，基准代码本身能不能跑、输出是否稳定都无人验证。
+        # 本步骤不设性能阈值（不同 runner 硬件差异过大），但要求程序正常退出。
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            BIN="build/bin/${{ matrix.build_type }}"
+          else
+            BIN="build/bin"
+          fi
+          "$BIN/renderer_benchmark" || "$BIN/renderer_benchmark.exe"
+
+      - name: Run stress probe
+        shell: bash
+        # 46 个高负载/敌意输入场景（渲染、后处理、2D、IO、线程、内存、损坏文件）。
+        # 退出码即结果：failures=0 → 0；任何场景失败 → 1。
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            BIN="build/bin/${{ matrix.build_type }}"
+          else
+            BIN="build/bin"
+          fi
+          "$BIN/renderer_stress" || "$BIN/renderer_stress.exe"
 
       - name: Upload Artifacts
         if: always()
@@ -129,10 +157,17 @@ jobs:
       - name: Configure Debug sanitizers
         run: >
           cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug
-          -DSR_ENABLE_SANITIZERS=ON
+          -DSR_ENABLE_SANITIZERS=ON -DSR_BUILD_BENCHMARKS=ON
           -DSR_BUILD_EXAMPLES=OFF -DSR_BUILD_PRACTICE=OFF
-      - name: Build tests
-        run: cmake --build build-asan --parallel 2 --target unit_tests render_regression
+      - name: Build tests and stress probe
+        run: cmake --build build-asan --parallel 2 --target unit_tests render_regression renderer_stress
+      - name: Run stress probe under ASAN
+        # 同一套敌意输入在 ASAN 下跑一遍：零法线/越界写这类问题
+        # 在 Release 下只表现为“颜色不对”，在这里会直接报错。
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ./build-asan/bin/renderer_stress --quick
       - name: Run ASAN and UBSAN tests
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
@@ -158,7 +193,7 @@ jobs:
           TSAN_OPTIONS: halt_on_error=1
         run: >
           ctest --test-dir build-tsan -C Debug --output-on-failure
-          -R '^(ThreadFailures|ThreadPool|CommandBuffer)\.'
+          -R '^(ThreadFailures|ThreadPool|CommandBuffer|ResourceCache)\.'
 
   # ============================================================
   # 覆盖率（testing_rules.md：核心模块行覆盖率 ≥ 80%、分支 ≥ 60%，

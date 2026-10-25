@@ -14,12 +14,13 @@ SoftRenderer 是 C++23 教学型 CPU 渲染器，同时作为可被外部工程�
 | 项目 | 结果 |
 | --- | --- |
 | Windows 工具链 | VS Build Tools 2022，MSVC 19.44，CMake 3.31.6 |
-| 独立工程 Release | 20 个离屏示例 + 3 个窗口示例 + 1 个练习 + 2 个测试程序 = 25 个默认可执行目标；另有可选 renderer_benchmark |
-| 单元测试 | 179 用例 / 46 套件，Release 全通过（全新构建目录 0 错误 0 警告） |
-| 集成测试 | 3 场景像素回归通过（基准图未更新）；`ctest -LE fast` 183/183 |
+| 独立工程 Release | 20 个离屏示例 + 3 个窗口示例 + 1 个练习 + 2 个测试程序 = 25 个默认可执行目标；另有两个可选基准/压测目标（`SR_BUILD_BENCHMARKS=ON`） |
+| 单元测试 | 246 用例 / 56 套件，Release 全通过（全量构建 0 错误 0 警告） |
+| 集成测试 | 3 场景像素回归通过（PNG 基准图，比较含 alpha）；下游消费工程 2 项通过 |
+| 压测探针 | `renderer_stress` 97 个场景（敌意输入/并发/性能）全通过；Release 全量约 8 s、`--quick` 78 个约 1.7 s；Debug+ASAN 同样干净 |
 | 架构门禁 | 逐头独立编译 + 命名空间哨兵（全局声明 60 个同名类型）+ include 白名单 + 循环依赖检查 |
 | 外部消费 | 聚合 / core-only / render-only 三类工程 × `add_subdirectory` 与安装后迁移 `find_package` 均通过；断言安装产物只含公共头 |
-| Debug ASAN | 177 通过 + 2 项既定跳过，无 ASAN 报告（Debug 下越界用例按约定 GTEST_SKIP） |
+| Debug ASAN | 单元测试与压测探针在 Debug+ASAN 下无断言、无 ASAN 报告（Debug 下两个越界用例按约定 GTEST_SKIP） |
 | Linux/macOS | 三平台 CI 配置已同步（stage 目标名、覆盖率范围 `include/softrenderer` + `src`）；本轮未执行远端作业 |
 | 覆盖率 / clang-tidy | 本机无 gcov/lcov/clang 工具链（已实测）；无覆盖率数值与静态分析结论 |
 

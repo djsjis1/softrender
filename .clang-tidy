@@ -30,8 +30,9 @@ Checks: >
   -modernize-avoid-c-arrays,
   -readability-redundant-access-specifiers
 
-# 只报告 src/ 下头文件里的问题，忽略第三方与构建目录
-HeaderFilterRegex: '.*/src/.*'
+# 主体公共实现在 include/softrenderer，私有实现在 src/。
+# 只过滤 src 会让绝大多数实际代码被跳过；third/ 另有自己的 .clang-tidy 关闭全部检查。
+HeaderFilterRegex: '.*/(include/softrenderer|src)/.*'
 
 # 不自动改写源码：本项目要求格式化与静态检查分离，
 # 修复必须经人工判断（自动 fix 会绕过 review 并可能改变热路径语义）
