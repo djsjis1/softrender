@@ -51,6 +51,9 @@ coverage*.info
 # 压测程序产物（trace.json 可达 25 MB、临时模型/图片头）
 stress-out/
 
+# 桌面验证截图（ComputerUse 等工具生成，不入库）
+_shots/
+
 # ---------- 第三方构建产物（源码本身需入库）----------
 vcpkg_installed/
 third/entt/build/

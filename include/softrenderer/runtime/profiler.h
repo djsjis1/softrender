@@ -288,8 +288,19 @@ class ProfileScope
 
     ~ProfileScope()
     {
-        if (active_)
+        if (!active_)
+            return;
+        // 析构函数隐式 noexcept：endScope 内部要拷贝 name/category 并 push_back 事件，
+        // 内存不足时会抛 bad_alloc。一旦从析构逸出就是 std::terminate，而且调用方
+        // 无法捕获。性能剖析是辅助功能，不能因为“记不下来一条事件”而终止进程。
+        // 这里不发日志：日志本身也可能分配，且在析构里再抛一次。
+        try
+        {
             Profiler::instance().endScope();
+        }
+        catch (...)
+        {
+        }
     }
 
    private:
