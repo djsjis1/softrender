@@ -7,6 +7,24 @@
 
 ## 2026-10-25
 
+### 缺陷审查（六）：零调用 API 清点
+
+用「调用方清点」扫描全部公共头的自由函数：87 个导出函数里有 **13 个**除定义外
+没有任何调用方（示例、测试、压测都没用过）。抽样逐个读实现：
+
+| 函数 | 结论 |
+|---|---|
+| `perp` / `rotate2D` / `angleBetween` | 数学正确：`atan2(cross, dot)` 带符号，零向量不产生 NaN |
+| `drawRect` | 四条边填充，厚度夹到 `min(w, h)`，不会越界 |
+| `clipTriangleNearPlane` | 输出上限 4 与单平面裁剪的顶点数一致；已被完整 6 面版本替代 |
+| `blitImageRotated` / `blitFramebuffer` / `clipTargetRect` | 变换链与 `long long` 裁剪均正确 |
+
+抽查未发现新缺陷；补 3 条用例锁定最常用的三个：
+`Vec2.PerpRotateAndSignedAngle`、`Draw2D.DrawRectOutlinesWithoutFillingCenter`、
+`Draw2D.BlitFramebufferRespectsOffset`。
+
+**验证**：构建 0/0；`unit_tests` **262/262**；像素回归 3/3；压测 105/105。
+
 ### 缺陷审查（五）：两个从未被执行的公共效果
 
 - 清点后处理的所有导出函数发现：`vignette` 与 `chromaticAberration` 除了定义之外
