@@ -13,6 +13,7 @@
 #include "softrenderer/scene/camera.h"
 #include "softrenderer/scene/camera2d.h"
 #include "softrenderer/scene/particle_system.h"
+#include "softrenderer/scene/scene_node.h"
 #include "softrenderer/scene/skeleton.h"
 
 using namespace sr;
@@ -244,6 +245,36 @@ TEST(Particle, Lifetime)
 }
 
 // ==================== 资源缓存 ====================
+
+// ==================== SceneNode 局部矩阵 ====================
+// localMatrix() 是所有层级世界矩阵的乘基，但此前没有任何用例。
+// 约定：有 matrix 时直接用它，否则 T * R * S（列向量，右侧先作用）。
+
+TEST(SceneNode, LocalMatrixComposesTranslateRotateScale)
+{
+    SceneNode node;
+    node.translation = Vec3f{10, 0, 0};
+    node.rotation = Quat::fromAxisAngle(Vec3f{0, 0, 1}, 1.5707963f); // 绕 Z 转 90°
+    node.scale = Vec3f{2, 2, 2};
+
+    // 原点只受平移影响
+    const Vec3f origin = node.localMatrix().transformPoint(Vec3f{0, 0, 0});
+    EXPECT_NEAR(origin.x, 10.0f, 1e-4f);
+    EXPECT_NEAR(origin.y, 0.0f, 1e-4f);
+
+    // 局部 +X 点 (1,0,0)：缩放→(2,0,0)，旋转 90°→(0,2,0)，平移→(10,2,0)
+    const Vec3f px = node.localMatrix().transformPoint(Vec3f{1, 0, 0});
+    EXPECT_NEAR(px.x, 10.0f, 1e-4f);
+    EXPECT_NEAR(px.y, 2.0f, 1e-4f);
+    EXPECT_NEAR(px.z, 0.0f, 1e-4f);
+
+    // hasMatrix 为真时覆盖 TRS
+    node.hasMatrix = true;
+    node.matrix = Mat4::translate(5.0f, 5.0f, 5.0f);
+    const Vec3f overridden = node.localMatrix().transformPoint(Vec3f{0, 0, 0});
+    EXPECT_NEAR(overridden.x, 5.0f, 1e-4f);
+    EXPECT_NEAR(overridden.y, 5.0f, 1e-4f);
+}
 
 // ==================== Camera（3D）退化参数 ====================
 // 窗口最小化时 aspect = 0；交互逻辑可能把远近平推到重合；
