@@ -27,6 +27,12 @@ struct Quat {
 
     // 从轴角构造
     static Quat fromAxisAngle(const Vec3f& axis, float angleRad) {
+        // 零/非有限轴没有方向：Vec3::normalized() 只有 assert 守卫，Release 下
+        // 是除零，产出的 NaN 四元数会沿蒙皮链污染整帧矩阵。退化输入按“无旋转”
+        // 处理，与 Quat::normalized() 对零长度的兜底、normalizedOr 的口径一致。
+        const float len2 = axis.lengthSq();
+        if (!(len2 > 1e-12f) || !std::isfinite(len2) || !std::isfinite(angleRad))
+            return identity();
         float half = angleRad * 0.5f;
         float s = std::sin(half);
         Vec3f a = axis.normalized();

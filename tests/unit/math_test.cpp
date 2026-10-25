@@ -359,6 +359,21 @@ TEST(Quat, ToMat4Consistency)
     EXPECT_NEAR(r1.z, r2.z, 1e-4f);
 }
 
+// 零/非有限轴没有方向可言：Vec3::normalized() 只有 assert 守卫，
+// Release 下是除零，会得到 NaN 四元数并污染整条蒙皮链。
+// 退化输入应返回单位四元数（无旋转），与 Quat::normalized() 对零长度的兜底同口径。
+TEST(Quat, FromAxisAngleWithDegenerateAxisStaysFinite)
+{
+    const Quat zeroAxis = Quat::fromAxisAngle(Vec3f{0, 0, 0}, 1.0f);
+    EXPECT_TRUE(std::isfinite(zeroAxis.x) && std::isfinite(zeroAxis.y));
+    EXPECT_TRUE(std::isfinite(zeroAxis.z) && std::isfinite(zeroAxis.w));
+    EXPECT_FLOAT_EQ(zeroAxis.w, 1.0f);
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const Quat nanAxis = Quat::fromAxisAngle(Vec3f{nan, 0, 0}, 1.0f);
+    EXPECT_TRUE(std::isfinite(nanAxis.w));
+}
+
 // ==================== 粒子系统 ====================
 
 TEST(Mat3, IdentityKeepsPoint)
