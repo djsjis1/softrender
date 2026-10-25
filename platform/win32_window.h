@@ -79,11 +79,12 @@ public:
         RegisterClassW(&wc);
 
         // 根据客户区目标尺寸反推窗口外框尺寸
+        const DWORD kStyle = WS_OVERLAPPEDWINDOW;
         RECT rc{0, 0, width, height};
-        AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+        AdjustWindowRect(&rc, kStyle, FALSE);
 
         std::wstring wtitle = utf8ToWide(title);
-        hwnd_ = CreateWindowW(wc.lpszClassName, wtitle.c_str(), WS_OVERLAPPEDWINDOW,
+        hwnd_ = CreateWindowW(wc.lpszClassName, wtitle.c_str(), kStyle,
                               CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left,
                               rc.bottom - rc.top, nullptr, nullptr, hInst, this);
         // 创建失败时后续 ShowWindow/GetDC 都不成立（GetDC(nullptr) 取的不是窗口 DC）。
@@ -166,6 +167,18 @@ public:
     // 键盘轮询（VK_* 或 'W' 之类的字符码）
     static bool keyDown(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
 
+    // 窗口是否被用户缩放（查询后自动清除标记，每帧只返回一次 true）
+    bool wasResized()
+    {
+        bool r = resized_;
+        resized_ = false;
+        return r;
+    }
+
+    // 当前客户区尺寸（可能因用户缩放而不同于构造时的值）
+    int clientWidth() const { return width_; }
+    int clientHeight() const { return height_; }
+
     // 取出并清零累计的鼠标拖拽位移（仅左键按下时累积）
     void consumeMouseDelta(int &dx, int &dy)
     {
@@ -202,6 +215,26 @@ private:
             shouldClose_ = true;
             PostQuitMessage(0);
             return 0;
+        case WM_SIZE:
+        {
+            // 用户缩放窗口时，重建 DIB 缓冲以匹配新客户区尺寸。
+            //
+            // 【顺序不能反】必须先把缓冲分配好，成功后再更新尺寸字段。
+            // 反过来的话 resize 抛 bad_alloc 时 width_/height_ 已是新值而
+            // bgra_ 还是旧尺寸，随后 present() 按 width_ * height_ * 4 写入
+            // 就会越界写堆。分配失败时这里整体跳过，present 继续用旧尺寸。
+            int newW = LOWORD(lp), newH = HIWORD(lp);
+            if (newW > 0 && newH > 0 && (newW != width_ || newH != height_))
+            {
+                bgra_.resize(dibByteCount(newW, newH));
+                width_ = newW;
+                height_ = newH;
+                bmi_.bmiHeader.biWidth = newW;
+                bmi_.bmiHeader.biHeight = newH;
+                resized_ = true;
+            }
+            return 0;
+        }
         case WM_LBUTTONDOWN:
             dragging_ = true;
             lastX_ = GET_X_LPARAM(lp);
@@ -236,6 +269,7 @@ private:
     BITMAPINFO bmi_ = {};
     std::vector<uint8_t> bgra_;
     bool shouldClose_ = false;
+    bool resized_ = false;
 
     // 鼠标状态
     bool dragging_ = false;
