@@ -471,3 +471,55 @@ TEST(Transform2D, Ortho2DMapsWorldToDevice)
     EXPECT_NEAR(p.y, 100.0f, 1e-3f);
 }
 
+// ==================== Rect2 边界语义（补充） ====================
+// 上面已覆盖 contains 半开与「空矩形不与任何矩形相交」；这里补四类此前
+// 没有断言的契约：不相交时 intersection 返回空矩形而非负尺寸、merged 跳过
+// 空矩形、fromMinMax 规整反向输入、负 margin 内缩到空。
+
+TEST(Rect, IntersectionReturnsEmptyInsteadOfNegativeSize)
+{
+    const Rectf a(0.0f, 0.0f, 10.0f, 10.0f);
+    const Rectf disjoint = a.intersection(Rectf(20.0f, 20.0f, 5.0f, 5.0f));
+    EXPECT_TRUE(disjoint.isEmpty());
+    EXPECT_GE(disjoint.w, 0.0f);
+    EXPECT_GE(disjoint.h, 0.0f);
+
+    const Rectf overlap = a.intersection(Rectf(5.0f, 5.0f, 10.0f, 10.0f));
+    EXPECT_FLOAT_EQ(overlap.x, 5.0f);
+    EXPECT_FLOAT_EQ(overlap.w, 5.0f);
+}
+
+TEST(Rect, MergedSkipsEmptyOperand)
+{
+    const Rectf a(0.0f, 0.0f, 4.0f, 4.0f);
+    const Rectf empty;
+    EXPECT_EQ(a.merged(empty), a);
+    EXPECT_EQ(empty.merged(a), a);
+
+    const Rectf merged = a.merged(Rectf(10.0f, -2.0f, 4.0f, 4.0f));
+    EXPECT_FLOAT_EQ(merged.x, 0.0f);
+    EXPECT_FLOAT_EQ(merged.w, 14.0f);
+    EXPECT_FLOAT_EQ(merged.y, -2.0f);
+    EXPECT_FLOAT_EQ(merged.h, 6.0f);
+}
+
+TEST(Rect, FromMinMaxNormalizesReversedInput)
+{
+    const Rectf r = Rectf::fromMinMax(10.0f, 20.0f, 0.0f, 0.0f);
+    EXPECT_FLOAT_EQ(r.x, 0.0f);
+    EXPECT_FLOAT_EQ(r.y, 0.0f);
+    EXPECT_FLOAT_EQ(r.w, 10.0f);
+    EXPECT_FLOAT_EQ(r.h, 20.0f);
+    EXPECT_FALSE(r.isEmpty());
+}
+
+TEST(Rect, ExpandedWithNegativeMarginShrinks)
+{
+    const Rectf r(0.0f, 0.0f, 10.0f, 10.0f);
+    const Rectf shrunk = r.expanded(-2.0f);
+    EXPECT_FLOAT_EQ(shrunk.x, 2.0f);
+    EXPECT_FLOAT_EQ(shrunk.w, 6.0f);
+    // 内缩超过一半得到负尺寸，isEmpty 必须能识别（否则会被当成有效裁剪区）
+    EXPECT_TRUE(r.expanded(-6.0f).isEmpty());
+}
+
