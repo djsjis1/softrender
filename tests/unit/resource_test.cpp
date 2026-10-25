@@ -94,9 +94,11 @@ TEST(Mesh, ComputeTangentsNonZero)
 TEST(Mesh, ComputeTangentsIgnoresOutOfRangeIndices)
 {
     Mesh m;
-    m.vertices.push_back({{0, 0, 0}, {0, 0, 1}, {0, 0}});
-    m.vertices.push_back({{1, 0, 0}, {0, 0, 1}, {1, 0}});
-    m.vertices.push_back({{0, 1, 0}, {0, 0, 1}, {0, 1}});
+    // Vertex 有 4 个成员（position / normal / uv / tangent）：少给一个时 MSVC 只是警告，
+    // 而 GCC / Clang 在仓库开启的 -Wmissing-field-initializers 下会直接报错（CI 就是这么挂的）。
+    m.vertices.push_back({{0, 0, 0}, {0, 0, 1}, {0, 0}, {0, 0, 0}});
+    m.vertices.push_back({{1, 0, 0}, {0, 0, 1}, {1, 0}, {0, 0, 0}});
+    m.vertices.push_back({{0, 1, 0}, {0, 0, 1}, {0, 1}, {0, 0, 0}});
     m.indices = {0, 1, 99}; // 99 越界
 
     sr::computeTangents(m);

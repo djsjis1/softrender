@@ -19,10 +19,15 @@ namespace sr
 
 struct Vertex
 {
-    Vec3f position;
-    Vec3f normal;
-    Vec2f uv;
-    Vec3f tangent;
+    // 四个成员都带默认值，两个原因：
+    // 1. 不初始化时 `Vertex v;` 的字段是未初始化内存（obj_loader 等处依赖后续赋值，
+    //    一旦漏赋就是垃圾值进光栅化）；
+    // 2. 聚合初始化只写前几个字段是常见写法（`{{pos},{normal},{uv}}`），
+    //    没有默认值时 GCC / Clang 的 -Wmissing-field-initializers 会直接报错（CI 就挂在这里）。
+    Vec3f position{0, 0, 0};
+    Vec3f normal{0, 0, 1}; // 朝向观察者的单位法线，避免零向量进光照
+    Vec2f uv{0, 0};
+    Vec3f tangent{0, 0, 0};
 };
 
 }  // namespace sr
