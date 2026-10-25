@@ -449,12 +449,24 @@ struct NormalAsColorShader : Shader
 };
 
 // 三顶点位置与颜色都互不相等：同色或共面退化会掩盖权重排列与量化错误。
+//
+// 【为什么不用 Vertex{{pos},{color}} 聚合初始化】Vertex 有四个成员，
+// 只写两个会触发 GCC/Clang 的 -Wmissing-field-initializers，而 -Wextra
+// 配 -Werror 会把它升级成错误；MSVC 只警告，所以本机全绿照样挂 CI。
+Vertex makeVertex(Vec3f position, Vec3f color)
+{
+    Vertex v;
+    v.position = position;
+    v.normal = color;  // 借用 normal 字段承载顶点色，避免为测试改动 Vertex
+    return v;
+}
+
 Mesh makeGradientTriangle()
 {
     Mesh mesh;
-    mesh.vertices.push_back(Vertex{{-0.8f, -0.7f, 0.0f}, {0.9f, 0.2f, 0.1f}});
-    mesh.vertices.push_back(Vertex{{0.75f, -0.55f, 0.0f}, {0.1f, 0.85f, 0.35f}});
-    mesh.vertices.push_back(Vertex{{-0.05f, 0.8f, 0.0f}, {0.2f, 0.3f, 0.95f}});
+    mesh.vertices.push_back(makeVertex(Vec3f{-0.8f, -0.7f, 0.0f}, Vec3f{0.9f, 0.2f, 0.1f}));
+    mesh.vertices.push_back(makeVertex(Vec3f{0.75f, -0.55f, 0.0f}, Vec3f{0.1f, 0.85f, 0.35f}));
+    mesh.vertices.push_back(makeVertex(Vec3f{-0.05f, 0.8f, 0.0f}, Vec3f{0.2f, 0.3f, 0.95f}));
     mesh.indices = {0, 1, 2};
     return mesh;
 }

@@ -265,10 +265,16 @@ void drawBezierCubic(FB& fb, int x0, int y0, int x1, int y1,
 
 // 前向声明：drawEllipse / drawPolygon 的加粗描边需要 drawThickLine，
 // 而 drawThickLine 定义在文件后部（依赖 fillPolygon），故先给原型。
+//
+// 【默认实参必须写在原型上】非模板函数允许在后续声明里追加默认实参，
+// 但函数模板的重复声明不允许（[dcl.fct.default]）——把默认值留在下面的
+// 定义处会让 Clang/GCC 直接报 "default arguments cannot be added to a
+// function template that has already been declared"，而 MSVC 放过。
 template <class FB>
 void drawThickLine(FB& fb, float x0, float y0, float x1, float y1,
-                          float thickness, Color c, bool roundCaps,
-                          BlendMode mode, const ClipRect* clip);
+                          float thickness, Color c, bool roundCaps = true,
+                          BlendMode mode = BlendMode::Opaque,
+                          const ClipRect* clip = nullptr);
 
 // ============================================================
 // 矩形
@@ -632,9 +638,8 @@ void drawPolygon(FB& fb, const std::vector<Vec2f>& pts, Color c,
 // 用途：粗描边、连接线、矢量画笔、加粗的多边形轮廓。
 template <class FB>
 void drawThickLine(FB& fb, float x0, float y0, float x1, float y1,
-                          float thickness, Color c, bool roundCaps = true,
-                          BlendMode mode = BlendMode::Opaque,
-                          const ClipRect* clip = nullptr)
+                          float thickness, Color c, bool roundCaps,
+                          BlendMode mode, const ClipRect* clip)
 {
     Vec2f a{x0, y0}, b{x1, y1};
     Vec2f d = b - a;
