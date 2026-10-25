@@ -524,12 +524,25 @@ inline void fillPolygon(Framebuffer& fb, const std::vector<Vec2f>& pts, Color c,
     int n = (int)pts.size();
     if (n < 3)
         return;
+    // 顶点是非可信浮点：`(int)std::floor(NaN)` 与超出 int 范围的大坐标都是
+    // 未定义行为，且 `n < 3` 这类判断对 NaN 恒为假。fillCircle /
+    // fillRoundedRect 都做了同样的前置校验，这里补齐以统一口径。
+    for (const auto& p : pts)
+        if (!allFinite({p.x, p.y}))
+            return;
     float minyf = pts[0].y, maxyf = pts[0].y;
     for (const auto& p : pts)
     {
         minyf = std::min(minyf, p.y);
         maxyf = std::max(maxyf, p.y);
     }
+    // 扫描线只可能落在屏幕行内：先把行范围夹到 [-1, height] 再做 float→int。
+    // 钳到“屏幕范围”而不只是“安全整数范围”：后者虽然能消除 UB，却会把
+    // 屏幕外很远的顶点钳成 1e7，产生千万次注定被 plotBlend 丢弃的无效循环
+    // （实测让一个 64×64 的小场景跑了 1.2 s）。
+    const float rowHi = float(fb.height());
+    minyf = std::clamp(minyf, -1.0f, rowHi);
+    maxyf = std::clamp(maxyf, -1.0f, rowHi);
     int minY = std::max(0, (int)std::floor(minyf));
     int maxY = std::min(fb.height() - 1, (int)std::ceil(maxyf));
     std::vector<float> xs;
@@ -552,8 +565,13 @@ inline void fillPolygon(Framebuffer& fb, const std::vector<Vec2f>& pts, Color c,
         // 成对填充：第 0-1 个交点之间、第 2-3 个之间……
         for (size_t k = 0; k + 1 < xs.size(); k += 2)
         {
-            int xStart = (int)std::ceil(xs[k] - 0.5f);
-            int xEnd = (int)std::ceil(xs[k + 1] - 0.5f);
+            // 交点 x 同样可能极大（顶点在屏幕外很远），夹到屏幕列范围后
+            // 由 plotBlend 的边界判断丢弃屏幕外部分。
+            const float colHi = float(fb.width());
+            const float x0 = std::clamp(xs[k] - 0.5f, -1.0f, colHi);
+            const float x1 = std::clamp(xs[k + 1] - 0.5f, -1.0f, colHi);
+            int xStart = (int)std::ceil(x0);
+            int xEnd = (int)std::ceil(x1);
             for (int x = xStart; x < xEnd; ++x)
                 plotBlend(fb, x, y, c, mode, clip);
         }

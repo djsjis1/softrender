@@ -22,7 +22,15 @@ namespace sr
 class DepthBuffer
 {
    public:
-    DepthBuffer(int width, int height) : width_(width), height_(height), depth_(size_t(width) * height, kFar) {}
+    // 非法尺寸统一落到 0×0：构造器与 resize 同口径。旧实现直接算 size_t(width) * height，
+    // 传负数时负数先转成 ~2^64 再相乘，在 vector 分配处抛 length_error，
+    // 而同样是非法尺寸，调用 resize 却只是忽略——两条路径行为不一致。
+    // 任一边非法就整体置空，而不是留下 0×N 这种半有效缓冲。
+    DepthBuffer(int width, int height)
+        : width_(width > 0 && height > 0 ? width : 0), height_(width > 0 && height > 0 ? height : 0),
+          depth_(size_t(width_) * size_t(height_), kFar)
+    {
+    }
 
     int width() const { return width_; }
     int height() const { return height_; }

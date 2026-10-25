@@ -27,10 +27,13 @@ namespace sr
 class FloatFramebuffer
 {
 public:
+    // 非法尺寸统一落到 0×0：与 resize() 同口径。旧实现直接把 int 负数转 size_t 再相乘，
+    // 会在容器分配处抛 length_error，而 resize 只是忽略非法尺寸。
     FloatFramebuffer(int width, int height)
-        : width_(width), height_(height),
-          pixels_(size_t(width) * height, Vec3f{0, 0, 0}),
-          depth_(width, height) {}
+        : width_(width > 0 && height > 0 ? width : 0), height_(width > 0 && height > 0 ? height : 0),
+          pixels_(size_t(width_) * size_t(height_), Vec3f{0, 0, 0}), depth_(width_, height_)
+    {
+    }
 
     int width() const { return width_; }
     int height() const { return height_; }
