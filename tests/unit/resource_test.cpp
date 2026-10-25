@@ -89,6 +89,27 @@ TEST(Mesh, ComputeTangentsNonZero)
     }
 }
 
+// computeTangents 直接索引 mesh.vertices[indices[i]]：越界索引会越界写。
+// drawMesh 会丢弃越界三角形，但本函数是独立公共 API，自己也要挡。
+TEST(Mesh, ComputeTangentsIgnoresOutOfRangeIndices)
+{
+    Mesh m;
+    m.vertices.push_back({{0, 0, 0}, {0, 0, 1}, {0, 0}});
+    m.vertices.push_back({{1, 0, 0}, {0, 0, 1}, {1, 0}});
+    m.vertices.push_back({{0, 1, 0}, {0, 0, 1}, {0, 1}});
+    m.indices = {0, 1, 99}; // 99 越界
+
+    sr::computeTangents(m);
+
+    // 越界三角形被整体跳过：顶点仍然得到可用的退化兼底切向
+    for (const auto &v : m.vertices)
+    {
+        EXPECT_TRUE(std::isfinite(v.tangent.x) && std::isfinite(v.tangent.y) && std::isfinite(v.tangent.z));
+        EXPECT_NEAR(v.tangent.length(), 1.0f, 1e-3f);
+        EXPECT_NEAR(dot(v.normal, v.tangent), 0.0f, 1e-3f);
+    }
+}
+
 // 全退化几何（共线三角形 + 零法线）：切线与法线都无定义。
 // 必须产出有限值（Debug 断言、Release NaN 都算错），不能依赖调用方预归一化。
 TEST(Mesh, ComputeTangentsHandlesDegenerateNormals)

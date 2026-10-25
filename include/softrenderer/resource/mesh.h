@@ -41,11 +41,28 @@ inline void computeTangents(Mesh &mesh)
     for (auto &v : mesh.vertices)
         v.tangent = {0, 0, 0};
 
+    // 与法线正交的任意切向：零切向与“去完法线分量后接近零”两种情况都走这里，
+    // 保证返回的 TBN 基不会退化。法线本身为零时回退 +Z。
+    auto orthogonalTangent = [](const Vec3f &normal)
+    {
+        const Vec3f n = normal.normalizedOr({0, 0, 1});
+        const Vec3f ref = std::abs(n.y) < 0.99f ? Vec3f{0, 1, 0} : Vec3f{1, 0, 0};
+        return cross(ref, n).normalizedOr({1, 0, 0});
+    };
+
     for (size_t i = 0; i + 2 < mesh.indices.size(); i += 3)
     {
-        Vertex &a = mesh.vertices[mesh.indices[i]];
-        Vertex &b = mesh.vertices[mesh.indices[i + 1]];
-        Vertex &c = mesh.vertices[mesh.indices[i + 2]];
+        // 索引是外部数据（手写 Mesh、解析结果）：越界就跳过整个三角形。
+        // 否则 mesh.vertices[idx] 是越界写。drawMesh 也会丢弃这类三角形，
+        // 但本函数是独立公共 API，不能依赖调用方先清理。
+        const int i0 = mesh.indices[i], i1 = mesh.indices[i + 1], i2 = mesh.indices[i + 2];
+        if (i0 < 0 || i1 < 0 || i2 < 0 || size_t(i0) >= mesh.vertices.size() ||
+            size_t(i1) >= mesh.vertices.size() || size_t(i2) >= mesh.vertices.size())
+            continue;
+
+        Vertex &a = mesh.vertices[size_t(i0)];
+        Vertex &b = mesh.vertices[size_t(i1)];
+        Vertex &c = mesh.vertices[size_t(i2)];
 
         Vec3f e1 = b.position - a.position;
         Vec3f e2 = c.position - a.position;
@@ -66,20 +83,18 @@ inline void computeTangents(Mesh &mesh)
     // 单位化，并用 Gram-Schmidt 让切线与法线正交
     for (auto &v : mesh.vertices)
     {
+        const Vec3f n = v.normal.normalizedOr({0, 0, 1});
         if (v.tangent.lengthSq() < 1e-12f)
         {
-            // 退化：造一个与法线正交的任意切线。
-            // 法线自身可能为零（全退化三角形、OBJ 无法线时未算出），
-            // 直接 normalized() 会在 Debug 构建立刻断言，故先兜底。
-            Vec3f n = v.normal.normalizedOr({0, 0, 1});
-            Vec3f ref = std::abs(n.y) < 0.99f ? Vec3f{0, 1, 0} : Vec3f{1, 0, 0};
-            v.tangent = cross(ref, n).normalizedOr({1, 0, 0});
+            v.tangent = orthogonalTangent(v.normal);
         }
         else
         {
-            Vec3f n = v.normal.normalizedOr({0, 0, 1});
-            Vec3f t = v.tangent;
-            v.tangent = (t - n * dot(n, t)).normalizedOr({1, 0, 0}); // 去掉法线分量
+            // 去掉法线分量。若切线与法线几乎平行，去完接近零向量 ——
+            // 旧实现兜底成固定 (1,0,0)，当法线也接近 +X 时切线与法线仍然平行，
+            // TBN 依旧退化。这里统一回退到正交构造。
+            const Vec3f orthogonal = v.tangent - n * dot(n, v.tangent);
+            v.tangent = orthogonal.lengthSq() < 1e-12f ? orthogonalTangent(v.normal) : orthogonal.normalized();
         }
     }
 }
