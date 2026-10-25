@@ -7,6 +7,20 @@
 
 ## 2026-10-25
 
+### 缺陷审查（七）：虚线的除零与负周期
+
+- `render/draw2d/shape2d.h` 的 `drawLineDashed`：`period = dash + gap` 没有下限。
+  `dash = gap = 0` 时 `step % period` 是**整数除零**（UB）；`gap` 为负时周期变负，
+  外段判断全乱。实测传入 `(0, 0)` 的结果是**一个像素都不画**（编译器对 UB 做了任意优化）。
+  现 `dash <= 0` 退化为实线、`gap < 0` 视为 0，保证 `period >= 1`。
+- 该函数与 `drawBezierCubic`、`blitImageScaled` 一样属于上轮清出的零调用 API，
+  三个都已补用例：虚线两种退化输入、缩放 blit 的四象限映射、
+  贝塞尔必须命中两个端点。用例数 262 → **266**。
+- 同期抽样确认无问题的：`blitImageScaled`（源坐标下界由 `clipTargetRect` 保证，
+  上界有 `min(h-1)` 夹取）、`drawBezierCubic`（`segments <= 0` 时循环不执行，不除零）。
+
+**验证**：构建 0/0；`unit_tests` **266/266**；像素回归 3/3；压测 105/105。
+
 ### 缺陷审查（六）：零调用 API 清点
 
 用「调用方清点」扫描全部公共头的自由函数：87 个导出函数里有 **13 个**除定义外
