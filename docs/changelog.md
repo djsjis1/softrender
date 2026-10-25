@@ -7,6 +7,23 @@
 
 ## 2026-10-25
 
+### 缺陷审查（十六）：两个参考组件的哨兵口径不一致
+
+- `scene/components.h`：`MeshRef` 用 `-1` 表示未设置（注释解释了 0 是合法下标），
+  但同为「资源下标」语义的 `MaterialRef` 默认值是 `0` —— 默认构造的组件会
+  静默指向第一个材质。现统一为 `-1` 并补注释。
+  两者目前都零使用（`MaterialRef` 只在哨兵测试里以同名局部结构出现），
+  所以这是口径修正，不是行为回归。
+- 新增 `ECS.ReferenceComponentsDefaultToUnset` 锁定两个组件的默认值。
+- `scene/keyframe_animation.h` 确认**全仓零引用**：它定义了另一套手写关键帧
+  动画（欧拉角 + 线性插值），与 `animation_clip.h` + `animation_player.h` 功能重叠。
+  复查实现本身：二分查找的不变式保证了 `kf[lo].time != kf[hi].time`，
+  所以那行除法的除零不可达，无功能性缺陷。给文件头补上“遗留、未接线”的状态标注，
+  不删公共头（属接口级变更，需单独决策）。
+
+**验证**：构建 0/0；`unit_tests` **281/281**（64 套件）；像素回归 3/3；压测 105/105；
+Debug（ASAN）**279 通过 + 2 跳过**（实测）。
+
 ### 缺陷审查（十五）：computeTangents 的越界写
 
 - `resource/mesh.h` 的 `computeTangents` 直接 `mesh.vertices[indices[i]]`，
