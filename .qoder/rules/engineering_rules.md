@@ -253,8 +253,8 @@ $llvm = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools
 >
 > 头文件检查必须带 `-x c++`：否则 `.h` 被当成 C 处理，报 `-std=c++23 not allowed with C`。
 > 静态分析目标聚焦 `clang-analyzer-*` 与 `bugprone-*`（`-*,` 前缀覆盖 `.clang-tidy` 的检查集）：
-> 已扫全部 67 个公共头，139 条诊断中 1 项真实缺陷、16 项范围受控的误报、
-> 122 条是刻意的 `float→int`。
+> 已扫公共头：早期全量扫描（65 个）得 139 条诊断，其中 1 项真实缺陷、16 项范围受控的误报、
+> 122 条是刻意的 `float→int`。全量 67 个头尚未整体重扫。
 >
 > `.clang-format` 仍**从未全仓执行**：实测 60 个 `include/softrenderer/` 头文件的 namespace 体
 > 缩进 4 空格，违反配置的 `NamespaceIndentation: None`。全仓格式化必须排在所有功能性修改之后、
