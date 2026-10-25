@@ -21,9 +21,9 @@ SoftRenderer 是 C++23 教学型 CPU 渲染器，同时作为可被外部工程�
 | 架构门禁 | 逐头独立编译 + 命名空间哨兵（全局声明 60 个同名类型）+ include 白名单 + 循环依赖检查 |
 | 外部消费 | 聚合 / core-only / render-only 三类工程 × `add_subdirectory` 与安装后迁移 `find_package` 均通过；断言安装产物只含公共头 |
 | Debug ASAN | 单元测试与压测探针在 Debug+ASAN 下无断言、无 ASAN 报告（Debug 下两个越界用例按约定 GTEST_SKIP） |
-| Linux/macOS | 三平台 CI 配置已同步（stage 目标名、覆盖率范围 `include/softrenderer` + `src`）；本轮未执行远端作业 |
+| Linux/macOS | 远端 CI（run 40185625656，commit 833fb32）**6/6 job 全绿**：Windows/Ubuntu/macOS 三平台构建测试 + coverage + sanitizers + thread-sanitizer |
 | 静态分析 | clang-tidy 19.1.5（VS BuildTools 自带，路径 `VC/Tools/Llvm/x64/bin`）已扫全部 65 个公共头：139 条诊断 → 1 项真实缺陷已修、16 项核实为范围受控的误报、122 条 narrow-conversions 为刻意的 float→int |
-| 覆盖率 | 本机不可得：BuildTools 无 CodeCoverage.exe；dotnet-coverage 18.12 对原生进程报「探查器未初始化」；LLVM 组件仅含 clang-tidy/format，无 clang 编译器与 llvm-cov |
+| 覆盖率 | **CI（ubuntu + gcov/lcov）实测：行 86.2%（3588/4164）、函数 95.7%（465/486）**，超过 `testing_rules.md` 的 80% 行覆盖要求。本机仍无法采集（五条工具链路径均已排除），数据来自 CI 的 coverage job |
 | 窗口示例 | 三个窗口示例均已桌面自动化实跑：`stage10_shadow_live`（WASD 引起 61.7% 像素变化、B 键切换阴影）、`stage03_sprite_anim`（空格跳跃，铠甲上移 112px 接近 90px 峰值后落地）、`stage08_shader_live`（1/2/3 切换 Flat/Gouraud/Phong，画面差异 34–37% 对基线 3.4%）；三者均能用 Esc 正常退出 |
 
 ## 2026-10-24 缺陷修复与压测扩展

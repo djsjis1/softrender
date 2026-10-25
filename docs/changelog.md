@@ -7,6 +7,40 @@
 
 ## 2026-10-25
 
+### 四项验证全部闭环：CI 6/6 全绿，覆盖率 86.2%，并修掉一个只在远端暴露的缺陷
+
+**首次推送就暴露了真问题**
+
+`ac605e2` 的 CI（run `40184585824`）：Windows success，但 ubuntu / macOS / coverage /
+sanitizers / thread-sanitizer 全在 Build 步骤失败。日志：
+
+```
+tests/unit/resource_test.cpp:97: error: missing initializer for member 'sr::Vertex::tangent'
+                                  [-Werror=missing-field-initializers]
+```
+
+根因是 `Vertex` 有四个成员，测试里只用三个做聚合初始化。**MSVC 只警告，GCC/Clang 的
+`-Werror` 直接失败**——本地 Release 全绿、远端必红的典型情形。
+
+修复（第 18 项）给 `Vertex` 四个成员都加默认初始化器。它同时也消除了真实隐患：
+`Vertex v;` 原本留下未初始化内存，`obj_loader` 等靠后续逐字段赋值弥补，漏赋即垃圾值进光栅化。
+`normal` 默认取 `+Z` 避免零向量进光照。
+
+**修复后 CI 全绿（run `40185625656`，commit `833fb32`）**
+
+| job | 结论 |
+|---|---|
+| build-and-test (windows / ubuntu / macos) | success ×3 |
+| coverage | success |
+| sanitizers | success |
+| thread-sanitizer | success |
+
+**覆盖率拿到了真实数据**：CI 的 coverage job（ubuntu + gcov/lcov）报告
+**行 86.2%（3588/4164）、函数 95.7%（465/486）**，超过 `testing_rules.md` 的 80% 行覆盖要求。
+本机仍无法采集（五条路径已排除），但结论不再悬空。
+
+至此四项验证全部闭环：clang-tidy（本机）→ 1 项缺陷；窗口示例 3/3；覆盖率 86.2%；CI 6/6。
+
 ### 覆盖率：给出一个可复现的替代指标
 
 工具链五条路径全部排除后，改用一个**不依赖任何外部工具**的替代证据：从 `tests/` 与
