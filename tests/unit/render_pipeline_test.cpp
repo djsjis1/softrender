@@ -16,9 +16,60 @@
 #include "softrenderer/render/pipeline/render_queue.h"
 #include "softrenderer/render/pipeline/renderer.h"
 #include "softrenderer/render/raster/rasterizer_fast.h"
+#include "softrenderer/render/shader/pbr_shader.h"
 #include "softrenderer/resource/mesh.h"
 
 using namespace sr;
+
+// ==================== PBR：粗糙度边界 ====================
+// 成员注释写「0=镜面」，但 roughness = 0 时 a = 0、a2 = 0，GGX 的 D 恒为 0，
+// 镜面项完全消失——完美镜面反而没有高光，与语义相反。
+TEST(PBRShader, ZeroRoughnessStillProducesSpecularHighlight)
+{
+    PBRShader shader;
+    shader.lightDir = Vec3f{0, 0, 1};
+    shader.lightColor = Vec3f{1, 1, 1};
+    shader.ambient = Vec3f{0, 0, 0};
+    shader.baseColor = Vec3f{0, 0, 0}; // 关掉漫反射与环境光，只看镜面项
+    shader.metallic = 0.0f;
+    shader.roughness = 0.0f;
+
+    Varyings v;
+    v.worldPos = Vec3f{0, 0, 0};
+    v.normal = Vec3f{0, 0, 1};
+    v.uv = Vec2f{0.5f, 0.5f};
+
+    Vec3f color;
+    ASSERT_TRUE(shader.fragment(v, color));
+    EXPECT_TRUE(std::isfinite(color.x));
+    EXPECT_GT(color.x, 0.01f);
+}
+
+// 粗糙度单调性：越光滑，法线方向上的高光越集中（峰值越高）。
+TEST(PBRShader, SmootherSurfaceHasStrongerPeakSpecular)
+{
+    auto peak = [](float roughness) {
+        PBRShader shader;
+        shader.lightDir = Vec3f{0, 0, 1};
+        shader.lightColor = Vec3f{1, 1, 1};
+        shader.ambient = Vec3f{0, 0, 0};
+        shader.baseColor = Vec3f{0, 0, 0};
+        shader.roughness = roughness;
+
+        Varyings v;
+        v.worldPos = Vec3f{0, 0, 0};
+        v.normal = Vec3f{0, 0, 1};
+        v.uv = Vec2f{0.5f, 0.5f};
+
+        Vec3f color;
+        shader.fragment(v, color);
+        return color.x;
+    };
+
+    const float smoothPeak = peak(0.0f);
+    const float roughPeak = peak(0.8f);
+    EXPECT_GT(smoothPeak, roughPeak);
+}
 
 TEST(Clip, FullyInside)
 {

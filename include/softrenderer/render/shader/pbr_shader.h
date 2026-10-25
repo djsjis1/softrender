@@ -62,13 +62,18 @@ struct PBRShader : SurfaceShader
         Vec3f F0 = Vec3f{0.04f, 0.04f, 0.04f} * (1.0f - metallic) + albedo * metallic;
 
         // --- D: GGX / Trowbridge-Reitz ---
-        float a = roughness * roughness;
+        // roughness = 0 时 a2 = 0，D 恒为 0：完美镜面反而完全没有高光，
+        // 与成员注释「0=镜面」相反（实测 roughness=0 的镜面项为 0，比 0.8 还暗）。
+        // 取感知粗糙度下限 0.04（Filament 同款）：D 仍是尖锐峰值，但不会退化成零分布。
+        // k、反射采样与粗糙度衰减必须用同一个夹取值，否则几何遮蔽与分布对不上。
+        const float rough = std::clamp(roughness, 0.04f, 1.0f);
+        float a = rough * rough;
         float a2 = a * a;
         float denom = NdotH * NdotH * (a2 - 1.0f) + 1.0f;
         float D = a2 / (3.14159265f * denom * denom + 1e-7f);
 
         // --- G: Smith-Schlick-GGX ---
-        float k = (roughness + 1.0f) * (roughness + 1.0f) / 8.0f;
+        float k = (rough + 1.0f) * (rough + 1.0f) / 8.0f;
         float G1V = NdotV / (NdotV * (1.0f - k) + k);
         float G1L = NdotL / (NdotL * (1.0f - k) + k);
         float G = G1V * G1L;
@@ -96,11 +101,11 @@ struct PBRShader : SurfaceShader
             // NdotV 已被 max(...,0.001) 夹取，不能拿它代换。
             Vec3f R = reflect(-V, N);
             // 粗糙度越大，反射越模糊（当前 cubemap 无预滤波链，见 sampleReflection 注释）
-            Vec3f envSpec = envMap->sampleReflection(R, roughness);
+            Vec3f envSpec = envMap->sampleReflection(R, rough);
             // 菲涅尔加权：掠射角反射更强
             Vec3f F_ibl = F0 + (Vec3f{1, 1, 1} - F0) * pow5(1.0f - NdotV);
             // 粗糙度衰减（简化 GGX 环境积分）
-            float roughFactor = 1.0f - roughness * 0.7f;
+            float roughFactor = 1.0f - rough * 0.7f;
             iblColor = iblColor + F_ibl * envSpec * roughFactor;
 
             // 漫反射 IBL：用法线采样环境辐照度
