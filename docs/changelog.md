@@ -7,6 +7,25 @@
 
 ## 2026-10-25
 
+### 缺陷审查（九）：场景节点与资产容器
+
+逐个读了 `scene/scene_node.h`、`material.h`、`scene_asset.h` 与加载器的节点段，
+**未发现缺陷**：
+
+- `gltf_loader` 对 `node.mesh` 有负值与上界双重检查，`node.skin` 默认 -1（与 tinygltf 一致），
+  且第 296 行有 `skinIndex` 范围校验。
+- `SceneAsset::texture / material / materialForMesh` 三个索引入口都有边界检查。
+- `Material` 的默认值（`metallic = 1`）与 glTF 2.0 规范一致；它和 `PBRShader` 的默认
+  （非金属、粗糙度 0.5）不同属有意分层：数据层跟规范，着色层跟直觉。
+- `SceneNode::meshIndex` 与 `meshIndices` 由加载器同步填充，不存在“单网格调用方
+  拿到不一致值”的情况。
+
+补上 `localMatrix()` 的用例（它是一切层级世界矩阵的乘基，却零测试）：
+`SceneNode.LocalMatrixComposesTranslateRotateScale` 验证 T·R·S 顺序与
+`hasMatrix` 覆盖 TRS 两个分支。用例数 **267 → 268**，套件 60 → 61。
+
+**验证**：构建 0/0；`unit_tests` **268/268**；像素回归 3/3；压测 105/105。
+
 ### 缺陷审查（八）：粗线的宽度
 
 - `render/draw2d/shape2d.h` 的 `drawLineThick`：用 `-half..half` 铺平行线，
