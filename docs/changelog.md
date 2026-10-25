@@ -7,6 +7,25 @@
 
 ## 2026-10-25
 
+### 缺陷审查（四）：主光栅循环与输入解析
+
+本轮逐函数读了以下模块，**未发现新缺陷**，结论记录如下以免重复审查：
+
+- `render/pipeline/renderer.h`：包围盒取渲染器与帧缓冲尺寸的较小者，行指针直写安全；
+  `z` 为 NaN 时深度比较为假自然丢弃；`discard` 不提交深度。
+- `render/pipeline/varyings.h`：`interpolateVaryings` 覆盖 `Varyings` 全部 5 个字段。
+- `core/color.h`：`fromFloat` / `lerp` 对 NaN 均因三目比较而落到 0，无未定义行为。
+- `render/postprocess/post_processing.h` 的 `gaussianBlur`：半径夹取、核归一化、
+  边界 clamp 与垂直 pass 的累加初值（`dst.clear()`）均正确。
+- `src/io/gltf_accessor.h`：索引、sparse、形状、对齐、stride、accessor 越界六层校验齐全。
+- `scene/particle_system.h`：容量跟随运行期配置、发射累加上限、`freeScan_` 续扫。
+
+补上 `Rect2` 四类此前没有断言的契约（`contains` / 空矩形已存在覆盖）：
+`IntersectionReturnsEmptyInsteadOfNegativeSize`、`MergedSkipsEmptyOperand`、
+`FromMinMaxNormalizesReversedInput`、`ExpandedWithNegativeMarginShrinks`。
+
+**验证**：构建 0/0；`unit_tests` **257/257**；像素回归 3/3；压测 105/105。
+
 ### 缺陷审查（三）：PBR 零粗糙度
 
 - `render/shader/pbr_shader.h`：`roughness = 0` 时 `a = 0`、`a2 = 0`，GGX 的 D 恒为 0，
