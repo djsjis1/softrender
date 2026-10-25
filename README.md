@@ -33,7 +33,7 @@ target_link_libraries(app PRIVATE SoftRenderer::core SoftRenderer::render)
 | 场景与资源 | OBJ、glTF/glb、材质、骨骼/动画、粒子、EnTT 组件与资源缓存 |
 | 工程设施 | 分条并行示例、命令缓冲/线程池、可复用 Arena、Profiler、单元/像素/安装集成测试 |
 
-这些能力分布在不同示例和模块中，并非都已整合进同一个 Renderer。SSE2 光栅化仍是独立实验路径；动画已支持 Linear/Step/CubicSpline，但完整场景层级与通用 skin 导入仍待完善。覆盖规则已统一到整数子像素；MSAA 示例按样本提交颜色。可选性能目标及实测结果见[性能基线](docs/engineering/58-覆盖规则与性能基线.md)。完整限制与优先级见[项目分析与优化记录](docs/project_review.md)。
+这些能力分布在不同示例和模块中，并非都已整合进同一个 Renderer。SSE2 光栅化仍是独立实验路径；动画已支持 Linear/Step/CubicSpline，节点与骨骼层级、skin 导入已支持，sparse accessor 与压缩扩展仍待完善。覆盖规则已统一到整数子像素；MSAA 示例按样本提交颜色。可选性能目标及实测结果见[性能基线](docs/engineering/58-覆盖规则与性能基线.md)。完整限制与优先级见[项目上下文](docs/project_context.md)与[架构文档](docs/architecture.md)。
 
 ## 构建和测试
 
@@ -95,7 +95,8 @@ target_link_libraries(your_target PRIVATE SoftRenderer::softrenderer)
 
 | 路径 | 职责 |
 | --- | --- |
-| `src/math`, `core`, `raster`, `shader`, `scene` | 数学、缓冲、光栅化、着色、场景与资源 |
+| `include/softrenderer/` | 数学、缓冲、渲染管线、资源、场景、运行时、IO 声明（公共头唯一入口） |
+| `src/io/` | 文件加载实现（`softrenderer_io` 静态库） |
 | `platform/` | Windows 显示与输入后端 |
 | `examples/`, `practice/` | 示例与练习，各自维护 CMake 目标 |
 | `tests/unit/` | GoogleTest 单元测试；新增 Arena/Renderer 测试独立成文件 |
@@ -103,8 +104,8 @@ target_link_libraries(your_target PRIVATE SoftRenderer::softrenderer)
 | `tests/fixtures/golden/` | 纳入版本控制的图像基准 |
 | `third/`, `cmake/` | 第三方源码、版本与安装导出 |
 
-- 学习：[学习路线](docs/00-学习路线与项目导读.md)、[模块职责](docs/modules.md)、[架构](docs/architecture.md)
+- 学习：[文档索引](docs/README.md)、[学习路线](docs/00-学习路线与项目导读.md)、[模块职责](docs/modules.md)、[架构](docs/architecture.md)
 - 使用：[构建指南](docs/engineering/46-构建与使用指南.md)、[问题排查](docs/troubleshooting.md)
-- 维护：[当前状态](docs/project_context.md)、[分析与验证记录](docs/project_review.md)、[任务](docs/tasks/README.md)、[变更日志](docs/changelog.md)
+- 维护：[当前状态](docs/project_context.md)、[任务](docs/tasks/README.md)、[变更日志](docs/changelog.md)
 
 动态的测试数量和验收状态统一维护在项目状态页；历史 TASK 保留当时的事实，不作为当前状态依据。

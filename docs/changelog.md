@@ -5,6 +5,19 @@
 > 按 `documentation_rules.md` 要求，每次有意义的变更都必须在此登记。
 > 重大接口变更需同时在变更内容中标注版本号。
 
+## 2026-10-25
+
+### 文档体系整理（仅 docs/ 与根 README，无代码变更）
+
+- 新增 `docs/README.md` 作为唯一文档入口：目录职责表、权威数字优先级（project_context → ACTIVE → changelog）、三条阅读路线。
+- 删除 `docs/math/09-13-综合.md`：09~13 的旧合并版，内容已被拆分的五篇覆盖且无任何引用。
+- `docs/tasks/README.md` 改为纯导航：去掉与 ACTIVE 重复且已大面积错误的状态列（TASK-014~018 曾标「待开始」）；`project_review.md` 死链改为备注说明。
+- `docs/modules.md` 按实际 `include/softrenderer/` 重组：拆出 resource / scene / io，render 下分 raster / pipeline / draw2d；删除已不存在的 `gltf_types.h`、`line.h`、`core/benchmark.h` 条目与 2.0 前的依赖链。
+- `docs/00-学习路线与项目导读.md`：源码路径从 `src/` 改为 `include/softrenderer/`，用例数 169→246，命名空间 `draw2d`→`sr::draw2d`，文档结构表改为指向 docs/README。
+- `docs/adr/README.md`：修被空行打断的表格与 ADR-001 缺失链接。
+- 教程正文不再保存用例数等易漂移数字（`engineering/20`、`math/00`、`engineering/58`），统一指向 project_context。
+- 根 `README.md`：目录表改 2.0 布局，移除 `docs/project_review.md` 死链，补充文档索引入口。
+
 ## 2026-10-24
 
 ### 全仓缺陷修复（审查驱动，未升版本）

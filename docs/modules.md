@@ -101,20 +101,37 @@
 
 ---
 
-## src/scene/ — 场景资源与加载
+## include/softrenderer/resource/ — 资源与生成器
 
-**职责**：描述「要画什么」——几何、材质、纹理、相机、动画、粒子，以及从磁盘
-格式（OBJ / glTF / 图像）到内存结构的加载。
-
-### 核心资源
+**职责**：几何与纹理的数据结构，以及不依赖外部文件的程序化生成。
 
 | 文件 | 关键类型 | 说明 |
 | --- | --- | --- |
-| `mesh.h` | `Vertex`（position / normal / uv / tangent）、`Mesh`（vertices + indices，`triangleCount()`）、`namespace meshgen` 程序化生成 | 全局命名空间 |
-| `texture.h` | `Texture`：`sampleNearest` / `sampleBilinear` / `sampleTrilinear`、mipmap 链、Repeat 环绕、`valid()`；`namespace texgen` 程序化生成 | |
+| `mesh.h` | `Vertex`（position / normal / uv / tangent）、`Mesh`（vertices + indices，`triangleCount()`） | |
+| `mesh_generator.h` | `sr::meshgen`：立方体、球、平面、细分地面 | |
+| `texture.h` | `Texture`：`sampleNearest` / `sampleBilinear` / `sampleTrilinear` / `sampleColorClamped`、mipmap 链、`valid()` | 3D 用 Repeat，2D 用 ClampToEdge |
+| `texture_generator.h` | `sr::texgen`：程序化纹理 | |
 | `cubemap.h` | `Cubemap`、`enum class CubeFace : int` | IBL 环境光照 |
-| `camera.h` | `Camera`（FPS 自由相机 + orbit 轨道模式）、`Camera2D`（正交 2D 相机） | 见下 |
-| `gltf_types.h` | `GltfMaterial` / `GltfTexture` / `GltfImage` / `GltfNode` / `GltfSkin` / `GltfAnimation`、`enum class AlphaMode` | glTF 常用 PBR 参数与场景元数据 |
+| `vertex.h` | 顶点布局 | |
+
+---
+
+## include/softrenderer/scene/ — 场景与动画
+
+**职责**：相机、节点与材质、骨骼与动画、粒子，以及 ECS 组件。
+
+| 文件 | 关键类型 |
+| --- | --- |
+| `camera.h` | `Camera`（FPS + orbit）、`Camera2D`（正交 2D） |
+| `scene_node.h` | 节点层级，世界矩阵沿 children 累乘 |
+| `scene_asset.h` | 加载结果：网格 + 材质 + 节点 + 动画 + 蒙皮 |
+| `material.h` | PBR 材质参数 |
+| `components.h` | `sr::Position` / `Velocity` / `Rotation` / `Scale` / `MeshRef` / `MaterialRef` / `Light` / `CameraTag`（8 个） |
+| `skeleton.h` | `Bone` / `Skeleton` / `VertexBoneWeights` / `Keyframe` / `AnimationChannel` / `Animation` |
+| `skin.h` | 蒙皮权重与关节矩阵 |
+| `animation_player.h` | `sr::animation::AnimSample`：Linear / Step / CubicSpline，旋转用 SLERP 或归一化 Hermite |
+| `animation_clip.h` / `keyframe_animation.h` | 动画剪辑与关键帧容器 |
+| `particle_system.h` | `Particle` / `EmitterConfig` / `ParticleSystem`：Billboard + 重力 + 颜色渐变 |
 
 **`Camera`（3D）**：用 `yaw` / `pitch` 描述朝向，`pitch` 夹在 ±89° 防万向节翻转。
 输出 `viewMatrix()` / `projMatrix()`。交互接口：`addYawPitch` / `moveForward` /
@@ -125,33 +142,12 @@
 提供 `worldToScreen` / `screenToWorld`（鼠标拾取）、`visibleWorldRect`（2D 剔除）、
 `zoomToFit`、`pan` / `zoomBy`。
 
-### 动画与粒子
-
-| 文件 | 关键类型 |
-| --- | --- |
-| `skeleton.h` | `Bone` / `Skeleton` / `VertexBoneWeights` / `Keyframe` / `AnimationChannel` / `Animation` |
-| `animation_player.h` | `AnimSample`：按时间采样 glTF 动画，Linear / Step / CubicSpline；旋转 SLERP 或归一化 Hermite |
-| `particle_system.h` | `Particle` / `EmitterConfig` / `ParticleSystem`：Billboard 发射器 + 重力 + 颜色渐变 |
-
-### 加载器
-
-| 文件 | 加载格式 | 命名空间 |
-| --- | --- | --- |
-| `image_loader.h` | PNG / JPG / BMP / TGA / PSD / GIF / HDR / PIC / PNM（stb_image） | `imageloader` |
-| `obj_loader.h` | Wavefront OBJ（tinyobjloader） | `objloader` |
-| `gltf_accessor.h` / `gltf_mesh.h` | 共享字节校验与 primitive 转换 | `sr::gltf` |
-| `gltf_loader.h` + `tinygltf_impl.cpp` | glTF 2.0 / glb（tinygltf） | `gltfloader` |
-
-> ⚠️ `gltf_loader.h` 与 `animation_player.h` 在公共头中 include `tiny_gltf.h`，
-> 下游用户需要 tinygltf 与 nlohmann/json 的头文件路径。这是**有意的接口泄漏**
-> （`animation_player` 需直接访问 `tinygltf::Model` 的动画数据）。
-
 ### ECS
 
 | 文件 | 内容 |
 | --- | --- |
 | `components.h` | `namespace sr`：`sr::Position` / `sr::Velocity` / `sr::Rotation` / `sr::Scale` / `sr::MeshRef` / `sr::MaterialRef` / `sr::Light` / `sr::CameraTag` |
-| `render_queue.h` | `DrawItem` / `RenderQueue` / `enum class RenderLayer : uint16_t`：透明排序 |
+| `render_queue.h`（在 `render/pipeline/`） | `DrawItem` / `RenderQueue` / `enum class RenderLayer : uint16_t`：透明排序 |
 
 ECS 容器本身来自 EnTT（`third/entt`），`components.h` 只定义组件数据结构。
 
@@ -161,18 +157,32 @@ ECS 容器本身来自 EnTT（`third/entt`），`components.h` 只定义组件�
 > `#include <softrenderer/scene/components.h>` 时直接撞上重定义硬错误。
 >
 > 能不留别名直接迁完，是因为实测引用面极小：本文件只被 2 个文件引用
-> （自身 + `tests/unit/test_core.cpp`），`Light` 除定义处外全仓零使用，
-> 22 个示例无一使用 ECS。
+> （自身 + 命名空间哨兵），`Light` 除定义处外全仓零使用，22 个示例无一使用 ECS。
 >
 > 调用时必须写 `sr::` 前缀：`registry.emplace<sr::Position>(e, Vec3f{...})`。
 > 注意 `Vec3f` 本身仍在全局命名空间（属后续批次）。
 >
-> 回归防护：`tests/unit/test_core.cpp` 在全局作用域声明了 8 个同名哨兵类型。
-> 若将来有人加回 `using sr::Position;`，测试文件会直接报重定义错误。
+> 回归防护：`tests/architecture/namespace_sentinel.cpp` 在全局作用域声明 60 个同名类型。
+> 若将来有人加回 `using sr::Position;`，哨兵会直接报重定义错误。
 
 ---
 
-## src/shader/ — 可编程着色管线
+## include/softrenderer/io/ — 文件加载
+
+| 文件 | 加载格式 | 命名空间 |
+| --- | --- | --- |
+| `image_loader.h` | PNG / JPG / BMP / TGA / PSD / GIF / HDR / PIC / PNM（stb_image） | `sr::io` |
+| `obj_loader.h` | Wavefront OBJ（tinyobjloader） | `sr::io` |
+| `gltf_loader.h` | glTF 2.0 / glb（tinygltf） | `sr::io` |
+| `tga.h` / `image_write.h` | TGA 读写与图像写出 | `sr::io` |
+
+> 第三方实现宏只在 `src/io/{stb,tinygltf,tinyobj}_impl.cpp` 三处各定义一次。
+> 2.0 起公共头不再包含第三方头，下游工程不需要 tinygltf / stb 的头文件路径。
+> 加载失败返回状态与错误文本，不抛异常。
+
+---
+
+## include/softrenderer/render/shader/ — 可编程着色管线
 
 **职责**：定义 GPU 风格的两段式着色契约，并提供若干内置实现。
 
@@ -211,7 +221,7 @@ struct Shader {
 | 文件 | 着色器 |
 | --- | --- |
 | `shaders.h` | `FlatShader`（逐三角形面法线）、`GouraudShader`（逐顶点光照）、`PhongShader`（逐像素光照） |
-| `pbr_shader.h` | `PBRShader`：Cook-Torrance BRDF（依赖 `scene/cubemap.h` 做 IBL） |
+| `pbr_shader.h` | `PBRShader`：Cook-Torrance BRDF（依赖 `resource/cubemap.h` 做 IBL） |
 | `advanced_shaders.h` | `DepthShader`（阴影贴图深度pass）、`FinalShader`（后处理合成） |
 
 **扩展点**：新增着色器 = 继承 `Shader` 并实现 `vertex` / `fragment`。
@@ -220,30 +230,36 @@ struct Shader {
 
 ---
 
-## src/raster/ — 光栅化与渲染器
+## include/softrenderer/render/ — 光栅化、管线与 2D
 
-**职责**：把几何图元转成像素。分 3D 与 2D 两条对等路径，共享底层图元。
+**职责**：把几何图元转成像素。`raster/` 是底层图元，`pipeline/` 是 3D 主链路，`draw2d/` 是 2D 路径。
 
-### 共享底层（全局命名空间，3D 与 2D 共用）
+### raster/ — 底层图元
 
 | 文件 | 内容 |
 | --- | --- |
-| `line.h` | Bresenham 画线、`drawLineGradient` |
 | `triangle.h` | 边函数 + 重心坐标三角形填充 |
+| `coverage.h` | `TriangleCoverage`：整数子像素 top-left 覆盖规则（±2^20 坐标上限） |
+| `rasterizer_fast.h` | `sr::raster`：增量边函数 + SSE2 四像素并行。**实验性，未接入主链路**，见 `architecture.md` §6.1 |
 
-### 3D 路径
+画线 `drawLine` / `drawLineGradient` 已从旧的 `line.h` 迁入 `draw2d/shape2d.h`。
+
+### pipeline/ — 3D 主链路
 
 | 文件 | 内容 |
 | --- | --- |
-| `clip.h` | `ClipVertex`（裁剪空间坐标 + `Varyings`）、`enum class ClipPlane : uint8_t`、`kClipPlaneCount`、`clipTriangleFullFrustum`：完整 6 面 Sutherland-Hodgman，含顺时针绕序修复 |
 | `renderer.h` | `Renderer`：`clear` / `drawMesh` / `depth()`，开关 `cullBackface` / `nearClip` |
-| `rasterizer_fast.h` | `namespace raster_fast`：增量边函数 + SSE2 四像素并行。**实验性，未接入主链路**，见 `architecture.md` §6.1 |
+| `clip.h` | `ClipVertex`、`enum class ClipPlane : uint8_t`、`kClipPlaneCount`、`clipTriangleFullFrustum`：完整 6 面 Sutherland-Hodgman，含顺时针绕序修复 |
+| `shader.h` | `Shader` / `Varyings` / `interpolateVaryings`（见下一节） |
+| `surface_shader.h` | 逐像素着色回调的中间层 |
+| `render_queue.h` | `DrawItem` / `RenderQueue` / `RenderLayer`：层→距离→材质排序 |
+| `msaa_renderer.h` | MSAA 4x 渲染路径 |
 
 `Renderer::drawMesh` 的固定流水线（8 步）：顶点着色 → 视锥裁剪 → 透视除法 →
 视口变换 → 背面剔除 → 光栅化 → 深度测试 → 透视校正插值 + 片元着色。
 详见 `architecture.md` §4 的时序图。
 
-### 2D 路径（`namespace draw2d`）
+### draw2d/ — 2D 路径（`sr::draw2d`）
 
 | 文件 | 内容 |
 | --- | --- |
@@ -255,10 +271,8 @@ struct Shader {
 混合 → 可选 `ClipRect` scissor。短路规则：仅 `Opaque`，或（`a == 255` 且模式为
 `AlphaBlend` / `Premultiplied`）时直接覆盖；`Additive` / `Multiply` 不短路。
 
-> **为什么 2D 符号都在 `draw2d` 而底层 `triangle.h`/`line.h` 在全局**：
-> 2D 图元函数名（`fillRect` / `fillCircle` / `SpritePalette`）曾与 `examples/` 中
-> 已有的全局同名符号冲突，故整体收进 `draw2d`。而 `triangle.h` / `line.h` 是
-> 3D 与 2D 共享的最底层图元，保持全局以避免双重限定。
+> 2D 图元名（`fillRect` / `fillCircle` / `SpritePalette`）收在 `sr::draw2d` 而非 `sr` 根，
+> 避免与 3D 侧同名符号混淆；`triangle.h` / `coverage.h` 属于 3D 光栅化，不放 `draw2d`。
 >
 > **调用 2D 图元层时必须加 `draw2d::` 前缀**（单元测试中同样如此）。
 
@@ -268,11 +282,11 @@ struct Shader {
 
 ---
 
-## src/test/ — 测试工具
+## tests/support/ — 测试工具
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
-| `pixel_regression.h` | `namespace regression`：`CompareResult`、`compare`、`saveGolden`、`compareWithGolden` | ✅ 已接线（TASK-004），3 个回归场景 + 7 个单元用例 |
+| `pixel_regression.h` | `namespace regression`：`CompareResult`、`compare`、`saveGolden`、`compareWithGolden` | ✅ 已接线（TASK-004），3 个回归场景 + 8 个单元用例 |
 
 `pixel_regression` 的通过判据：不匹配像素占比 < 0.1%、平均差值 < 0.5，**且 alpha 完全一致**。
 基准图存放于 `tests/fixtures/golden/<name>.png`（RGBA，含 alpha）。
@@ -299,18 +313,10 @@ struct Shader {
 
 ## 依赖方向速查（红线）
 
-```
-math/  ←  core/  ←  scene/  ←  shader/  ←  raster/  ←  examples/ + platform/
-```
+逐目录允许的依赖见上方[模块总览](#模块总览200-唯一正式布局)表格。三条红线：
 
-- 只能向左依赖，**禁止反向**
-- `src/` 内**禁止** include `platform/` 或 `<windows.h>`
-- 已知违例：`core/benchmark.h → raster/rasterizer_fast.h`（层次倒置，待修）
+- 只能向底层依赖（`math/` 在最底），**禁止反向**
+- `include/` 与 `src/` 内**禁止** include `platform/` 或 `<windows.h>`；唯一例外是 `rasterizer_fast.h` 的 SSE2，它提供非 x86 的标量降级路径
+- 分层门禁由 `tests/architecture/check_boundaries.cmake`（include 白名单）与 `public_headers_check`（逐头独立编译）强制，违反即 CTest 失败
 
-## 2026-10-06 光栅化新增模块
-
-| 文件 | 职责 |
-| --- | --- |
-| include/softrenderer/render/raster/coverage.h | sr::TriangleCoverage / RasterBounds，整数子像素覆盖与有限包围盒 |
-| include/softrenderer/render/pipeline/msaa_renderer.h | sr::MSAAFlatRenderer<1/4>，常量颜色的逐样本覆盖与深度/颜色提交 |
-| benchmarks/renderer_benchmark.cpp | 可选主管线基线；配置和数据见 [性能记录](engineering/58-覆盖规则与性能基线.md) |
+基准设施在 `benchmarks/support/benchmark.h`，不属于公共头，不参与分层门禁。
