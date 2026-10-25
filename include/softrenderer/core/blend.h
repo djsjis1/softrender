@@ -56,18 +56,30 @@ inline uint8_t clampU8(int v) noexcept
     return v < 0 ? 0 : v > 255 ? 255 : static_cast<uint8_t>(v);
 }
 
-// 整数除以 255：(v + (v >> 8) + 128) >> 8
-// 等价于 v / 255，对所有 v ∈ [0, 65025] 精确无误差
-// 仅用移位和加法，无浮点、无硬件除法，Cortex-M0 也能跑
+// 四舍五入到最近整数：round(v / 255)，输入为 0 时返回 0。
+//
+// 不能改用移位近似：旧写法 (v + (v>>8) + 128) >> 8 在 v=33023 时得 129，
+// 正确值应为 130；任何近似形式都需先做全输入范围验证。除数是编译期常量，
+// 编译器会把 /255 强度折减为乘高位 + 移位，不会发出真正的除法指令。
 inline int div255(int v) noexcept
 {
-    return (v + (v >> 8) + 128) >> 8;
+    return v <= 0 ? 0 : (v + 127) / 255;
 }
 
 // 整数混合核心：(src × α + dst × (255-α)) / 255
 inline int blendChannel(int src, int dst, int alpha, int invAlpha) noexcept
 {
     return div255(src * alpha + dst * invAlpha);
+}
+
+// source-over 的结果 alpha：As + Ad × (1 − As)
+//
+// 单独成函数是因为旧实现把 alpha 当作 RGB 又乘了一次源 alpha，
+// 实际算的是 As×As + Ad×(1−As)：半透明源盖在不透明目标上会得到 191
+// 而不是 255，后续图层拿这个 alpha 继续合成就会偏暗。
+inline int sourceOverAlpha(int srcAlpha, int dstAlpha) noexcept
+{
+    return srcAlpha + div255(dstAlpha * (255 - srcAlpha));
 }
 
 // 单像素混合：src（前景）画到 dst（背景）上，按 mode 决定最终颜色
@@ -82,32 +94,48 @@ inline Color blendPixels(Color src, Color dst, BlendMode mode) noexcept
         return src;
 
     case BlendMode::AlphaBlend:
-        return Color(
-            clampU8(blendChannel(src.r, dst.r, a, inv)),
-            clampU8(blendChannel(src.g, dst.g, a, inv)),
-            clampU8(blendChannel(src.b, dst.b, a, inv)),
-            clampU8(blendChannel(src.a, dst.a, a, inv)));
+    {
+        const int outA = sourceOverAlpha(a, dst.a);
+        // 目标不透明（Framebuffer 默认情况）时 outA 恒为 255，颜色退化为
+        // 普通线性混合，避免逐通道除法。
+        if (outA >= 255)
+            return Color(clampU8(blendChannel(src.r, dst.r, a, inv)),
+                         clampU8(blendChannel(src.g, dst.g, a, inv)),
+                         clampU8(blendChannel(src.b, dst.b, a, inv)), 255);
+        if (outA <= 0)
+            return Color(0, 0, 0, 0);
+        // 透明目标：直通色要先按加权和求出再除以结果 alpha，
+        // 才能把预乘后的颜色还原成直通（straight）表示。
+        const int dstWeight = div255(dst.a * inv);
+        auto channel = [&](int s, int d) { return clampU8((s * a + d * dstWeight) / outA); };
+        return Color(channel(src.r, dst.r), channel(src.g, dst.g), channel(src.b, dst.b),
+                     static_cast<uint8_t>(outA));
+    }
 
     case BlendMode::Additive:
         return Color(
             clampU8(div255(src.r * a) + dst.r),
             clampU8(div255(src.g * a) + dst.g),
             clampU8(div255(src.b * a) + dst.b),
-            255);
+            static_cast<uint8_t>(sourceOverAlpha(a, dst.a)));
 
     case BlendMode::Multiply:
         return Color(
             clampU8(blendChannel(div255(src.r * dst.r), dst.r, a, inv)),
             clampU8(blendChannel(div255(src.g * dst.g), dst.g, a, inv)),
             clampU8(blendChannel(div255(src.b * dst.b), dst.b, a, inv)),
-            255);
+            static_cast<uint8_t>(sourceOverAlpha(a, dst.a)));
 
     case BlendMode::Premultiplied:
-        return Color(
-            clampU8(src.r + div255(dst.r * inv)),
-            clampU8(src.g + div255(dst.g * inv)),
-            clampU8(src.b + div255(dst.b * inv)),
-            255);
+    {
+        const int outA = sourceOverAlpha(a, dst.a);
+        if (outA <= 0)
+            return Color(0, 0, 0, 0);
+        // src 的 RGB 已预乘；dst 是直通表示，必须先预乘才能直接相加。
+        auto channel = [&](int s, int d) { return clampU8(s + div255(div255(d * dst.a) * inv)); };
+        return Color(channel(src.r, dst.r), channel(src.g, dst.g), channel(src.b, dst.b),
+                     static_cast<uint8_t>(outA));
+    }
     }
     return src;
 }

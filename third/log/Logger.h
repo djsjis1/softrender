@@ -53,8 +53,10 @@ namespace mylog
 
         Logger(const Logger &) = delete;
         Logger &operator=(const Logger &) = delete;
-        Logger(Logger &&) noexcept = default;
-        Logger &operator=(Logger &&) noexcept = default;
+        // 移动必须手写：默认移动会把 logger_/name_ 搬走却不清理源对象，
+        // 源对象析构时会按残留的 name_ 去 drop，把新对象刚注册的那一项删掉。
+        Logger(Logger &&) noexcept;
+        Logger &operator=(Logger &&) noexcept;
 
         // 释放资源（析构时也会调用）
         void shutdown();
@@ -90,10 +92,22 @@ namespace mylog
     private:
         Logger() = delete; // 必须通过 LogConfig 构造
 
+        // 未初始化时的占位实例：logger_ 为空，所有 log() 直接返回。
+        // 让 SingletonLogger::instance() 在 init 前调用宏时不会解引用空指针。
+        struct NullTag
+        {
+        };
+        explicit Logger(NullTag)
+        {
+        }
+
         static spdlog::level::level_enum to_spdlog_level(Level lvl);
 
         std::shared_ptr<spdlog::logger> logger_;
         std::string name_;
+
+    public:
+        static Logger &nullInstance();
     };
 
     // 全局单例包装：无需手动持有 Logger，直接 LOGS_XXX(...) 即可。

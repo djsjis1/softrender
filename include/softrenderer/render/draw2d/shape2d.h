@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstddef>
+#include <initializer_list>
 #include <utility>
 #include <algorithm>
 #include <cmath>
@@ -27,6 +28,19 @@
 
 namespace sr::draw2d
 {
+
+// 2D 图元的浮点参数统一做有限性检查。
+//
+// 坐标、半径、宽高都是调用方给的浮点，一旦是 NaN/Inf，后面的
+// `int(std::floor(...))` / `int(std::ceil(...))` 就是未定义行为；
+// 而 `r <= 0` 这类判据对 NaN 恒为假，拦不住。
+inline bool allFinite(std::initializer_list<float> values)
+{
+    for (float v : values)
+        if (!std::isfinite(v))
+            return false;
+    return true;
+}
 
 // ── 裁剪矩形 ──────────────────────────────────────────────
 // 半开区间 [x0,x1) × [y0,y1)，用于 scissor 裁剪。
@@ -180,7 +194,9 @@ inline void drawLineAA(Framebuffer& fb, int x0, int y0, int x1, int y1, Color c,
         float intensity = dx == 0 ? 0.0f : float(error2) / float(2 * dx);
         if (intensity > 0.01f && intensity < 0.99f)
         {
-            Color edge = Color(c.r, c.g, c.b, static_cast<uint8_t>(intensity * 255));
+            // 边缘透明度要乘源颜色的 alpha：否则完全透明的线仍会画出边缘。
+            const int edgeAlpha = int(intensity * float(c.a) + 0.5f);
+            Color edge = Color(c.r, c.g, c.b, static_cast<uint8_t>(std::clamp(edgeAlpha, 0, 255)));
             steep ? plotBlend(fb, nextY, x, edge, BlendMode::AlphaBlend, clip)
                   : plotBlend(fb, x, nextY, edge, BlendMode::AlphaBlend, clip);
         }
@@ -307,11 +323,13 @@ inline void fillRectGradient(Framebuffer& fb, int x, int y, int w, int h,
 // 填充圆：包围盒内逐像素做勾股距离测试 (dx²+dy² ≤ r²)。
 // 圆心支持浮点坐标，实现亚像素级平滑定位。
 // 先裁剪包围盒到屏幕/裁剪区，避免对屏外像素做无谓的距离测试。
-inline void fillCircle(Framebuffer& fb, float cx, float cy, float r, Color c,
+inline void fillCircle(Framebuffer& fb, float cx, float cy, float r, Color c,   
                        BlendMode mode = BlendMode::Opaque,
                        const ClipRect* clip = nullptr)
 {
-    if (r <= 0.0f)
+    // 坐标是调用方给的浮点：NaN/Inf 会让下面的 int(std::floor(...)) 成为未定义行为，
+    // 而 `r <= 0` 这类判断对 NaN 恒为假，拦不住它。
+    if (!allFinite({cx, cy, r}) || r <= 0.0f)
         return;
     int minX = std::max(0, (int)std::floor(cx - r));
     int maxX = std::min(fb.width() - 1, (int)std::ceil(cx + r));
@@ -380,7 +398,7 @@ inline void fillEllipse(Framebuffer& fb, float cx, float cy, float rx, float ry,
                         BlendMode mode = BlendMode::Opaque,
                         const ClipRect* clip = nullptr)
 {
-    if (rx <= 0.0f || ry <= 0.0f)
+    if (!allFinite({cx, cy, rx, ry}) || rx <= 0.0f || ry <= 0.0f)
         return;
     int minX = std::max(0, (int)std::floor(cx - rx));
     int maxX = std::min(fb.width() - 1, (int)std::ceil(cx + rx));
@@ -414,10 +432,12 @@ inline void drawEllipse(Framebuffer& fb, float cx, float cy, float rx, float ry,
                         BlendMode mode = BlendMode::Opaque,
                         const ClipRect* clip = nullptr)
 {
-    if (rx <= 0.0f || ry <= 0.0f)
+    if (!allFinite({cx, cy, rx, ry}) || rx <= 0.0f || ry <= 0.0f)
         return;
     const float PI = 3.14159265358979f;
-    int steps = std::max(16, (int)(2.0f * PI * std::max(rx, ry)));
+    const float span = 2.0f * PI * std::max(rx, ry);
+    // span 可能是 inf（rx 极大），直接转 int 同样是 UB：先夹住上界。
+    int steps = std::max(16, span > 4096.0f ? 4096 : int(span));
     int prevX = (int)std::round(cx + rx), prevY = (int)std::round(cy);
     for (int i = 1; i <= steps; ++i)
     {
@@ -451,7 +471,7 @@ inline void fillRoundedRect(Framebuffer& fb, float x, float y, float w, float h,
                             BlendMode mode = BlendMode::Opaque,
                             const ClipRect* clip = nullptr)
 {
-    if (w <= 0.0f || h <= 0.0f)
+    if (!allFinite({x, y, w, h, r}) || w <= 0.0f || h <= 0.0f)
         return;
     r = std::max(0.0f, std::min(r, std::min(w, h) * 0.5f)); // 半径不能超过宽高一半
     int minX = (int)std::floor(x), maxX = (int)std::ceil(x + w);
@@ -468,7 +488,7 @@ inline void drawRoundedRect(Framebuffer& fb, float x, float y, float w, float h,
                             BlendMode mode = BlendMode::Opaque,
                             const ClipRect* clip = nullptr)
 {
-    if (w <= 0.0f || h <= 0.0f || thickness <= 0)
+    if (!allFinite({x, y, w, h, r}) || w <= 0.0f || h <= 0.0f || thickness <= 0)
         return;
     float t = float(thickness);
     int minX = (int)std::floor(x), maxX = (int)std::ceil(x + w);

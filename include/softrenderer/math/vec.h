@@ -132,6 +132,19 @@ struct Vec3
         return {x / len, y / len, z / len};
     }
 
+    // 安全单位化：零长度或非有限输入返回 fallback。
+    //
+    // 与 normalized() 分工：后者是「调用方保证非零」的严格契约（调试版直接断言），
+    // 用于内部已校验的路径；顶点属性、外部 uniform 这类不可信输入必须用本函数，
+    // 否则一个零法线就会让 Debug 构建断言中止、Release 构建静默得到 NaN。
+    Vec3 normalizedOr(const Vec3& fallback) const
+    {
+        const T len = length();
+        if (!(len > T(0)) || !std::isfinite(len))
+            return fallback;
+        return {x / len, y / len, z / len};
+    }
+
     // 编译期维度：供通用模板函数推导循环次数
     static constexpr size_t size = 3;
 };

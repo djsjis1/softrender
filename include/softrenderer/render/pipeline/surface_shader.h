@@ -36,9 +36,13 @@ struct SurfaceShader : Shader
     const Texture *texture = nullptr;   // 可选漫反射贴图
 
     // 法线变换到世界空间（逆转置矩阵，处理非等比缩放）
+    //
+    // 顶点法线是外部数据（OBJ/glTF/手写 Mesh），可能为零或非有限。
+    // 用 normalizedOr 兜底：正常输入与 normalized() 完全一致，
+    // 退化输入不再触发 Debug 断言，也不再把 NaN 传进光照。
     Vec3f toWorldNormal(const Vec3f &n) const
     {
-        return normalMatrix.transformDir(n).normalized();
+        return normalMatrix.transformDir(n).normalizedOr({0, 0, 1});
     }
 
     // 采样漫反射贴图（无贴图则返回基色）

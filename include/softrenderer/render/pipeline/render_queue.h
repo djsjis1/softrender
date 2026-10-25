@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -43,11 +44,13 @@ struct DrawItem
     int meshIndex = -1;         // 指向外部 mesh 数组
     int objectIndex = -1;       // 指向外部 object 数组
 
-    // 组合排序键：layer(16bit) | materialId(16bit) | distance 排序方向
+    // 组合排序键：layer(16bit) | distance(32bit) | materialId(16bit)
+    //
+    // 顺序必须与 sort() 的比较器一致（层 → 距离 → 材质）。旧实现把材质放在
+    // 距离之前，两个入口会得到不同结果。
     uint64_t sortKey(bool reverseDistance) const
     {
         uint64_t key = uint64_t(uint16_t(layer)) << 48;
-        key |= uint64_t(uint16_t(materialId)) << 32;
         // 不透明：近→远（distance 小排前面）
         // 透明：远→近（distance 大排前面 → 翻转浮点位）
         // 用 memcpy 取位模式（避免 float→uint32_t 的严格别名违规）
@@ -55,10 +58,11 @@ struct DrawItem
         std::memcpy(&distBits, &sortDistance, sizeof(distBits));
         if (reverseDistance)
         {
-            // 翻转：把 float 位模式取反（对正数有效）
+            // 翻转：把 float 位模式取反（对非负距离有效）
             distBits = ~distBits;
         }
-        key |= distBits;
+        key |= uint64_t(distBits) << 16;
+        key |= uint64_t(uint16_t(materialId));
         return key;
     }
 };
@@ -70,33 +74,34 @@ class RenderQueue
 
     void add(const DrawItem& item) { items_.push_back(item); }
 
-    // 排序：按 layer → materialId → distance
+    // 排序：按 layer → distance → materialId
     // 不透明层：近→远；透明层：远→近
+    //
+    // 透明层必须距离优先：先按材质分组会破坏画家算法，不同材质的
+    // 透明物体不再保证远到近绘制。材质只在距离相等时做稳定次级键。
     void sort(const Vec3f& cameraPos, const std::vector<Vec3f>& objectPositions)
     {
         // 先填距离
         for (auto& item : items_)
         {
             if (item.objectIndex >= 0 && item.objectIndex < int(objectPositions.size()))
-                item.sortDistance = (objectPositions[item.objectIndex] - cameraPos).lengthSq();
+            {
+                const float distSq = (objectPositions[item.objectIndex] - cameraPos).lengthSq();
+                // 非有限距离会让比较器失去严格弱序（std::sort 行为未定义）
+                item.sortDistance = std::isfinite(distSq) ? distSq : 0.0f;
+            }
         }
         // 排序
         std::sort(items_.begin(), items_.end(), [](const DrawItem& a, const DrawItem& b) {
-            bool aReverse = (a.layer >= RenderLayer::Transparent);
-            bool bReverse = (b.layer >= RenderLayer::Transparent);
             // 不同层直接比 layer
             if (a.layer != b.layer)
                 return a.layer < b.layer;
-            // 同层：先比 materialId
-            if (a.materialId != b.materialId)
-                return a.materialId < b.materialId;
-            // 同材质：比距离
-            if (aReverse != bReverse)
-                return aReverse;  // 透明的排后面
-            if (aReverse)
-                return a.sortDistance > b.sortDistance;  // 远→近
-            else
-                return a.sortDistance < b.sortDistance;  // 近→远
+            const bool reverse = (a.layer >= RenderLayer::Transparent);
+            // 同层：距离优先
+            if (a.sortDistance != b.sortDistance)
+                return reverse ? (a.sortDistance > b.sortDistance) : (a.sortDistance < b.sortDistance);
+            // 距离相同：材质分组作为稳定次序
+            return a.materialId < b.materialId;
         });
     }
 

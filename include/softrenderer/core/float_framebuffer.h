@@ -38,10 +38,16 @@ public:
     // 重新分配尺寸（清空内容）
     void resize(int w, int h)
     {
+        // 负尺寸会被 size_t 放大成巨值；且必须先构造新数据再改尺寸，
+        // 否则 assign 抛 bad_alloc 时 width_/height_ 已改而像素还是旧的。
+        if (w < 0 || h < 0)
+            return;
+        std::vector<Vec3f> pixels(size_t(w) * size_t(h), Vec3f{0, 0, 0});
+        DepthBuffer depth(w, h);
+        pixels_.swap(pixels);
+        depth_ = std::move(depth);
         width_ = w;
         height_ = h;
-        pixels_.assign(size_t(w) * h, Vec3f{0, 0, 0});
-        depth_ = DepthBuffer(w, h);
     }
 
     void clear(Vec3f bg = {0, 0, 0})

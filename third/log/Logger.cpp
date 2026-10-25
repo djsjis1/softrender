@@ -4,6 +4,8 @@
 #include <vector>
 #include <cstdio>
 #include <filesystem>
+#include <mutex>
+#include <utility>
 
 #include "spdlog/async.h"
 #include "spdlog/sinks/rotating_file_sink.h"
@@ -11,6 +13,27 @@
 
 namespace mylog
 {
+
+    namespace
+    {
+        // 全局异步线程池只初始化一次。
+        //
+        // spdlog::init_thread_pool 会替掉 registry 里当前的全局池，而 async_logger
+        // 只持 weak_ptr：池被替掉后旧 logger 的下一次写入会抛
+        // "async log: thread pool doesn't exist anymore"。因此多实例场景下
+        // 重复调用 init_thread_pool 是错的：首次配置生效，后续请求直接复用。
+        std::mutex g_poolMutex;
+        bool g_poolReady = false;
+
+        void ensureThreadPool(std::size_t queueSize, std::size_t threadCount)
+        {
+            std::lock_guard<std::mutex> lock(g_poolMutex);
+            if (g_poolReady)
+                return;
+            spdlog::init_thread_pool(queueSize, threadCount);
+            g_poolReady = true;
+        }
+    } // namespace
 
     // ---------------------- Logger ----------------------
 
@@ -48,14 +71,7 @@ namespace mylog
 
             if (cfg.async)
             {
-                try
-                {
-                    spdlog::init_thread_pool(cfg.async_queue_size, cfg.async_thread_count);
-                }
-                catch (...)
-                {
-                    // 线程池已存在，忽略
-                }
+                ensureThreadPool(cfg.async_queue_size, cfg.async_thread_count);
                 logger_ = std::make_shared<spdlog::async_logger>(
                     cfg.logger_name,
                     sinks.begin(), sinks.end(),
@@ -84,9 +100,44 @@ namespace mylog
             logger_.reset();
             name_.clear();
         }
+        catch (const std::exception &ex)
+        {
+            // 内存/线程创建失败等不是 spdlog_ex，旧实现会让它穿出构造函数。
+            std::fprintf(stderr, "[mylog] init failed (%s): %s\n",
+                         cfg.logger_name.c_str(), ex.what());
+            logger_.reset();
+            name_.clear();
+        }
     }
 
     Logger::~Logger() { shutdown(); }
+
+    Logger::Logger(Logger &&other) noexcept
+        : logger_(std::move(other.logger_)), name_(std::move(other.name_))
+    {
+        // 源对象不再持有注册项：不清理的话它析构时会 drop 掉同一个名字。
+        other.name_.clear();
+        other.logger_.reset();
+    }
+
+    Logger &Logger::operator=(Logger &&other) noexcept
+    {
+        if (this != &other)
+        {
+            shutdown();
+            logger_ = std::move(other.logger_);
+            name_ = std::move(other.name_);
+            other.name_.clear();
+            other.logger_.reset();
+        }
+        return *this;
+    }
+
+    Logger &Logger::nullInstance()
+    {
+        static Logger instance{NullTag{}};
+        return instance;
+    }
 
     spdlog::level::level_enum Logger::to_spdlog_level(Level lvl)
     {
@@ -163,7 +214,9 @@ namespace mylog
 
     Logger &SingletonLogger::instance()
     {
-        return *g_singleton;
+        // 未 init（或已 shutdown）时返回空实现：宏在初始化前被调用属于
+        // 常见误用，不能让它变成空指针解引用。
+        return g_singleton ? *g_singleton : Logger::nullInstance();
     }
 
     bool SingletonLogger::init(const LogConfig &cfg)

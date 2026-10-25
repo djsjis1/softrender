@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include <cstddef>
 #include <utility>
@@ -47,8 +48,12 @@ class Profiler
         return p;
     }
 
+    // 关闭时必须是空操作：业务代码可以到处包 SR_PROFILE_SCOPE，
+    // 而多线程渲染时每次 begin/end 都加锁会让线程互相串行化。
     void beginScope(const char* name, const char* category = "render")
     {
+        if (!enabled_.load(std::memory_order_relaxed))
+            return;
         ScopeData sd;
         sd.name = name;
         sd.category = category;
@@ -60,12 +65,16 @@ class Profiler
 
     void endScope()
     {
-        auto end = Clock::now();
         auto& stack = scopeStack();
         if (stack.empty())
             return;
+        const bool recording = enabled_.load(std::memory_order_relaxed);
         ScopeData sd = std::move(stack.back());
         stack.pop_back();
+        // 关闭状态下也要把栈弹干净：开启/关闭中途切换时不能留下错配的残留条目。
+        if (!recording)
+            return;
+        auto end = Clock::now();
 
         TraceEvent ev;
         ev.name = std::move(sd.name);
@@ -76,28 +85,80 @@ class Profiler
         ev.thread_id = sd.thread_id;
         ev.process_id = 1;
         std::lock_guard<std::mutex> lock(mutex_);
+        // 无上限时长时间运行会把事件堆到内存里（20 万条约 16MB，
+        // flush 还要再拷一份）。超出上限就丢弃并计数，而不是无限增长。
+        if (events_.size() >= maxEvents_)
+        {
+            ++dropped_;
+            return;
+        }
         events_.push_back(std::move(ev));
     }
 
-    // 输出 Chrome Trace JSON
-    void flush(const char* path)
+    // 事件数上限（含已记录数）。默认 100 万条，约 80MB。
+    void setMaxEvents(size_t n)
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        maxEvents_ = n;
+    }
+
+    size_t droppedEvents() const
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return dropped_;
+    }
+
+    // 输出 Chrome Trace JSON
+    //
+    // 先在内存里拼完整份文档再一次 fwrite：旧实现逐事件 fprintf，
+    // 200k 事件时 25 MB 要经过 200k 次 libc 格式化 + 缓冲检查，实测占了总耗时的 90%。
+    void flush(const char* path)
+    {
+        // 先在锁内拷一份再写盘：持锁做文件 I/O 会把所有正在记录的线程卡住。
+        std::vector<TraceEvent> events;
+        size_t dropped = 0;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            events = events_;
+            dropped = dropped_;
+        }
         FILE* f = std::fopen(path, "w");
         if (!f)
             return;
-        std::fprintf(f, "{\"traceEvents\":[\n");
-        for (size_t i = 0; i < events_.size(); ++i)
+
+        std::string out;
+        out.reserve(64 + events.size() * 160);
+        out += "{\"traceEvents\":[\n";
+        for (size_t i = 0; i < events.size(); ++i)
         {
-            const auto& e = events_[i];
-            std::fprintf(f,
-                         "{\"name\":\"%s\",\"cat\":\"%s\",\"ph\":\"%c\","
-                         "\"ts\":%.3f,\"dur\":%.3f,"
-                         "\"pid\":%u,\"tid\":%u}%s\n",
-                         e.name.c_str(), e.category.c_str(), e.phase, e.timestamp_us, e.duration_us, e.process_id,
-                         e.thread_id, (i + 1 < events_.size()) ? "," : "");
+            const auto& e = events[i];
+            // name/category 必须转义：引号与反斜杠会产出非法文档。
+            out += "{\"name\":\"";
+            appendJsonEscaped(out, e.name);
+            out += "\",\"cat\":\"";
+            appendJsonEscaped(out, e.category);
+            // 时间戳用整数微秒：MSVC 的 "%.3f" 每次约 3 μs（200k 事件就是 600 ms），
+            // 而 trace 的时间精度到微秒已经足够。
+            const long long ts = static_cast<long long>(e.timestamp_us + 0.5);
+            const long long dur = static_cast<long long>(e.duration_us + 0.5);
+            // 其余字段全部手写：200k 次 snprintf 的格式串解析本身就是大头。
+            out += "\",\"ph\":\"";
+            out += e.phase;
+            out += "\",\"ts\":";
+            appendUnsigned(out, static_cast<unsigned long long>(ts));
+            out += ",\"dur\":";
+            appendUnsigned(out, static_cast<unsigned long long>(dur));
+            out += ",\"pid\":";
+            appendUnsigned(out, e.process_id);
+            out += ",\"tid\":";
+            appendUnsigned(out, e.thread_id);
+            out += i + 1 < events.size() ? "},\n" : "}\n";
         }
-        std::fprintf(f, "],\"displayTimeUnit\":\"ms\"}\n");
+        out += "],\"displayTimeUnit\":\"ms\",\"droppedEvents\":";
+        out += std::to_string(dropped);
+        out += "}\n";
+
+        std::fwrite(out.data(), 1, out.size(), f);
         std::fclose(f);
     }
 
@@ -105,6 +166,7 @@ class Profiler
     {
         std::lock_guard<std::mutex> lock(mutex_);
         events_.clear();
+        dropped_ = 0;
     }
 
     size_t eventCount() const
@@ -113,14 +175,17 @@ class Profiler
         return events_.size();
     }
 
-    // 启用/禁用 profiling（禁用时 beginScope/endScope 为空操作）
-    void setEnabled(bool e) { enabled_ = e; }
-    bool isEnabled() const { return enabled_; }
+    // 启用/禁用 profiling。默认关闭（零开销）；需要 trace 时显式开启。
+    // 关闭后 beginScope/endScope 只做一次原子读，不碰时钟、不加锁、不分配。
+    void setEnabled(bool e) { enabled_.store(e, std::memory_order_relaxed); }
+    bool isEnabled() const { return enabled_.load(std::memory_order_relaxed); }
 
    private:
     Profiler() : epoch_(Clock::now()) {}
 
-    using Clock = std::chrono::high_resolution_clock;
+    // steady_clock 保证单调：high_resolution_clock 在部分平台上可被系统校时
+    // 回拨，会导致 duration_us 为负或时间轴错乱。
+    using Clock = std::chrono::steady_clock;
     using TimePoint = Clock::time_point;
 
     struct ScopeData
@@ -140,13 +205,60 @@ class Profiler
 
     static double toUs(std::chrono::nanoseconds ns) { return std::chrono::duration<double, std::micro>(ns).count(); }
 
+    // 无符号十进制追加。比 snprintf 快一个数量级（后者要解析格式串）。
+    static void appendUnsigned(std::string& out, unsigned long long value)
+    {
+        char buffer[24];
+        char* end = buffer + sizeof(buffer);
+        char* p = end;
+        do
+        {
+            *--p = static_cast<char>('0' + value % 10);
+            value /= 10;
+        } while (value != 0);
+        out.append(p, size_t(end - p));
+    }
+
+    // JSON 字符串转义：引号、反斜杠与控制字符必须转义，否则 trace 文件无效。
+    // 直接追加到目标缓冲，避免每个事件两次临时 std::string 分配。
+    static void appendJsonEscaped(std::string& out, const std::string& in)
+    {
+        for (char c : in)
+        {
+            switch (c)
+            {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+            {
+                const auto byte = static_cast<unsigned char>(c);
+                if (byte < 0x20)
+                {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", int(byte));
+                    out += buf;
+                }
+                else
+                {
+                    out += c;
+                }
+            }
+            }
+        }
+    }
+
     static uint32_t getThreadId()
     {
         // 简化：用 hash
         return static_cast<uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF);
     }
 
-    bool enabled_ = true;
+    std::atomic<bool> enabled_{false};
+    size_t maxEvents_ = 1000000;
+    size_t dropped_ = 0;
     TimePoint epoch_;
     std::vector<TraceEvent> events_;
     mutable std::mutex mutex_;
@@ -163,6 +275,12 @@ class ProfileScope
         else
             active_ = false;
     }
+
+    // 作用域守卫必须不可复制：两份副本各自析构会重复 endScope，
+    // 把外层的 scope 也弹掉。
+    ProfileScope(const ProfileScope&) = delete;
+    ProfileScope& operator=(const ProfileScope&) = delete;
+
     ~ProfileScope()
     {
         if (active_)

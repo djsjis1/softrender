@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <vector>
 #include "softrenderer/math/vec.h"
@@ -40,13 +41,21 @@ struct GBuffer
 
     void resize(int w, int h)
     {
+        // 先在局部构造完再发布：旧实现先改 width/height 再 assign，
+        // 任一 assign 抛异常都会留下“尺寸已变、数据是旧的”的失配状态。
+        if (w < 0 || h < 0)
+            return;
+        const size_t n = size_t(w) * size_t(h);
+        std::vector<Vec3f> newWorldPos(n, Vec3f{0, 0, 0});
+        std::vector<Vec4f> newNormalRough(n, Vec4f{0, 0, 1, 0.5f});
+        std::vector<Vec4f> newAlbedoMetal(n, Vec4f{0.8f, 0.8f, 0.8f, 0});
+        std::vector<float> newDepth(n, 1e9f);
+        worldPos.swap(newWorldPos);
+        normalRough.swap(newNormalRough);
+        albedoMetal.swap(newAlbedoMetal);
+        depth.swap(newDepth);
         width = w;
         height = h;
-        size_t n = size_t(w) * h;
-        worldPos.assign(n, Vec3f{0, 0, 0});
-        normalRough.assign(n, Vec4f{0, 0, 1, 0.5f});
-        albedoMetal.assign(n, Vec4f{0.8f, 0.8f, 0.8f, 0});
-        depth.assign(n, 1e9f);
     }
 
     void clear()
@@ -57,12 +66,17 @@ struct GBuffer
         std::fill(depth.begin(), depth.end(), 1e9f);
     }
 
-    // 写入一个像素的 G-Buffer 数据（带深度测试）
+    // 写入一个像素的 G-Buffer 数据（带深度测试）。
+    //
+    // z 必须是有限值：NaN 与任何值的比较都为假，`z >= depth[idx]` 拦不住它，
+    // 一旦写进去，后续所有像素与 NaN 比较也是假，深度测试会整体失效。
     bool write(int x, int y, float z, const Vec3f &pos,
                const Vec3f &normal, float roughness,
                const Vec3f &albedo, float metallic)
     {
         if (x < 0 || x >= width || y < 0 || y >= height)
+            return false;
+        if (!std::isfinite(z))
             return false;
         size_t idx = size_t(y) * width + x;
         if (z >= depth[idx])

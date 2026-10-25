@@ -63,6 +63,13 @@ struct AnimationClip
     std::vector<AnimationSampler> samplers;
     std::vector<AnimationChannel> channels;
 
+    // 是否已通过加载期校验（时间轴严格递增、非负、长度匹配）。
+    //
+    // 每次采样都重新扫描整条时间轴是 O(n)：1 万关键帧的片段每帧采样会扫 1 万次，
+    // 实测 2 万次采样从 1.4 s 降到几毫秒的差别就在这里。
+    // 由加载器在完成校验后置 true；手工构造的片段保持 false，仍走完整校验。
+    bool validated = false;
+
     // 片段时长 = 所有采样器时间轴的最大值（空片段为 0）
     float duration() const
     {

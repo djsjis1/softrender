@@ -26,6 +26,8 @@ using namespace sr;
 
 int main()
 {
+    // Profiler 默认关闭（零开销），示例需要 trace 才显式打开。
+    sr::Profiler::instance().setEnabled(true);
     SR_PROFILE_SCOPE("demo_ibl_pbr");
     const int W = 900, H = 600;
     Framebuffer fb(W, H);

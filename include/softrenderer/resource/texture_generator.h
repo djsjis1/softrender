@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <vector>
 
 #include "softrenderer/core/image.h"
 #include "softrenderer/math/vec.h"
@@ -13,22 +14,32 @@
 namespace sr::texgen
 {
 
-    // 棋盘格：checks×checks 个格子，两色交替
+    // 棋盘格：checks×checks 个格子，两色交替。
+    // checks>size 时格子不足一格，cell 夹到 1 保证不除零；size/checks 非正
+    // 时返回空图像（valid()==false），由调用方按无效纹理处理。
     inline sr::Image checkerboard(int size = 256, int checks = 8,
                                    Color a = Color(230, 230, 230),
                                    Color b = Color(40, 40, 40))
     {
         sr::Image img;
+        if (size <= 0 || checks <= 0)
+            return img;
         img.width = size;
         img.height = size;
         img.pixels.resize(size_t(size) * size);
-        int cell = size / checks;
+        const int cell = std::max(1, size / checks);
+        // 每列奇偶位预先算好：原来逐像素做 x/cell，2048² 就是四百万次整数除法
+        // 注意：不能写 colOdd(size_t(size))——那是函数声明（most vexing parse）。
+        std::vector<uint8_t> colOdd(static_cast<size_t>(size));
+        for (int x = 0; x < size; ++x)
+            colOdd[size_t(x)] = uint8_t((x / cell) & 1);
         for (int y = 0; y < size; ++y)
+        {
+            const uint8_t rowOdd = uint8_t((y / cell) & 1);
+            Color *dstRow = img.pixels.data() + size_t(y) * size_t(size);
             for (int x = 0; x < size; ++x)
-            {
-                bool odd = ((x / cell) + (y / cell)) & 1;
-                img.pixels[size_t(y) * size + x] = odd ? a : b;
-            }
+                dstRow[x] = (rowOdd ^ colOdd[size_t(x)]) ? a : b;
+        }
         return img;
     }
 
@@ -36,20 +47,29 @@ namespace sr::texgen
     inline sr::Image uvGrid(int size = 256, int lines = 10)
     {
         sr::Image img;
+        if (size <= 0 || lines <= 0)
+            return img;
         img.width = size;
         img.height = size;
         img.pixels.resize(size_t(size) * size);
-        int step = size / lines;
+        const int step = std::max(1, size / lines);
+        // 每列红分量与每行绿分量预先算好：避开逐像素的 x*255/size 除法
+        std::vector<uint8_t> red(static_cast<size_t>(size)), green(static_cast<size_t>(size));
+        std::vector<uint8_t> lineAt(static_cast<size_t>(size));
+        for (int i = 0; i < size; ++i)
+        {
+            red[size_t(i)] = uint8_t(i * 255 / size);
+            green[size_t(i)] = red[size_t(i)];
+            lineAt[size_t(i)] = uint8_t(i % step == 0 ? 1 : 0);
+        }
         for (int y = 0; y < size; ++y)
+        {
+            const bool rowIsLine = lineAt[size_t(y)] != 0;
+            Color *dstRow = img.pixels.data() + size_t(y) * size_t(size);
             for (int x = 0; x < size; ++x)
-            {
-                uint8_t r = uint8_t(x * 255 / size);
-                uint8_t g = uint8_t(y * 255 / size);
-                Color c(r, g, 60);
-                if (x % step == 0 || y % step == 0)
-                    c = Color(20, 20, 20); // 网格线
-                img.pixels[size_t(y) * size + x] = c;
-            }
+                dstRow[x] = (rowIsLine || lineAt[size_t(x)] != 0) ? Color(20, 20, 20)
+                                                                 : Color(red[size_t(x)], green[size_t(y)], 60);
+        }
         return img;
     }
 
@@ -64,10 +84,12 @@ namespace sr::texgen
     inline sr::Image normalMapBumps(int size = 256, int cells = 8, float strength = 1.0f)
     {
         sr::Image img;
+        if (size <= 0 || cells <= 0 || !std::isfinite(strength))
+            return img;
         img.width = size;
         img.height = size;
         img.pixels.resize(size_t(size) * size);
-        float cell = float(size) / cells;
+        float cell = float(size) / float(cells);
         float radius = cell * 0.42f;
         for (int y = 0; y < size; ++y)
             for (int x = 0; x < size; ++x)

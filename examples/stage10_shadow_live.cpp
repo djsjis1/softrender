@@ -37,7 +37,7 @@ struct Object
 int main()
 {
     sr::logInit();
-    SR_LOG_INFO("Stage8 realtime starting");
+    SR_LOG_INFO("Stage10 realtime starting");
     const int W = 900, H = 640;
     const int SM = 1024;
 
@@ -46,7 +46,7 @@ int main()
     Framebuffer shadowDummy(SM, SM);
     Renderer shadowRenderer(SM, SM);
 
-    Win32Window window(W, H, "SoftRenderer Stage8 - Shadow + NormalMap");
+    Win32Window window(W, H, "SoftRenderer Stage10 - Shadow + NormalMap");
 
     Camera cam;
     cam.position = {4.5f, 4.0f, 7.5f};
@@ -195,7 +195,7 @@ int main()
             float fps = frames / std::chrono::duration<float>(now - fpsTime).count();
             char title[160];
             std::snprintf(title, sizeof(title),
-                          "SoftRenderer Stage8 | %.1f FPS | Shadow:%s NormalMap:%s | B/N toggle, WASD+Mouse",
+                          "SoftRenderer Stage10 | %.1f FPS | Shadow:%s NormalMap:%s | B/N toggle, WASD+Mouse",
                           fps, useShadow ? "ON" : "OFF", useNormalMap ? "ON" : "OFF");
             window.setTitle(title);
             frames = 0;

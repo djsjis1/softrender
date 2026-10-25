@@ -132,14 +132,20 @@ sr::io::SceneLoadResult convertModel(const tinygltf::Model &model)
     sr::io::SceneLoadResult result;
 
     // ---- 网格 ----
-    for (const auto &source : model.meshes)
+    // 每个 primitive 展平为一个独立 Mesh；同时记录「源 mesh → primitive 列表」
+    // 的映射，供下面的节点引用。缺了它，第二个及以后的 primitive 会丢掉，
+    // 或让节点错指到别的源 mesh 的第一个 primitive。
+    std::vector<std::vector<int>> meshToPrimitives(model.meshes.size());
+    for (size_t mi = 0; mi < model.meshes.size(); ++mi)
     {
+        const auto &source = model.meshes[mi];
         for (const auto &primitive : source.primitives)
         {
             Mesh mesh;
             std::string error;
             if (!readMeshPrimitive(model, primitive, mesh, error))
                 return fail("mesh: " + error);
+            meshToPrimitives[mi].push_back(int(result.scene.meshes.size()));
             result.scene.meshMaterialIndices.push_back(primitive.material);
             result.scene.meshes.push_back(std::move(mesh));
         }
@@ -184,7 +190,13 @@ sr::io::SceneLoadResult convertModel(const tinygltf::Model &model)
     {
         SceneNode n;
         n.name = node.name;
-        n.meshIndex = node.mesh;
+        if (node.mesh >= 0)
+        {
+            if (size_t(node.mesh) >= meshToPrimitives.size())
+                return fail("node: invalid mesh index");
+            n.meshIndices = meshToPrimitives[size_t(node.mesh)];
+        }
+        n.meshIndex = n.meshIndices.empty() ? -1 : n.meshIndices.front();
         n.skinIndex = node.skin;
         n.children = node.children;
         if (node.translation.size() >= 3)
@@ -332,6 +344,9 @@ sr::io::SceneLoadResult convertModel(const tinygltf::Model &model)
                 return fail(error);
             clip.samplers.push_back(std::move(decoded));
         }
+        // 上面的 decodeSampler 已逐帧校验时间轴（严格递增、非负）与长度关系，
+        // 运行时不必每次采样重扫整条时间轴。
+        clip.validated = true;
         result.scene.animations.push_back(std::move(clip));
     }
 

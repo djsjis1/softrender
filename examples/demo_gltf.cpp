@@ -23,7 +23,6 @@
 #include "softrenderer/io/gltf_loader.h"
 #include "softrenderer/resource/mesh.h"
 #include "softrenderer/render/shader/shaders.h"
-#include "softrenderer/resource/mesh_generator.h"
 
 using namespace sr;
 
@@ -84,6 +83,8 @@ static std::string generateMinimalGltf()
 
 int main()
 {
+    // Profiler 默认关闭（零开销），示例需要 trace 才显式打开。
+    sr::Profiler::instance().setEnabled(true);
     SR_PROFILE_SCOPE("demo_gltf_main");
 
     const int W = 800, H = 600;
@@ -110,13 +111,12 @@ int main()
         SR_PROFILE_SCOPE("load_gltf");
         if (!sr::io::loadGltfMesh("output/test_triangle.gltf", mesh))
         {
-            printf("glTF 加载失败，使用 fallback 网格\n");
-            mesh = sr::meshgen::cube(1.0f);
+            // 不回落成程序化立方体：那会让“glTF 管线坏了”表现为一张正常的方块图，
+            // CI 跑完仍是绿灯，等于把主功能失效伪装成成功。
+            std::printf("glTF 加载失败\n");
+            return 1;
         }
-        else
-        {
-            printf("glTF 加载成功：%zu 顶点, %d 三角形\n", mesh.vertices.size(), mesh.triangleCount());
-        }
+        printf("glTF 加载成功：%zu 顶点, %d 三角形\n", mesh.vertices.size(), mesh.triangleCount());
     }
 
     // ---- 3. 渲染 ----
@@ -147,7 +147,11 @@ int main()
     // ---- 4. 输出 ----
     {
         SR_PROFILE_SCOPE("write_output");
-        sr::io::writeTga("output/demo_gltf.tga", fb);
+        if (!sr::io::writeTga("output/demo_gltf.tga", fb))
+        {
+            std::printf("写文件失败: output/demo_gltf.tga\n");
+            return 1;
+        }
         printf("已生成 output/demo_gltf.tga\n");
     }
 

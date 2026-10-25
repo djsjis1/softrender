@@ -17,16 +17,10 @@
 
 #include "softrenderer/core/framebuffer.h"
 #include "softrenderer/io/image_write.h"
+#include "softrenderer/render/draw2d/blit2d.h"
 #include "softrenderer/render/draw2d/shape2d.h"
 
 using namespace sr;
-
-// 字符 → 颜色 映射（'.' 表示透明像素）
-struct SpritePalette
-{
-    char ch;
-    Color color;
-};
 
 // 勇者 16x20 字符画（每行严格 16 个字符，方便用肉眼对齐）
 // 含义：H=金发 S=皮肤 E=眼睛 C=红斗篷 A=铠甲 P=裤子 B=靴子 M=剑柄 I=剑刃
@@ -53,40 +47,9 @@ const std::vector<std::string> kHero = {
     "..BB....BB......",  //
 };
 
-// 把一个 sprite 画到 fb 上：左下角 (ox,oy)，每个像素放大 scale×scale 块
-void drawSprite(Framebuffer& fb, const std::vector<std::string>& sprite, const std::vector<SpritePalette>& palette,
-                int ox, int oy, int scale)
-{
-    const int w = int(sprite[0].size());
-    const int h = int(sprite.size());
-    for (int row = 0; row < h; ++row)
-    {
-        for (int col = 0; col < w; ++col)
-        {
-            char ch = sprite[row][col];
-            if (ch == '.')
-                continue;  // 透明像素跳过
-
-            // 查调色板；查不到就给品红色，方便发现字符拼写错误
-            Color c = sr::colors::magenta;
-            for (const auto& p : palette)
-                if (p.ch == ch)
-                {
-                    c = p.color;
-                    break;
-                }
-
-            // y 翻转：sprite 第 0 行在最顶部，而画布 y 向上，
-            // 所以顶部行要画在 oy + (h-1-row)*scale 处
-            int px = ox + col * scale;
-            int py = oy + (h - 1 - row) * scale;
-            for (int dy = 0; dy < scale; ++dy)
-                for (int dx = 0; dx < scale; ++dx)
-                    fb.setPixel(px + dx, py + dy, c);
-        }
-    }
-}
-
+// 把一个 sprite 画到 fb 上：左下角 (ox,oy)，每个像素放大 scale×scale 块。
+// 直接用公共的 draw2d::drawCharSprite：它经 plotBlend 写入，scissor 与混合模式
+// 都能生效；本文件旧实现直接 setPixel，属于绕过唯一写入口的重复实现。
 int main()
 {
     const int W = 800, H = 600;
@@ -144,7 +107,7 @@ int main()
     // 影子：脚下一层暗色（没有 alpha 混合，直接画深色块）
     sr::draw2d::fillRect(fb, hx + 20, hy - 6, heroW - 40, 6, Color(20, 14, 20));
 
-    std::vector<SpritePalette> palette = {
+    std::vector<sr::draw2d::SpritePalette> palette = {
         {'H', Color(238, 186, 48)},   // 金发
         {'S', Color(255, 214, 170)},  // 皮肤
         {'E', Color(40, 40, 52)},     // 眼睛
@@ -155,7 +118,7 @@ int main()
         {'M', Color(196, 150, 62)},   // 剑柄
         {'I', Color(224, 232, 244)},  // 剑刃
     };
-    drawSprite(fb, kHero, palette, hx, hy, scale);
+    drawCharSprite(fb, kHero, palette, hx, hy, scale);
 
     // ---------- 6. 导出 PNG ----------
     const std::string path = "output/stage02_sprite.png";

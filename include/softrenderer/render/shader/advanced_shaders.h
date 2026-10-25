@@ -47,7 +47,7 @@ struct FinalShader : SurfaceShader
         out.worldPos = model.transformPoint(in.position);
         out.normal = toWorldNormal(in.normal);
         // 切线用 model 的线性部分变换（无缩放时与逆转置一致）
-        out.tangent = model.transformDir(in.tangent).normalized();
+        out.tangent = model.transformDir(in.tangent).normalizedOr({1, 0, 0});
         out.uv = in.uv;
         return mvp * Vec4f(in.position, 1.0f);
     }
@@ -55,25 +55,27 @@ struct FinalShader : SurfaceShader
     bool fragment(const Varyings &v, Vec3f &color) override
     {
         // ---- 1. 确定着色法线（可选法线贴图）----
-        Vec3f N = v.normal.normalized();
+        Vec3f N = v.normal.normalizedOr({0, 0, 1});
         if (normalMap && normalMap->valid())
         {
             // 构建 TBN：把切线空间法线转到世界空间
             Vec3f T = v.tangent;
-            T = (T - N * dot(N, T)).normalized(); // Gram-Schmidt 正交化
+            T = (T - N * dot(N, T)).normalizedOr({1, 0, 0}); // Gram-Schmidt 正交化
             Vec3f B = cross(N, T);
             Vec3f enc = normalMap->sampleBilinear(v.uv.x, v.uv.y);
             // 解码 [0,1] -> [-1,1]
             Vec3f nt{enc.x * 2.0f - 1.0f, enc.y * 2.0f - 1.0f, enc.z * 2.0f - 1.0f};
-            N = (T * nt.x + B * nt.y + N * nt.z).normalized();
+            N = (T * nt.x + B * nt.y + N * nt.z).normalizedOr(N);
         }
 
         // ---- 2. Blinn-Phong 各项 ----
         Vec3f albedo = sampleAlbedo(v.uv);
         Vec3f L = lightDir;
+        if (!(L.lengthSq() > 0.0f) || !std::isfinite(L.lengthSq()))
+            L = {0, 1, 0};
         float diff = std::max(0.0f, dot(N, L));
-        Vec3f View = (cameraPos - v.worldPos).normalized();
-        Vec3f Hh = (L + View).normalized();
+        Vec3f View = (cameraPos - v.worldPos).normalizedOr(N);
+        Vec3f Hh = (L + View).normalizedOr(N);
         float spec = (diff > 0.0f)
                          ? std::pow(std::max(0.0f, dot(N, Hh)), shininess)
                          : 0.0f;

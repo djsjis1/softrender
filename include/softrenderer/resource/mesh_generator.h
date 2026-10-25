@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <cmath>
 #include "softrenderer/resource/mesh.h"
 
@@ -66,6 +67,11 @@ namespace sr::meshgen
     inline Mesh sphere(float radius = 1.0f, int segments = 32, int rings = 16)
     {
         Mesh mesh;
+        // 细分不足时无法构成闭合球面（segments<3 会得到退化三角形，
+        // rings<2 时两极重合），夹到最小可用值而不是除零。
+        segments = std::max(3, segments);
+        rings = std::max(2, rings);
+        radius = std::isfinite(radius) ? radius : 1.0f;
         const float PI = 3.14159265358979f;
         // 顶点：从北极 (v=1) 到南极 (v=0) 逐圈生成
         for (int r = 0; r <= rings; ++r)
@@ -84,14 +90,21 @@ namespace sr::meshgen
                 mesh.vertices.push_back(v);
             }
         }
-        // 索引：每个网格单元两三角形
+        // 索引：每个网格单元两三角形。
+        //
+        // 绕序必须与向外法线一致（默认 cullBackface 依赖屏幕空间有向面积），
+        // 即 cross(p1-p0, p2-p0) 指向球外。两极处的三角形有一个顶点与本行
+        // 相邻顶点重合，面积为零，直接跳过以免产生无效几何。
         for (int r = 0; r < rings; ++r)
         {
             for (int s = 0; s < segments; ++s)
             {
                 int a = r * (segments + 1) + s;
                 int b = a + segments + 1;
-                mesh.indices.insert(mesh.indices.end(), {a, b, a + 1, a + 1, b, b + 1});
+                if (r > 0)
+                    mesh.indices.insert(mesh.indices.end(), {a, a + 1, b});
+                if (r + 1 < rings)
+                    mesh.indices.insert(mesh.indices.end(), {a + 1, b + 1, b});
             }
         }
         return mesh;
@@ -124,6 +137,7 @@ namespace sr::meshgen
     inline Mesh planeGrid(float size = 1.0f, int div = 20, float uvRepeat = 1.0f)
     {
         Mesh mesh;
+        div = std::max(1, div);
         const float h = size * 0.5f;
         for (int z = 0; z <= div; ++z)
             for (int x = 0; x <= div; ++x)

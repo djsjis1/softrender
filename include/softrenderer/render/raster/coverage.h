@@ -51,7 +51,9 @@ class TriangleCoverage
             // y 向上：顶边向左、左边向下；其他边在整数域减一排除等号。
             const bool inclusive = dy < 0 || (dy == 0 && dx < 0);
             result.edges_[i] = {-dy, dx, dy * x[i] - dx * y[i] - (inclusive ? 0 : 1)};
+            result.bias_[i] = inclusive ? 0 : 1;
         }
+        result.area_ = area * sign;
         result.minX_ = *std::min_element(x.begin(), x.end());
         result.maxX_ = *std::max_element(x.begin(), x.end());
         result.minY_ = *std::min_element(y.begin(), y.end());
@@ -82,7 +84,32 @@ class TriangleCoverage
         int64_t qx = 0, qy = 0;
         return quantize(x, qx) && quantize(y, qy) && contains(evaluate(qx, qy));
     }
+
+    // 采样点命中时输出扣除 top-left 偏置的边函数值，未命中（或坐标非有限）返回 false。
+    // 调用方用 out[i] / area() 就是重心坐标，不必再做一次浮点边函数——
+    // 两个数学上等价的算法各算一遍是 MSAA 管线的主要浪费（实测占一半开销）。
+    bool sampleInside(float x, float y, Values& out) const
+    {
+        int64_t qx = 0, qy = 0;
+        if (!quantize(x, qx) || !quantize(y, qy))
+            return false;
+        const Values values = evaluate(qx, qy);
+        if (!contains(values))
+            return false;
+        out = unbiased(values);
+        return true;
+    }
     static bool contains(const Values& values) { return (values[0] | values[1] | values[2]) >= 0; }
+
+    // 三边无偏边函数之和恒为此值（量化单位），是重心坐标的分母。
+    int64_t area() const { return area_; }
+
+    // 扣除 top-left 规则的 -1 偏置。覆盖归属需要偏置，属性插值不需要：
+    // 直接用带偏置的值算重心坐标会把这份偏置换算进深度与 UV。
+    Values unbiased(const Values& values) const
+    {
+        return {values[0] + bias_[0], values[1] + bias_[1], values[2] + bias_[2]};
+    }
     const std::array<Edge, 3>& edges() const { return edges_; }
     // 扫描游标仅用于 bounds() 返回的有限矩形（允许行/列结束后的一次步进）。
     // 不得对调用方构造的任意 Values 或无限次累计调用这些快速路径。
@@ -116,6 +143,8 @@ class TriangleCoverage
         return values;
     }
     std::array<Edge, 3> edges_{};
+    std::array<int64_t, 3> bias_{}; // 每边在 c 上附加的 top-left 偏置（0 或 1）
+    int64_t area_ = 0;
     int64_t minX_ = 0, maxX_ = 0, minY_ = 0, maxY_ = 0;
 };
 }  // namespace sr

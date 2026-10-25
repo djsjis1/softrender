@@ -22,12 +22,14 @@ namespace sr
 inline Vec3f blinnPhong(const SurfaceShader &s, const Vec3f &n, const Vec3f &p,
                         const Vec3f &albedo)
 {
-    Vec3f N = n.normalized();
+    // 法线/视向量可能退化（零法线、相机与片元重合），用 normalizedOr 兜底：
+    // 正常输入结果与 normalized() 一致，退化输入不会触发 Debug 断言或传播 NaN。
+    Vec3f N = n.normalizedOr({0, 0, 1});
     Vec3f L = s.lightDir; // 已单位化
     float diff = std::max(0.0f, dot(N, L));
 
-    Vec3f V = (s.cameraPos - p).normalized(); // 指向相机
-    Vec3f Hh = (L + V).normalized();          // 半程向量
+    Vec3f V = (s.cameraPos - p).normalizedOr({0, 0, 1}); // 指向相机
+    Vec3f Hh = (L + V).normalizedOr(N);                  // 半程向量
     float spec = 0.0f;
     if (diff > 0.0f)
         spec = std::pow(std::max(0.0f, dot(N, Hh)), s.shininess);
@@ -57,6 +59,8 @@ struct FlatShader : SurfaceShader
         Vec3f faceN = cross(b.worldPos - a.worldPos, c.worldPos - a.worldPos);
         if (faceN.lengthSq() > 1e-12f)
             faceN = faceN.normalized();
+        else
+            faceN = Vec3f{0, 0, 1}; // 退化三角形（面积为零）给一个稳定方向
         Vec3f center = (a.worldPos + b.worldPos + c.worldPos) * (1.0f / 3.0f);
         Vec3f albedo = sampleAlbedo(a.uv);
         flatColor_ = blinnPhong(*this, faceN, center, albedo);

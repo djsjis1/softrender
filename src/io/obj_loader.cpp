@@ -1,12 +1,23 @@
 #include "softrenderer/io/obj_loader.h"
 
+#include <cmath>
+#include <limits>
 #include <unordered_map>
+#include <utility>
 
 #include "tiny_obj_loader.h"
 
 namespace sr::io {
 
-// 加载 OBJ 文件到 Mesh。接口保持不变。
+// 加载 OBJ 文件到 Mesh。
+//
+// 【为何自己再查一次索引上界】tiny_obj_loader 对正索引只做 -1 偏移，越界仅
+// 追加一条 warning 并返回成功（见 third/tiny_obj_loader.h 中 `Vertex indices
+// out of bounds` 分支）。若直接把它导出的索引当有效索引用，`f 1 2 99` 这类
+// 文件会在这里越界读 attrib 数组。因此包装层必须独立校验，不能依赖上游。
+//
+// 【失败不改 out】先在局部 Mesh 上构造，全部成功后才移动赋值：失败时调用方
+// 传进来的旧数据保持原样，不会拿到半成品。
 bool loadObjMesh(const std::string& path, Mesh& out)
 {
     tinyobj::ObjReaderConfig config;
@@ -21,8 +32,14 @@ bool loadObjMesh(const std::string& path, Mesh& out)
     const auto& attrib = reader.GetAttrib();
     const auto& shapes = reader.GetShapes();
 
-    out.vertices.clear();
-    out.indices.clear();
+    // 三个独立数组必须能整除各自的元组大小，否则下面的除法计数不可信。
+    if (attrib.vertices.size() % 3 != 0 || attrib.normals.size() % 3 != 0 || attrib.texcoords.size() % 2 != 0)
+        return false;
+    const int vertexCount = static_cast<int>(attrib.vertices.size() / 3);
+    const int normalCount = static_cast<int>(attrib.normals.size() / 3);
+    const int texcoordCount = static_cast<int>(attrib.texcoords.size() / 2);
+
+    Mesh loaded;
 
     // OBJ 的索引把 位置/UV/法线 拆成三个独立数组，同一个 (v,vt,vn)
     // 组合可能被多个面共享。这里按组合键去重，既减少重复顶点，
@@ -45,29 +62,52 @@ bool loadObjMesh(const std::string& path, Mesh& out)
     };
     std::unordered_map<IndexKey, int, IndexKeyHash> indexCache;
 
+    // 预留容量：50k 面 / 150k 索引的模型不预留会经历多次扩容与 rehash，
+    // 实测这一项就占了解析耗时的可观部分。去重后顶点数必然 ≤ 索引数。
+    size_t totalIndices = 0;
+    for (const auto& shape : shapes)
+        totalIndices += shape.mesh.indices.size();
+    const size_t expectedVertices = std::min(totalIndices, size_t(vertexCount));
+    indexCache.reserve(expectedVertices);
+    loaded.indices.reserve(totalIndices);
+    loaded.vertices.reserve(expectedVertices);
+
     for (const auto& shape : shapes)
     {
         const auto& mesh = shape.mesh;
+
+        // 索引数量不是 3 的倍数时，后续按三角形访问会越界。
+        if (mesh.indices.size() % 3 != 0)
+            return false;
 
         // 逐索引去重后生成顶点
         for (size_t i = 0; i < mesh.indices.size(); ++i)
         {
             const auto& idx = mesh.indices[i];
+
+            // 位置索引必需且必须在范围内；法线/UV 索引可为负（未提供）。
+            if (idx.vertex_index < 0 || idx.vertex_index >= vertexCount || idx.normal_index >= normalCount ||
+                idx.texcoord_index >= texcoordCount)
+                return false;
+
             IndexKey key{idx.vertex_index, idx.texcoord_index, idx.normal_index};
 
             auto it = indexCache.find(key);
             if (it != indexCache.end())
             {
-                out.indices.push_back(it->second);
+                loaded.indices.push_back(it->second);
                 continue;
             }
+
+            // 目标索引是 int：顶点数必须能落在 int 范围内。
+            if (loaded.vertices.size() >= size_t(std::numeric_limits<int>::max()))
+                return false;
 
             Vertex v;
 
             // 位置
-            if (idx.vertex_index >= 0)
             {
-                int vi = idx.vertex_index;
+                const int vi = idx.vertex_index;
                 v.position = {attrib.vertices[3 * vi + 0], attrib.vertices[3 * vi + 1], attrib.vertices[3 * vi + 2]};
             }
 
@@ -85,35 +125,47 @@ bool loadObjMesh(const std::string& path, Mesh& out)
                 v.uv = {attrib.texcoords[2 * ti + 0], attrib.texcoords[2 * ti + 1]};
             }
 
-            indexCache.emplace(key, static_cast<int>(out.vertices.size()));
-            out.indices.push_back(static_cast<int>(out.vertices.size()));
-            out.vertices.push_back(v);
+            indexCache.emplace(key, static_cast<int>(loaded.vertices.size()));
+            loaded.indices.push_back(static_cast<int>(loaded.vertices.size()));
+
+            // 文本里的 nan / inf 能通过 strtod，会原样进入 Mesh：非法位置会让
+            // 包围盒、平滑法线、蒙皮结果全部变 NaN，必须在入口拒绝。
+            if (!std::isfinite(v.position.x) || !std::isfinite(v.position.y) || !std::isfinite(v.position.z) ||
+                !std::isfinite(v.normal.x) || !std::isfinite(v.normal.y) || !std::isfinite(v.normal.z) ||
+                !std::isfinite(v.uv.x) || !std::isfinite(v.uv.y))
+                return false;
+
+            loaded.vertices.push_back(v);
         }
     }
 
     // 如果没有法线，计算平滑法线（顶点已去重，累加会在共享顶点上合并）
-    if (attrib.normals.empty() && !out.vertices.empty())
+    if (attrib.normals.empty() && !loaded.vertices.empty())
     {
-        for (auto& v : out.vertices)
+        for (auto& v : loaded.vertices)
             v.normal = {0, 0, 0};
-        for (size_t i = 0; i + 2 < out.indices.size(); i += 3)
+        for (size_t i = 0; i + 2 < loaded.indices.size(); i += 3)
         {
-            Vertex& a = out.vertices[out.indices[i]];
-            Vertex& b = out.vertices[out.indices[i + 1]];
-            Vertex& c = out.vertices[out.indices[i + 2]];
+            Vertex& a = loaded.vertices[loaded.indices[i]];
+            Vertex& b = loaded.vertices[loaded.indices[i + 1]];
+            Vertex& c = loaded.vertices[loaded.indices[i + 2]];
             Vec3f n = cross(b.position - a.position, c.position - a.position);
             a.normal = a.normal + n;
             b.normal = b.normal + n;
             c.normal = c.normal + n;
         }
-        for (auto& v : out.vertices)
+        for (auto& v : loaded.vertices)
             if (v.normal.lengthSq() > 1e-12f)
                 v.normal = v.normal.normalized();
     }
 
-    computeTangents(out);  // 法线就绪后统一算切线
+    computeTangents(loaded);  // 法线就绪后统一算切线
 
-    return !out.vertices.empty();
+    if (loaded.vertices.empty())
+        return false;
+
+    out = std::move(loaded);
+    return true;
 }
 
 }  // namespace objloader

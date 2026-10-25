@@ -38,7 +38,7 @@ int main()
     Framebuffer fb(W, H);
     Renderer renderer(W, H);
 
-    Win32Window window(W, H, "SoftRenderer Stage6");
+    Win32Window window(W, H, "SoftRenderer Stage08");
 
     Camera cam;
     cam.position = {0, 2.0f, 6.0f};
@@ -169,7 +169,7 @@ int main()
             float fps = frames / std::chrono::duration<float>(now - fpsTime).count();
             char title[128];
             std::snprintf(title, sizeof(title),
-                          "SoftRenderer Stage6 | %s | %.1f FPS | WASD+Mouse, 1/2/3 shader",
+                          "SoftRenderer Stage08 | %s | %.1f FPS | WASD+Mouse, 1/2/3 shader",
                           shaderNames[current], fps);
             window.setTitle(title);
             frames = 0;

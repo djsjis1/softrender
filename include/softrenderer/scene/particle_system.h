@@ -1,4 +1,6 @@
 #pragma once
+#include <algorithm>
+#include <cstddef>
 #include <vector>
 #include <cmath>
 #include <random>
@@ -22,8 +24,9 @@ struct Particle
     Vec3f position;
     Vec3f velocity;
     Color color;
-    float size;
-    float life; // 剩余生命 [0, maxLife]
+    float size;      // 当前尺寸
+    float sizeStart; // 出生时的尺寸，用于随生命衰减
+    float life;      // 剩余生命 [0, maxLife]
     float maxLife;
     bool alive;
 };
@@ -51,7 +54,7 @@ class ParticleSystem
 public:
     explicit ParticleSystem(const EmitterConfig &cfg = {}) : config_(cfg)
     {
-        particles_.resize(config_.maxParticles);
+        particles_.resize(capacity());
         for (auto &p : particles_)
             p.alive = false;
     }
@@ -59,9 +62,28 @@ public:
     // 更新所有粒子（dt = 帧时间）
     void update(float dt)
     {
+        if (!std::isfinite(dt) || dt <= 0.0f)
+            return;
+
+        // maxParticles 可在运行期通过 config() 修改：容量必须以当前配置为准，
+        // 否则新配置不生效（旧实现只在构造时 resize 一次）。
+        if (particles_.size() != capacity())
+        {
+            particles_.resize(capacity());
+            for (auto &p : particles_)
+                p.alive = false;
+            emitAccum_ = 0.0f;
+            aliveCount_ = 0;
+            freeScan_ = 0;
+        }
+
         emitAccum_ += config_.rate * dt;
-        int toEmit = static_cast<int>(emitAccum_);
-        emitAccum_ -= toEmit;
+        // 累加器上限：超大 rate 或长时间暂停不应积攒出无限突发。
+        emitAccum_ = std::min(emitAccum_, float(particles_.size()));
+        // 发射数不得超过剩余空槽：否则交回 emit() 去扫满池（O(n) 无果）。
+        const size_t remaining = particles_.size() - aliveCount_;
+        int toEmit = int(std::clamp(emitAccum_, 0.0f, float(remaining)));
+        emitAccum_ -= float(toEmit);
 
         // 发射新粒子
         for (int i = 0; i < toEmit; ++i)
@@ -76,6 +98,7 @@ public:
             if (p.life <= 0)
             {
                 p.alive = false;
+                --aliveCount_;
                 continue;
             }
             p.velocity = p.velocity + config_.gravity * dt;
@@ -83,8 +106,8 @@ public:
             // 颜色插值
             float t = 1.0f - p.life / p.maxLife;
             p.color = Color::lerp(config_.colorStart, config_.colorEnd, t);
-            // 尺寸随生命缩小
-            p.size = config_.sizeMax * (p.life / p.maxLife);
+            // 尺寸随生命缩小：以出生尺寸为基准，而不是永远从 sizeMax 开始
+            p.size = p.sizeStart * (p.life / p.maxLife);
         }
     }
 
@@ -111,18 +134,31 @@ public:
     EmitterConfig &config() { return config_; }
 
 private:
+    // 当前配置下的粒子槽位数（maxParticles 为负时按 0 处理）。
+    size_t capacity() const { return size_t(std::max(0, config_.maxParticles)); }
+
     void emit()
     {
-        // 找一个空闲槽
-        for (auto &p : particles_)
+        if (particles_.empty())
+            return;
+        // 从上次结束的位置继续扫描，而不是每次从第 0 个元素开始：
+        // 池子快满时后者会让整帧发射退化成 O(n²)。配合 update() 对
+        // 发射数的上限（不超过剩余空槽），调用方保证能找到空位。
+        const size_t n = particles_.size();
+        for (size_t k = 0; k < n; ++k)
         {
+            const size_t index = (freeScan_ + k) % n;
+            Particle &p = particles_[index];
             if (p.alive)
                 continue;
+            freeScan_ = (index + 1) % n;
             p.alive = true;
+            ++aliveCount_;
             p.position = config_.position;
             // 随机方向（锥形扩散）
             std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-            Vec3f dir = config_.direction.normalized();
+            // 零方向向量归一化会得到 NaN：退回 +Y。
+            Vec3f dir = config_.direction.lengthSq() > 1e-12f ? config_.direction.normalized() : Vec3f{0, 1, 0};
             Vec3f right = std::abs(dir.y) < 0.99f ? cross(dir, Vec3f{0, 1, 0}).normalized() : cross(dir, Vec3f{1, 0, 0}).normalized();
             Vec3f up = cross(right, dir);
             float angle = dist(rng_) * config_.spread;
@@ -133,7 +169,10 @@ private:
             p.velocity = vel * spd;
             p.maxLife = config_.lifeMin + (config_.lifeMax - config_.lifeMin) * (dist(rng_) * 0.5f + 0.5f);
             p.life = p.maxLife;
-            p.size = config_.sizeMax;
+            // 出生尺寸在 [sizeMin, sizeMax] 内随机：sizeMin 不再是被忽略的配置项。
+            const float u = dist(rng_) * 0.5f + 0.5f;
+            p.sizeStart = config_.sizeMin + (config_.sizeMax - config_.sizeMin) * u;
+            p.size = p.sizeStart;
             p.color = config_.colorStart;
             return;
         }
@@ -142,6 +181,9 @@ private:
     EmitterConfig config_;
     std::vector<Particle> particles_;
     float emitAccum_ = 0;
+    // 存活数避免每帧重数一遍；空闲扫描游标避免每次发射从头找空槽。
+    size_t aliveCount_ = 0;
+    size_t freeScan_ = 0;
     std::mt19937 rng_{42};
 };
 

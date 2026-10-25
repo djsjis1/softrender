@@ -21,7 +21,17 @@ namespace sr
 struct SceneNode
 {
     std::string name;
-    int meshIndex = -1; // 引用 SceneAsset::meshes，-1 = 不绘制
+
+    // 该节点引用的全部网格索引（引用 SceneAsset::meshes）。
+    //
+    // glTF 的一个 mesh 可含多个 primitive，加载时每个 primitive 展平为一个
+    // 独立 Mesh，因此一个节点可能对应多个网格。空 = 不绘制。
+    std::vector<int> meshIndices;
+
+    // meshIndices 的首元素快捷值，-1 = 不绘制。
+    // 保留它是为了不破坏只关心单网格的调用方；多 primitive 时须读 meshIndices。
+    int meshIndex = -1;
+
     int skinIndex = -1; // 引用 SceneAsset::skins，-1 = 不蒙皮
     std::vector<int> children;
 

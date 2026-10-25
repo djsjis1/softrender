@@ -61,9 +61,13 @@ struct Rect2
         return o.x >= x && o.y >= y && o.right() <= right() && o.top() <= top();
     }
 
-    // 相交判定：两轴投影均重叠才相交（分离轴思想）
+    // 相交判定：两轴投影均重叠才相交（分离轴思想）。
+    // 空矩形（w 或 h ≤ 0）一律不相交：否则 (5,5,0,0) 这类零面积矩形
+    // 会被判为与包含它的矩形相交，命中测试与裁剪会凭空产生结果。
     bool intersects(const Rect2& o) const
     {
+        if (isEmpty() || o.isEmpty())
+            return false;
         return x < o.right() && o.x < right() && y < o.top() && o.y < top();
     }
 

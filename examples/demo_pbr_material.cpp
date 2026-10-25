@@ -142,6 +142,8 @@ static std::string generatePbrGltf()
 
 int main()
 {
+    // Profiler 默认关闭（零开销），示例需要 trace 才显式打开。
+    sr::Profiler::instance().setEnabled(true);
     SR_PROFILE_SCOPE("demo_pbr_material");
     const int W = 900, H = 600;
     Framebuffer fb(W, H);

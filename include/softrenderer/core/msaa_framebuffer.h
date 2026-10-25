@@ -85,6 +85,24 @@ class MSAAFramebuffer
         samples_[(size_t(y) * width_ + x) * N + sampleIdx] = c;
     }
 
+    // 深度测试与颜色写入合并。
+    //
+    // 光栅化热路径里 testDepth() + setSample() 会各自做一遍边界检查
+    // 和一次索引乘法，而两者用的是同一个样本索引。合并后每样本只算一次，
+    // 语义不变：仍然只有深度通过才写颜色（不变量：颜色与深度同分支提交）。
+    bool testAndWriteSample(int x, int y, int sampleIdx, float z, Color c)
+    {
+        if (x < 0 || x >= width_ || y < 0 || y >= height_ || sampleIdx < 0 || sampleIdx >= N || !std::isfinite(z))
+            return false;
+        const size_t index = (size_t(y) * width_ + x) * N + sampleIdx;
+        float& slot = depth_[index];
+        if (!(z < slot))
+            return false;
+        slot = z;
+        samples_[index] = c;
+        return true;
+    }
+
     // 统计某像素被覆盖的样本数
     int coverageCount(int x, int y) const
     {

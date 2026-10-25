@@ -38,12 +38,38 @@
 // 输入：键盘用 GetAsyncKeyState 在主循环轮询；鼠标用 WndProc
 //   累积左键拖拽的位移，供相机 look 使用。
 // ============================================================
+// UTF-8 → UTF-16。旧写法 std::wstring(title.begin(), title.end()) 只是把
+// 每个字节当成一个 wchar_t，中文标题会变成乱码。
+inline std::wstring utf8ToWide(const std::string &text)
+{
+    if (text.empty())
+        return {};
+    const int length = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), int(text.size()), nullptr, 0);
+    if (length <= 0)
+        return {};
+    std::wstring wide(size_t(length), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, text.c_str(), int(text.size()), wide.data(), length);
+    return wide;
+}
+
+// DIB 后备缓冲字节数；尺寸非法时为 0，避免 size_t(负数) 静默膨胀。
+inline size_t dibByteCount(int w, int h)
+{
+    return (w > 0 && h > 0) ? size_t(w) * size_t(h) * 4 : 0;
+}
+
 class Win32Window
 {
 public:
     Win32Window(int width, int height, const std::string &title)
-        : width_(width), height_(height), bgra_(size_t(width) * height * 4)
+        : width_(width), height_(height), bgra_(dibByteCount(width, height))
     {
+        if (width <= 0 || height <= 0)
+        {
+            shouldClose_ = true;
+            return;
+        }
+
         HINSTANCE hInst = GetModuleHandleW(nullptr);
         WNDCLASSW wc = {};
         wc.lpfnWndProc = &Win32Window::wndProcThunk;
@@ -56,10 +82,16 @@ public:
         RECT rc{0, 0, width, height};
         AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
 
-        std::wstring wtitle(title.begin(), title.end());
+        std::wstring wtitle = utf8ToWide(title);
         hwnd_ = CreateWindowW(wc.lpszClassName, wtitle.c_str(), WS_OVERLAPPEDWINDOW,
                               CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left,
                               rc.bottom - rc.top, nullptr, nullptr, hInst, this);
+        // 创建失败时后续 ShowWindow/GetDC 都不成立（GetDC(nullptr) 取的不是窗口 DC）。
+        if (!hwnd_)
+        {
+            shouldClose_ = true;
+            return;
+        }
         ShowWindow(hwnd_, SW_SHOW);
         hdc_ = GetDC(hwnd_);
 
@@ -71,6 +103,13 @@ public:
         bmi_.bmiHeader.biBitCount = 32;
         bmi_.bmiHeader.biCompression = BI_RGB;
     }
+
+    // 本类持有 HWND/HDC，且 WndProc 通过 GWLP_USERDATA 回指 this：
+    // 复制会产生两个对象释放同一组句柄，移动会让窗口过程拿到失效指针。
+    Win32Window(const Win32Window &) = delete;
+    Win32Window &operator=(const Win32Window &) = delete;
+    Win32Window(Win32Window &&) = delete;
+    Win32Window &operator=(Win32Window &&) = delete;
 
     ~Win32Window()
     {
@@ -99,6 +138,9 @@ public:
     // 把 framebuffer 贴到窗口
     void present(const sr::Framebuffer &fb)
     {
+        // 下面的循环按窗口尺寸读取源像素：源帧缓冲更小时会越界读。
+        if (!hdc_ || fb.width() < width_ || fb.height() < height_)
+            return;
         const sr::Color *src = fb.data();
         size_t n = size_t(width_) * height_;
         for (size_t i = 0; i < n; ++i)
@@ -115,7 +157,9 @@ public:
 
     void setTitle(const std::string &title)
     {
-        std::wstring w(title.begin(), title.end());
+        if (!hwnd_)
+            return;
+        std::wstring w = utf8ToWide(title);
         SetWindowTextW(hwnd_, w.c_str());
     }
 

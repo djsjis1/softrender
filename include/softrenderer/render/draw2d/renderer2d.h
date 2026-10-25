@@ -252,10 +252,45 @@ class Renderer2D
 
     void rectGradient(float x, float y, float w, float h, Color c0, Color c1, bool horizontal = false)
     {
-        if (!fb_ || !axisAligned())
+        if (!fb_ || w <= 0.0f || h <= 0.0f)
+            return;
+        if (!axisAligned())
         {
-            // 有旋转时退化为纯色（渐变方向在旋转下无良定义）
-            fillRect(x, y, w, h);
+            // 旋转/斜切：逐像素逆映射回用户空间取渐变参数。
+            // 旧实现直接退化成纯色（c1 被静默丢弃），与 image()/texture() 的行为不一致。
+            const Vec2f corners[4] = {mapPoint(x, y), mapPoint(x + w, y), mapPoint(x + w, y + h), mapPoint(x, y + h)};
+            float minXf = corners[0].x, maxXf = corners[0].x, minYf = corners[0].y, maxYf = corners[0].y;
+            for (const Vec2f& c : corners)
+            {
+                minXf = std::min(minXf, c.x);
+                maxXf = std::max(maxXf, c.x);
+                minYf = std::min(minYf, c.y);
+                maxYf = std::max(maxYf, c.y);
+            }
+            if (!std::isfinite(minXf) || !std::isfinite(maxXf) || !std::isfinite(minYf) || !std::isfinite(maxYf))
+                return;
+            auto* cl = clip();
+            int px0 = std::max(0, int(std::floor(minXf)));
+            int px1 = std::min(fb_->width(), int(std::ceil(maxXf)));
+            int py0 = std::max(0, int(std::floor(minYf)));
+            int py1 = std::min(fb_->height(), int(std::ceil(maxYf)));
+            if (cl)
+            {
+                px0 = std::max(px0, cl->x0);
+                px1 = std::min(px1, cl->x1);
+                py0 = std::max(py0, cl->y0);
+                py1 = std::min(py1, cl->y1);
+            }
+            const Mat3 inv = deviceTransform().inversed();
+            for (int py = py0; py < py1; ++py)
+                for (int px = px0; px < px1; ++px)
+                {
+                    const Vec2f u = inv.transformPoint({float(px) + 0.5f, float(py) + 0.5f});
+                    if (u.x < x || u.x >= x + w || u.y < y || u.y >= y + h)
+                        continue;
+                    const float t = horizontal ? (u.x - x) / w : (u.y - y) / h;
+                    sr::draw2d::plotBlend(*fb_, px, py, Color::lerp(c0, c1, t), blend, cl);
+                }
             return;
         }
         Vec2f p0 = mapPoint(x, y), p1 = mapPoint(x + w, y + h);
@@ -378,8 +413,16 @@ class Renderer2D
 
     void texture(const Texture& tex, float x, float y, float w, float h)
     {
-        if (!fb_ || !axisAligned())
+        if (!fb_ || !tex.valid() || w <= 0.0f || h <= 0.0f)
             return;
+        if (!axisAligned())
+        {
+            // 旋转/斜切：走逆映射的通用四边形路径，而不是“静默不画”。
+            // 与 image() 的行为保持一致（那边一直支持任意变换）。
+            Mat3 xf = deviceTransform() * Mat3::translate(x, y) * Mat3::scale(w, h);
+            sr::draw2d::blitTextureTransformed(*fb_, tex, xf, color, bilinear, blend, clip());
+            return;
+        }
         Vec2f p0 = mapPoint(x, y), p1 = mapPoint(x + w, y + h);
         int X = (int)std::floor(std::min(p0.x, p1.x));
         int Y = (int)std::floor(std::min(p0.y, p1.y));
@@ -427,7 +470,8 @@ class Renderer2D
         if (!fb_ || scale <= 0.0f)
             return;
         const float advance = 6.0f * scale; // 5 列 + 1 列间距
-        const Mat3 d = deviceTransform(); // 一次绘制只算一次设备矩阵
+        const Mat3 d = deviceTransform();   // 一次绘制只算一次设备矩阵
+        const bool aligned = axisAligned();
         float cx = x;
         for (char ch : str)
         {
@@ -442,10 +486,49 @@ class Renderer2D
                 cx += advance;
                 continue;
             }
-            for (int r = 0; r < 7; ++r)
-                for (int c = 0; c < 5; ++c)
-                    if (rows[r][c] == 'X')
-                        fillUserRectMat(d, cx + c * scale, y + (6 - r) * scale, scale, scale);
+
+            // 轴对齐快速路径：整个字符只做一次包围盒映射，然后逐像素查字模。
+            // 旧实现对每个亮点都调一次 fillUserRectMat（一次 4 角变换 + 裁剪），
+            // 一个字符 15~20 个亮点就是 15~20 次重复工作。
+            const Vec2f p0 = mapPoint(cx, y);
+            const Vec2f p1 = mapPoint(cx + 5.0f * scale, y + 7.0f * scale);
+            const bool fastPath = aligned && p1.x > p0.x && p1.y > p0.y;
+            if (fastPath)
+            {
+                int X0 = 0, Y0 = 0, X1 = 0, Y1 = 0;
+                const long long minX = (long long)std::floor(p0.x);
+                const long long minY = (long long)std::floor(p0.y);
+                if (sr::draw2d::clipTargetRect(*fb_, clip(), minX, minY, (long long)std::ceil(p1.x) - minX,
+                                               (long long)std::ceil(p1.y) - minY, X0, Y0, X1, Y1))
+                {
+                    const float devW = 5.0f * scale;
+                    const float devH = 7.0f * scale;
+                    const float pixelsPerUnitX = (p1.x - p0.x) / devW;
+                    const float pixelsPerUnitY = (p1.y - p0.y) / devH;
+                    for (int py = Y0; py < Y1; ++py)
+                        for (int px = X0; px < X1; ++px)
+                        {
+                            const float ux = (float(px) + 0.5f - p0.x) / pixelsPerUnitX;
+                            const float uy = (float(py) + 0.5f - p0.y) / pixelsPerUnitY;
+                            if (ux < 0.0f || ux >= devW || uy < 0.0f || uy >= devH)
+                                continue;
+                            const int col = int(ux / scale);
+                            const int rowFromBottom = int(uy / scale);
+                            if (col < 0 || col >= 5 || rowFromBottom < 0 || rowFromBottom >= 7)
+                                continue;
+                            // 字模第 0 行在顶部，用户空间 y 向上
+                            if (rows[6 - rowFromBottom][col] == 'X')
+                                plotBlend(*fb_, px, py, color, blend, clip());
+                        }
+                }
+            }
+            else
+            {
+                for (int r = 0; r < 7; ++r)
+                    for (int c = 0; c < 5; ++c)
+                        if (rows[r][c] == 'X')
+                            fillUserRectMat(d, cx + c * scale, y + (6 - r) * scale, scale, scale);
+            }
             cx += advance;
         }
     }

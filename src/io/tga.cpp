@@ -1,5 +1,6 @@
 #include "softrenderer/io/tga.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <vector>
 
@@ -7,14 +8,26 @@
 namespace sr::io
 {
 
+namespace
+{
+// 外部输入不可信：文件头里的宽高只有 16 位，但 65535×65535 就要分配 12 GB。
+// 先按像素数卡上限（8192×8192），再按声明字节数与实际文件长度卡——
+// 后者能拦住“头部声明巨大、文件只有几字节”的放大攻击。
+constexpr int64_t kMaxTgaPixels = int64_t(8192) * 8192;
+}  // namespace
+
     // ---------- 写出：未压缩 24 位 BGR ----------
     bool writeTga(const std::string &path, const Framebuffer &fb)
     {
+        const int w = fb.width(), h = fb.height();
+        // TGA 头里的宽高只有 16 位：超范围会被静默截断，读回来尺寸错乱。
+        if (w <= 0 || h <= 0 || w > 65535 || h > 65535)
+            return false;
+
         FILE *f = std::fopen(path.c_str(), "wb");
         if (!f)
             return false;
 
-        const int w = fb.width(), h = fb.height();
         uint8_t header[18] = {};
         header[2] = 2; // 未压缩真彩色
         header[12] = uint8_t(w & 0xFF);
@@ -23,23 +36,28 @@ namespace sr::io
         header[15] = uint8_t((h >> 8) & 0xFF);
         header[16] = 24; // 24 位 BGR
         header[17] = 0;  // 原点左下角
-        std::fwrite(header, 1, 18, f);
+
+        bool ok = std::fwrite(header, 1, sizeof(header), f) == sizeof(header);
 
         // 逐像素写 BGR。fb 第 0 行是底部行，正好匹配 TGA 左下角原点，顺序直写
         std::vector<uint8_t> row(size_t(w) * 3);
-        for (int y = 0; y < h; ++y)
+        for (int y = 0; ok && y < h; ++y)
         {
             for (int x = 0; x < w; ++x)
             {
-                Color c = fb.getPixel(x, y);
+                const Color c = fb.getPixel(x, y);
                 row[size_t(x) * 3 + 0] = c.b;
                 row[size_t(x) * 3 + 1] = c.g;
                 row[size_t(x) * 3 + 2] = c.r;
             }
-            std::fwrite(row.data(), 1, row.size(), f);
+            ok = std::fwrite(row.data(), 1, row.size(), f) == row.size();
         }
-        std::fclose(f);
-        return true;
+
+        // fclose 会报告延迟写入的错误（磁盘满、网络盘断开）：
+        // 旧实现不看返回值，写出失败也返回 true。
+        if (std::fclose(f) != 0)
+            ok = false;
+        return ok;
     }
 
     // ---------- 读取：支持未压缩(2)与 RLE(10)，24/32 位 ----------
@@ -69,9 +87,31 @@ namespace sr::io
             std::fclose(f);
             return false; // 只支持真彩色 24/32 位
         }
+        if (int64_t(w) * int64_t(h) > kMaxTgaPixels)
+        {
+            std::fclose(f);
+            return false; // 超出像素上限
+        }
         std::fseek(f, idLength, SEEK_CUR); // 跳过图像 ID 区
 
         const int bytesPP = bpp / 8;
+        // 未压缩：先验证文件真的有这么多数据，再分配缓冲。
+        if (imageType == 2)
+        {
+            const long long needed = static_cast<long long>(w) * h * bytesPP;
+            const long here = std::ftell(f);
+            if (here < 0 || std::fseek(f, 0, SEEK_END) != 0)
+            {
+                std::fclose(f);
+                return false;
+            }
+            const long end = std::ftell(f);
+            if (std::fseek(f, here, SEEK_SET) != 0 || end < 0 || static_cast<long long>(end - here) < needed)
+            {
+                std::fclose(f);
+                return false;
+            }
+        }
         std::vector<uint8_t> raw(size_t(w) * h * bytesPP);
 
         if (imageType == 2)

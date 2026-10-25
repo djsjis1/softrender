@@ -5,7 +5,7 @@
 //   - 深空背景（带微弱星云渐变）
 //   - 数百颗随机星星（不同大小/亮度/色温）
 //   - 几颗超亮星带十字衍射光芒
-//   - Bloom 后处理让亮星产生光晕
+//   - 光晕：由 drawStar 叠加的外圈高斯模拟，**未**调用公共 Bloom 算子
 //
 // 输出：output/stars.tga
 // ============================================================
@@ -20,6 +20,7 @@
 #include "softrenderer/core/framebuffer.h"
 #include "softrenderer/io/tga.h"
 #include "softrenderer/math/vec.h"
+#include "softrenderer/render/postprocess/post_processing.h"
 
 // 本库公共符号正逐步迁入 namespace sr（见 docs/adr/ADR-001）。
 // 示例属于应用代码，用 using-directive 比逐处写 sr:: 前缀更接近真实集成方式。
@@ -218,24 +219,11 @@ int main()
     }
 
     // ---- 5. 色调映射 + Gamma ----
+    // 用公共后处理算子：本文件旧实现自己写了一份 ACES + gamma，
+    // 两份公式一旦有人只改一边就会出现“图变了但测试不知道”的漂移。
     printf("色调映射...\n");
     Framebuffer ldr(W, H);
-    for (int y = 0; y < H; ++y)
-    {
-        for (int x = 0; x < W; ++x)
-        {
-            Vec3f hdr = fb.getPixel(x, y);
-            // ACES 近似
-            auto aces = [](float v) {
-                float a = 2.51f, b = 0.03f, c = 2.43f, d = 0.59f, e = 0.14f;
-                return std::clamp((v * (a * v + b)) / (v * (c * v + d) + e), 0.0f, 1.0f);
-            };
-            Vec3f mapped{aces(hdr.x), aces(hdr.y), aces(hdr.z)};
-            // Gamma
-            auto gamma = [](float v) { return std::pow(std::max(v, 0.0f), 1.0f / 2.2f); };
-            ldr.setPixel(x, y, Color::fromFloat(gamma(mapped.x), gamma(mapped.y), gamma(mapped.z)));
-        }
-    }
+    sr::postprocess::resolveToLdr(fb, ldr);
 
     // ---- 输出 ----
     std::filesystem::create_directories("output");

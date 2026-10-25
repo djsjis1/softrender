@@ -17,7 +17,11 @@ namespace sr::io
         // 声明即初始化：stbi_load 失败时不保证写入这三个出参，
         // 未初始化的值一旦被后续逻辑读到就是 UB。
         int w = 0, h = 0, channels = 0;
-        stbi_set_flip_vertically_on_load(1);                                 // 翻转为自底向上（匹配我们的约定）
+        // 不能用 stbi_set_flip_vertically_on_load：那是全局开关，
+        // tinygltf 解码贴图时用的是同一份 stb 实现，一旦改全局状态，
+        // glTF 贴图的方向就取决于“之前有没有加载过普通图片”，
+        // 而且并发加载会在这个非原子全局变量上产生竞态。
+        // 改为拿到 top-down 像素后自己按行翻转。
         unsigned char *data = stbi_load(path.c_str(), &w, &h, &channels, 4); // 强制 4 通道 RGBA
         if (data == nullptr)
         {
@@ -52,12 +56,18 @@ namespace sr::io
         out.pixels.resize(pixelCount);
 
         const unsigned char *src = pixels.get();
-        for (size_t i = 0; i < pixelCount; ++i)
+        // stb 输出是 top-down（第 0 行在图像顶部），而 sr::Image 约定第 0 行在底部：
+        // 逐行反序拷贝，不依赖任何全局状态。
+        const size_t rowBytes = size_t(w) * 4;
+        for (int y = 0; y < h; ++y)
         {
-            // i * 4 为 size_t 运算，不会溢出；偏移上界 = pixelCount*4，
-            // 正好等于 stbi_load 以 desired_channels=4 分配的缓冲长度。
-            const unsigned char *px = src + i * 4;
-            out.pixels[i] = Color(px[0], px[1], px[2], px[3]);
+            const unsigned char *srcRow = src + size_t(h - 1 - y) * rowBytes;
+            Color *dstRow = out.pixels.data() + size_t(y) * size_t(w);
+            for (int x = 0; x < w; ++x)
+            {
+                const unsigned char *px = srcRow + size_t(x) * 4;
+                dstRow[x] = Color(px[0], px[1], px[2], px[3]);
+            }
         }
         return true;
     }

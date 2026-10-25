@@ -94,6 +94,39 @@ inline void drawCharSprite(Framebuffer& fb, const std::vector<std::string>& spri
 }
 
 // ------------------------------------------------------------
+// 目标矩形与帧缓冲、裁剪区的交集（半开区间 [x0,x1) × [y0,y1)）。
+//
+// 返回 false 表示完全不可见。贴图前必须先算它：超屏矩形如果只靠
+// plotBlend 的边界检查丢弃，每个屏外像素仍要付出采样 + 函数调用的代价
+// （实测 4000×4000 的目标矩形 94% 的调用落在屏外，单次 blit 耗时 3.5 s）。
+// ------------------------------------------------------------
+inline bool clipTargetRect(const Framebuffer& fb, const ClipRect* clip,
+                           long long x, long long y, long long w, long long h,
+                           int& x0, int& y0, int& x1, int& y1)
+{
+    if (fb.width() <= 0 || fb.height() <= 0 || w <= 0 || h <= 0)
+        return false;
+    long long left = std::max<long long>(x, 0);
+    long long bottom = std::max<long long>(y, 0);
+    long long right = std::min<long long>(x + w, fb.width());
+    long long top = std::min<long long>(y + h, fb.height());
+    if (clip)
+    {
+        left = std::max<long long>(left, clip->x0);
+        bottom = std::max<long long>(bottom, clip->y0);
+        right = std::min<long long>(right, clip->x1);
+        top = std::min<long long>(top, clip->y1);
+    }
+    if (left >= right || bottom >= top)
+        return false;
+    x0 = int(left);
+    y0 = int(bottom);
+    x1 = int(right);
+    y1 = int(top);
+    return true;
+}
+
+// ------------------------------------------------------------
 // 1:1 位图拷贝：把整张 image 贴到 (dx,dy)。
 // ------------------------------------------------------------
 inline void blitImage(Framebuffer& fb, const sr::Image& img, int dx, int dy,
@@ -103,9 +136,12 @@ inline void blitImage(Framebuffer& fb, const sr::Image& img, int dx, int dy,
 {
     if (!img.valid())
         return;
-    for (int y = 0; y < img.height; ++y)
-        for (int x = 0; x < img.width; ++x)
-            plotBlend(fb, dx + x, dy + y, tintPixel(img.at(x, y), tint), mode, clip);
+    int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    if (!clipTargetRect(fb, clip, dx, dy, img.width, img.height, x0, y0, x1, y1))
+        return;
+    for (int y = y0; y < y1; ++y)
+        for (int x = x0; x < x1; ++x)
+            plotBlend(fb, x, y, tintPixel(img.at(x - dx, y - dy), tint), mode, clip);
 }
 
 // ------------------------------------------------------------
@@ -120,10 +156,14 @@ inline void blitImageRect(Framebuffer& fb, const sr::Image& img, const Recti& sr
     if (!img.valid())
         return;
     Recti region = src.intersection(Recti(0, 0, img.width, img.height)); // 夹到图像内
-    for (int y = region.y; y < region.top(); ++y)
-        for (int x = region.x; x < region.right(); ++x)
-            plotBlend(fb, dx + (x - region.x), dy + (y - region.y),
-                      tintPixel(img.at(x, y), tint), mode, clip);
+    if (region.isEmpty())
+        return;
+    int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    if (!clipTargetRect(fb, clip, dx, dy, region.w, region.h, x0, y0, x1, y1))
+        return;
+    for (int y = y0; y < y1; ++y)
+        for (int x = x0; x < x1; ++x)
+            plotBlend(fb, x, y, tintPixel(img.at(region.x + (x - dx), region.y + (y - dy)), tint), mode, clip);
 }
 
 // ------------------------------------------------------------
@@ -138,14 +178,17 @@ inline void blitImageScaled(Framebuffer& fb, const sr::Image& img,
 {
     if (!img.valid() || dw <= 0 || dh <= 0)
         return;
-    for (int j = 0; j < dh; ++j)
+    int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    if (!clipTargetRect(fb, clip, dx, dy, dw, dh, x0, y0, x1, y1))
+        return;
+    for (int j = y0; j < y1; ++j)
     {
         // 目标像素中心映射回源图坐标（最近邻）
-        int sy = std::min(img.height - 1, (int)((j + 0.5f) * img.height / dh));
-        for (int i = 0; i < dw; ++i)
+        const int sy = std::min(img.height - 1, int((float(j - dy) + 0.5f) * float(img.height) / float(dh)));
+        for (int i = x0; i < x1; ++i)
         {
-            int sx = std::min(img.width - 1, (int)((i + 0.5f) * img.width / dw));
-            plotBlend(fb, dx + i, dy + j, tintPixel(img.at(sx, sy), tint), mode, clip);
+            const int sx = std::min(img.width - 1, int((float(i - dx) + 0.5f) * float(img.width) / float(dw)));
+            plotBlend(fb, i, j, tintPixel(img.at(sx, sy), tint), mode, clip);
         }
     }
 }
@@ -239,9 +282,12 @@ inline void blitFramebuffer(Framebuffer& dst, const Framebuffer& src, int dx, in
                             BlendMode mode = BlendMode::AlphaBlend,
                             const ClipRect* clip = nullptr)
 {
-    for (int y = 0; y < src.height(); ++y)
-        for (int x = 0; x < src.width(); ++x)
-            plotBlend(dst, dx + x, dy + y, src.getPixel(x, y), mode, clip);
+    int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    if (!clipTargetRect(dst, clip, dx, dy, src.width(), src.height(), x0, y0, x1, y1))
+        return;
+    for (int y = y0; y < y1; ++y)
+        for (int x = x0; x < x1; ++x)
+            plotBlend(dst, x, y, src.getPixel(x - dx, y - dy), mode, clip);
 }
 
 // ------------------------------------------------------------
@@ -256,15 +302,92 @@ inline void blitTexture(Framebuffer& fb, const Texture& tex, int x, int y, int w
 {
     if (!tex.valid() || w <= 0 || h <= 0)
         return;
-    for (int j = 0; j < h; ++j)
+    // 先把目标矩形夹到屏幕/裁剪区内：屏外像素不必采样。
+    int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    if (!clipTargetRect(fb, clip, x, y, w, h, x0, y0, x1, y1))
+        return;
+    // 采样点取像素中心：用 i/(w-1) 会把首尾像素挤到纹理边界，
+    // 配合 Repeat 寻址在 u=1 处绕回开头。同时传导数才能让三线性选对 mip。
+    const float du = 1.0f / float(w), dv = 1.0f / float(h);
+    // 轴对齐矩形的屏幕空间导数是常量 → mip 层只需算一次。
+    // 逐像素重算一次 sqrt+log2 是整张 blit 的主要开销（实测占一半以上）。
+    const auto filter = tex.getFilter();
+    const bool useLod = filter == Texture::Filter::Trilinear;
+    const float lod = useLod ? tex.lodForPixel(du, 0.0f, 0.0f, dv) : 0.0f;
+    for (int py = y0; py < y1; ++py)
     {
-        float v = h > 1 ? float(j) / float(h - 1) : 0.0f;
-        for (int i = 0; i < w; ++i)
+        const float v = (float(py - y) + 0.5f) * dv;
+        for (int px = x0; px < x1; ++px)
         {
-            float u = w > 1 ? float(i) / float(w - 1) : 0.0f;
-            Vec3f c = tex.sample(u, v);
-            Color col = Color::fromFloat(c.x, c.y, c.z);
-            plotBlend(fb, x + i, y + j, tintPixel(col, tint), mode, clip);
+            const float u = (float(px - x) + 0.5f) * du;
+            // 2D 合成用 ClampToEdge：Repeat 在放大小图时会把对边颜色带进来，
+            // 图集边缘整列串色。带 alpha 的入口才能保留纹理透明度。
+            const Color col = filter == Texture::Filter::Nearest ? tex.sampleNearestClamped(u, v)
+                              : useLod ? tex.sampleColorClamped(u, v, lod)
+                                       : tex.sampleColorClamped(u, v, 0.0f);
+            plotBlend(fb, px, py, tintPixel(col, tint), mode, clip);
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// 纹理四边形（任意仿射）：xform 把图空间 [0,1]×[0,1] 映射到设备像素。
+//
+// blitTexture 只支持轴对齐矩形；旋转/斜切下必须有这条路径，
+// 否则上层只能“静默不画”（Renderer2D::texture 曾如此）。
+// 用逆变换反向映射，保证旋转后不留空洞。
+// ------------------------------------------------------------
+inline void blitTextureTransformed(Framebuffer& fb, const Texture& tex, const Mat3& xform,
+                                   Color tint = sr::colors::white, bool bilinear = true,
+                                   BlendMode mode = BlendMode::Opaque,
+                                   const ClipRect* clip = nullptr)
+{
+    if (!tex.valid() || !std::isfinite(xform.determinant()) || std::abs(xform.determinant()) < 1e-12f)
+        return;
+    // 图空间四角 → 设备包围盒
+    const Vec2f c0 = xform.transformPoint({0.0f, 0.0f});
+    const Vec2f c1 = xform.transformPoint({1.0f, 0.0f});
+    const Vec2f c2 = xform.transformPoint({1.0f, 1.0f});
+    const Vec2f c3 = xform.transformPoint({0.0f, 1.0f});
+    if (!std::isfinite(c0.x) || !std::isfinite(c0.y) || !std::isfinite(c1.x) || !std::isfinite(c1.y) ||
+        !std::isfinite(c2.x) || !std::isfinite(c2.y) || !std::isfinite(c3.x) || !std::isfinite(c3.y))
+        return;
+
+    const float minXf = std::min({c0.x, c1.x, c2.x, c3.x});
+    const float maxXf = std::max({c0.x, c1.x, c2.x, c3.x});
+    const float minYf = std::min({c0.y, c1.y, c2.y, c3.y});
+    const float maxYf = std::max({c0.y, c1.y, c2.y, c3.y});
+    int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    if (!clipTargetRect(fb, clip, (long long)std::floor(minXf), (long long)std::floor(minYf),
+                        (long long)std::ceil(maxXf) - (long long)std::floor(minXf),
+                        (long long)std::ceil(maxYf) - (long long)std::floor(minYf), x0, y0, x1, y1))
+        return;
+
+    const Mat3 inv = xform.inversed();
+    // 屏幕 1 像素对应的 UV 步长（估计），让三线性能选对 mip
+    const float deviceW = std::max(1.0f, std::max(std::abs(c1.x - c0.x), std::abs(c1.y - c0.y)));
+    const float deviceH = std::max(1.0f, std::max(std::abs(c3.x - c0.x), std::abs(c3.y - c0.y)));
+    const float du = 1.0f / deviceW, dv = 1.0f / deviceH;
+    const auto filter = tex.getFilter();
+    const bool useLod = filter == Texture::Filter::Trilinear;
+    const float lod = useLod ? tex.lodForPixel(du, 0.0f, 0.0f, dv) : 0.0f;
+
+    for (int py = y0; py < y1; ++py)
+    {
+        for (int px = x0; px < x1; ++px)
+        {
+            const Vec2f ip = inv.transformPoint({float(px) + 0.5f, float(py) + 0.5f});
+            // 只画图空间内部：越界不允许 Repeat 绕回，否则旋转四边形会把对边贴过来
+            if (!(ip.x >= 0.0f && ip.x < 1.0f && ip.y >= 0.0f && ip.y < 1.0f))
+                continue;
+            // bilinear=false 仍走双线性但固定第 0 层（与旧行为一致）；
+            // 所有路径都用 ClampToEdge，避免旋转后边缘串色。
+            Color col;
+            if (filter == Texture::Filter::Nearest)
+                col = tex.sampleNearestClamped(ip.x, ip.y);
+            else
+                col = tex.sampleColorClamped(ip.x, ip.y, (bilinear && useLod) ? lod : 0.0f);
+            plotBlend(fb, px, py, tintPixel(col, tint), mode, clip);
         }
     }
 }

@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <cstddef>
 #include <cmath>
 #include <limits>
@@ -52,14 +53,17 @@ inline bool normalizeQuat(Quat q, Quat &result)
 }
 
 // 采样器的静态合法性：长度关系与时间轴单调性。
-// 加载阶段已校验一次，这里兜底防御手工构造的片段。
-inline bool samplerIsValid(const AnimationSampler &sampler)
+// 加载阶段已校验一次，这里兜底防御手工构造的片段；
+// trusted=true 时跳过 O(n) 的时间轴扫描（调用方已声明 validated）。
+inline bool samplerIsValid(const AnimationSampler &sampler, bool trusted = false)
 {
     if (sampler.times.empty())
         return false;
     const size_t stride = sampler.stride();
     if (sampler.values.size() != sampler.times.size() * stride)
         return false;
+    if (trusted)
+        return true;
     float previous = -1.0f;
     for (float t : sampler.times)
     {
@@ -88,7 +92,7 @@ inline bool sampleChannel(const AnimationClip &clip, const AnimationChannel &cha
     if (sampler.interpolation != Interpolation::Linear && sampler.interpolation != Interpolation::Step &&
         sampler.interpolation != Interpolation::CubicSpline)
         return false;
-    if (!detail::samplerIsValid(sampler))
+    if (!detail::samplerIsValid(sampler, clip.validated))
         return false;
 
     const bool rotation = channel.path == Path::Rotation;
@@ -96,11 +100,14 @@ inline bool sampleChannel(const AnimationClip &clip, const AnimationChannel &cha
     const size_t frames = sampler.frameCount();
     const size_t stride = sampler.stride();
 
-    // 定位区间；落在首帧之前或末帧之后时钳到端点
+    // 定位区间；落在首帧之前或末帧之后时钳到端点。
+    //
+    // 旧实现是逐帧扫描（O(n)）：1 万关键帧的片段每次采样扫 1 万次，
+    // 实测 2 万次采样耗时 1.3 秒。times 已保证严格递增，用二分即可。
+    const auto upper = std::upper_bound(sampler.times.begin(), sampler.times.end(), time);
     size_t lo = 0;
-    for (size_t i = 0; i < frames; ++i)
-        if (sampler.times[i] <= time)
-            lo = i;
+    if (upper != sampler.times.begin())
+        lo = size_t(upper - sampler.times.begin()) - 1;
     size_t hi = lo + 1 < frames ? lo + 1 : lo;
     if (time <= sampler.times[lo])
         hi = lo;

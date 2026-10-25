@@ -1,8 +1,12 @@
 // ============================================================
-// Demo：骨骼蒙皮动画
+// Demo：手工单关节变换（不是完整的 glTF 蒙皮管线）
 //
-// 程序化生成一个带 2 根骨骼 + 顶点蒙皮 + 旋转动画的 glTF，
-// 逐帧采样动画 → 计算蒙皮矩阵 → 更新顶点位置 → 渲染。
+// 程序化生成一个带 2 根骨骼 + 旋转动画的 glTF，逐帧采样动画 →
+// 计算蒙皮矩阵 → 手动用一个关节矩阵变换整块网格 → 渲染。
+//
+// 本示例**不**读取顶点的 JOINTS_0 / WEIGHTS_0，也不按 skin.joints
+// 建立索引映射与父子全局变换：Vertex 目前不携带骨骼权重，真实逐顶点
+// 蒙皮尚未接入管线。它验证的是“动画采样 + 矩阵链 + 渲染”这条链路。
 //
 // 输出：output/skin_frame_XX.tga（首帧 + 尾帧 + 中间帧）
 //       output/trace_skin.json（Perfetto 火焰图）
@@ -145,6 +149,8 @@ static Mesh applySkinning(const Mesh& src, const std::vector<Mat4>& skinMatrices
 
 int main()
 {
+    // Profiler 默认关闭（零开销），示例需要 trace 才显式打开。
+    sr::Profiler::instance().setEnabled(true);
     SR_PROFILE_SCOPE("demo_skinning");
     const int W = 800, H = 600;
 

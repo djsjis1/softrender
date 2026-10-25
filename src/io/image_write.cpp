@@ -35,10 +35,11 @@ bool writeImage(const std::string& path, const Framebuffer& fb, int jpgQuality)
     int w = fb.width(), h = fb.height();
     auto rgba = extractRGBA(fb, true);
 
-    // 判断扩展名
+    // 判断扩展名。tolower 参数必须是 unsigned char：
+    // 非 ASCII 路径里的负值 char 直接传进去是未定义行为。
     auto ext = path.substr(path.rfind('.') + 1);
     for (auto& c : ext)
-        c = char(std::tolower(c));
+        c = char(std::tolower(static_cast<unsigned char>(c)));
 
     if (ext == "png")
     {

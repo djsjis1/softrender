@@ -68,16 +68,18 @@ inline void computeTangents(Mesh &mesh)
     {
         if (v.tangent.lengthSq() < 1e-12f)
         {
-            // 退化：造一个与法线正交的任意切线
-            Vec3f n = v.normal;
+            // 退化：造一个与法线正交的任意切线。
+            // 法线自身可能为零（全退化三角形、OBJ 无法线时未算出），
+            // 直接 normalized() 会在 Debug 构建立刻断言，故先兜底。
+            Vec3f n = v.normal.normalizedOr({0, 0, 1});
             Vec3f ref = std::abs(n.y) < 0.99f ? Vec3f{0, 1, 0} : Vec3f{1, 0, 0};
-            v.tangent = cross(ref, n).normalized();
+            v.tangent = cross(ref, n).normalizedOr({1, 0, 0});
         }
         else
         {
-            Vec3f n = v.normal.normalized();
+            Vec3f n = v.normal.normalizedOr({0, 0, 1});
             Vec3f t = v.tangent;
-            v.tangent = (t - n * dot(n, t)).normalized(); // 去掉法线分量
+            v.tangent = (t - n * dot(n, t)).normalizedOr({1, 0, 0}); // 去掉法线分量
         }
     }
 }

@@ -53,12 +53,22 @@ class Renderer
     // 包住 drawMesh，避免渲染头依赖时钟、线程与文件写出。
     void drawMesh(Framebuffer& fb, const Mesh& mesh, Shader& shader)
     {
+        const int vertexCount = int(mesh.vertices.size());
         for (int i = 0; i < mesh.triangleCount(); ++i)
         {
+            // 索引越界的三角形直接丢弃。Mesh 是公共结构，可以被使用者手工构造，
+            // 越界索引在这里不是“渲染结果差异”而是未定义行为（读越界内存）。
+            const int i0 = mesh.indices[size_t(i) * 3 + 0];
+            const int i1 = mesh.indices[size_t(i) * 3 + 1];
+            const int i2 = mesh.indices[size_t(i) * 3 + 2];
+            if (i0 < 0 || i1 < 0 || i2 < 0 || i0 >= vertexCount || i1 >= vertexCount || i2 >= vertexCount)
+                continue;
+
             // 1. 顶点着色
             ClipVertex tri[3];
-            for (int k = 0; k < 3; ++k)
-                tri[k].pos = shader.vertex(mesh.vertices[mesh.indices[i * 3 + k]], tri[k].var);
+            tri[0].pos = shader.vertex(mesh.vertices[size_t(i0)], tri[0].var);
+            tri[1].pos = shader.vertex(mesh.vertices[size_t(i1)], tri[1].var);
+            tri[2].pos = shader.vertex(mesh.vertices[size_t(i2)], tri[2].var);
 
             if (nearClip)
             {
@@ -123,9 +133,10 @@ class Renderer
         // E0 = edge(v0->v1) 对应 v2 的权重
         // E1 = edge(v1->v2) 对应 v0 的权重
         // E2 = edge(v2->v0) 对应 v1 的权重
-        // 三边函数值之和恒等于三角形面积（量化单位），逐像素不变，故只求一次倒数。
+        // 三边无偏边函数值之和恒等于三角形面积（量化单位），逐像素不变，故只求一次倒数。
+        // 分母取无偏面积：coverage 的偏置只服务于覆盖归属，不参与归一化。
         auto coverageRow = coverage->atPixel(bounds.minX, bounds.minY);
-        const double invArea = 1.0 / double(coverageRow[0] + coverageRow[1] + coverageRow[2]);
+        const double invArea = 1.0 / double(coverage->area());
 
         for (int y = bounds.minY; y <= bounds.maxY; ++y)
         {
@@ -138,9 +149,11 @@ class Renderer
             {
                 if (sr::TriangleCoverage::contains(coveragePixel))
                 {
-                    // 从整数边函数值算重心坐标；用 double 相乘避免大三角形丢精度
-                    Vec3f bc{float(coveragePixel[1] * invArea), float(coveragePixel[2] * invArea),
-                             float(coveragePixel[0] * invArea)};
+                    // 从整数边函数值算重心坐标；用 double 相乘避免大三角形丢精度。
+                    // 先扣除 top-left 偏置：覆盖判定需要它，深度/UV 插值不能要它。
+                    const auto raw = coverage->unbiased(coveragePixel);
+                    Vec3f bc{float(double(raw[1]) * invArea), float(double(raw[2]) * invArea),
+                             float(double(raw[0]) * invArea)};
 
                     // 7. 深度测试（行内直访）
                     const float z = bc.x * s0.z + bc.y * s1.z + bc.z * s2.z;

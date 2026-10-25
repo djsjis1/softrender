@@ -19,16 +19,10 @@
 #include "softrenderer/core/framebuffer.h"
 #include "softrenderer/io/image_write.h"
 #include "platform/win32_window.h"
+#include "softrenderer/render/draw2d/blit2d.h"
 #include "softrenderer/render/draw2d/shape2d.h"
 
 using namespace sr;
-
-// 字符 → 颜色 映射（'.' 表示透明像素）
-struct SpritePalette
-{
-    char ch;
-    Color color;
-};
 
 // 勇者 16x20，两帧走路动画（每行严格 16 个字符）：
 //   帧 0：站姿（双腿并拢）
@@ -51,40 +45,6 @@ const std::vector<std::vector<std::string>> kHeroFrames = {
     },
 };
 
-// 把一个 sprite 画到 fb 上：左下角 (ox,oy)，每个像素放大 scale×scale 块
-void drawSprite(Framebuffer& fb, const std::vector<std::string>& sprite, const std::vector<SpritePalette>& palette,
-                int ox, int oy, int scale)
-{
-    const int w = int(sprite[0].size());
-    const int h = int(sprite.size());
-    for (int row = 0; row < h; ++row)
-    {
-        for (int col = 0; col < w; ++col)
-        {
-            char ch = sprite[row][col];
-            if (ch == '.')
-                continue;  // 透明像素跳过
-
-            // 查调色板；查不到就给品红色，方便发现字符拼写错误
-            Color c = sr::colors::magenta;
-            for (const auto& p : palette)
-                if (p.ch == ch)
-                {
-                    c = p.color;
-                    break;
-                }
-
-            // y 翻转：sprite 第 0 行在最顶部，而画布 y 向上，
-            // 所以顶部行要画在 oy + (h-1-row)*scale 处
-            int px = ox + col * scale;
-            int py = oy + (h - 1 - row) * scale;
-            for (int dy = 0; dy < scale; ++dy)
-                for (int dx = 0; dx < scale; ++dx)
-                    fb.setPixel(px + dx, py + dy, c);
-        }
-    }
-}
-
 int main()
 {
     const int W = 800, H = 600;
@@ -95,7 +55,7 @@ int main()
     CreateDirectoryA("output", nullptr);
     CreateDirectoryA("output\\anim", nullptr);
 
-    const std::vector<SpritePalette> palette = {
+    const std::vector<sr::draw2d::SpritePalette> palette = {
         {'H', Color(238, 186, 48)},   // 金发
         {'S', Color(255, 214, 170)},  // 皮肤
         {'E', Color(40, 40, 52)},     // 眼睛
@@ -205,7 +165,7 @@ int main()
         if (shW > 0)
             sr::draw2d::fillRect(fb, heroX + (heroW - shW) / 2, 94, shW, 6, Color(20, 14, 20));
 
-        drawSprite(fb, kHeroFrames[frame], palette, heroX, heroY, scale);
+        drawCharSprite(fb, kHeroFrames[frame], palette, heroX, heroY, scale);
 
         // ---- 显示 ----
         window.present(fb);
