@@ -7,6 +7,18 @@
 
 ## 2026-10-25
 
+### 缺陷审查（八）：粗线的宽度
+
+- `render/draw2d/shape2d.h` 的 `drawLineThick`：用 `-half..half` 铺平行线，
+  **偶数厚度会多画一条**（`thickness = 4` 画出 5 像素宽），与注释「thickness×thickness」
+  不符。改成 `lo..hi` 后总行数恰为 `thickness`；同时把厚度夹到画布尺寸——
+  本函数是 O(thickness²) 条 Bresenham，超过画布只会白烧时间。
+- 至此上轮清出的 13 个零调用 API 已全部读完：**2 个有缺陷**
+  （`drawLineDashed` 周期除零、`drawLineThick` 偶数宽度），其余 11 个实现正确。
+- 新增 `Draw2D.LineThickMatchesRequestedWidth`（thickness 2–5 逐值验证，修前为红）。
+
+**验证**：构建 0/0；`unit_tests` **267/267**；像素回归 3/3；压测 105/105。
+
 ### 缺陷审查（七）：虚线的除零与负周期
 
 - `render/draw2d/shape2d.h` 的 `drawLineDashed`：`period = dash + gap` 没有下限。
