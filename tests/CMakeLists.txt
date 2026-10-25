@@ -46,6 +46,7 @@ file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/golden" SR_GOLDEN_DIR_P
 add_executable(unit_tests
     unit/math_test.cpp
     unit/core_buffer_test.cpp
+    unit/pixel_format_test.cpp
     unit/resource_test.cpp
     unit/render_pipeline_test.cpp
     unit/postprocess_test.cpp

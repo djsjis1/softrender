@@ -406,4 +406,397 @@ static void stress_polygon_fill_robustness()
 SR_SCENARIO("clip_boundary_contract", stress_clip_boundary_contract, false);
 SR_SCENARIO("polygon_fill_robustness", stress_polygon_fill_robustness, false);
 
+// ============================================================
+// 像素格式与呈现层。见 ADR-005：存储格式与运算域分离，
+// 渲染侧只多一次量化，呈现侧由 NearestUpscaler 做放大 + 换格式。
+// ============================================================
+
+// 1. 小画布 → 目标分辨率的放大：整数倍必须精确复制，非整数倍不得越界，
+//    降采样、退化 1x1、非法尺寸都必须不崩。
+static void stress_present_upscale_565()
+{
+    const auto t0 = Clock::now();
+    bool ok = true;
+    std::string detail;
+
+    // 整数倍 2x：源 160x120 → 目标 320x240，每个源像素必须铺满 2x2
+    {
+        Framebuffer src(160, 120);
+        for (int y = 0; y < 120; ++y)
+            for (int x = 0; x < 160; ++x)
+                src.setPixel(x, y, Color(uint8_t(x), uint8_t(y), uint8_t((x * 3 + y) & 0xFF)));
+
+        BasicFramebuffer<Color565> screen(320, 240);
+        NearestUpscaler up;
+        up.resize(160, 120, 320, 240);
+        up.present(src, screen);
+
+        const int probeX[5] = {0, 159, 80, 1, 318};
+        const int probeY[5] = {0, 119, 60, 1, 238};
+        int mismatches = 0;
+        for (int i = 0; i < 5; ++i)
+        {
+            const Color expected = Color565::fromColor(src.getPixel(probeX[i] / 2, probeY[i] / 2)).toColor();
+            if (screen.getPixel(probeX[i], probeY[i]) != expected)
+                ++mismatches;
+        }
+        ok = ok && mismatches == 0;
+        detail += "2x_mismatch=" + std::to_string(mismatches);
+    }
+
+    // 非整数倍 1.6x：200x150 → 320x240，只校验覆盖完整（不得留黑边）
+    {
+        Framebuffer src(200, 150, Color(30, 60, 90));
+        BasicFramebuffer<Color565> screen(320, 240);
+        NearestUpscaler up;
+        up.resize(200, 150, 320, 240);
+        up.present(src, screen);
+        const Color565 expected = Color565::fromColor(Color(30, 60, 90));
+        int holes = 0;
+        for (int y = 0; y < 240; ++y)
+            for (int x = 0; x < 320; ++x)
+                if (!(screen.getPixel(x, y) == expected.toColor()))
+                    ++holes;
+        ok = ok && holes == 0;
+        detail += " 1.6x_holes=" + std::to_string(holes);
+    }
+
+    // 降采样 320x240 → 160x120：映射为 i*2，取偶数行列
+    {
+        Framebuffer src(320, 240);
+        for (int y = 0; y < 240; ++y)
+            for (int x = 0; x < 320; ++x)
+                src.setPixel(x, y, Color(uint8_t(x & 0xFF), uint8_t(y & 0xFF), 0));
+        Framebuffer dst(160, 120);
+        NearestUpscaler up;
+        up.resize(320, 240, 160, 120);
+        up.present(src, dst);
+        ok = ok && dst.getPixel(0, 0) == src.getPixel(0, 0) && dst.getPixel(159, 119) == src.getPixel(318, 238);
+    }
+
+    // 退化源 1x1：整屏应是同一颜色
+    {
+        Framebuffer src(1, 1, Color(200, 100, 50));
+        BasicFramebuffer<Color565> screen(64, 64);
+        NearestUpscaler up;
+        up.resize(1, 1, 64, 64);
+        up.present(src, screen);
+        const Color expected = Color565::fromColor(Color(200, 100, 50)).toColor();
+        int mismatches = 0;
+        for (int y = 0; y < 64; ++y)
+            for (int x = 0; x < 64; ++x)
+                if (!(screen.getPixel(x, y) == expected))
+                    ++mismatches;
+        ok = ok && mismatches == 0;
+        detail += " 1x1_mismatch=" + std::to_string(mismatches);
+    }
+
+    // 非法尺寸：不得写入、不得崩
+    {
+        NearestUpscaler up;
+        up.resize(0, 0, 64, 64);
+        Framebuffer src(4, 4, colors::white);
+        Framebuffer dst(64, 64, colors::black);
+        up.present(src, dst);
+        ok = ok && !up.valid() && dst.getPixel(0, 0) == colors::black;
+    }
+
+    report("present_upscale_565", ok, msSince(t0), detail);
+}
+
+// 2. 同一场景渲染进 8888 与 565：只允许差一个量化步长；
+//    同时核对内存占用确实减半（这是引入格式的唯一目的）。
+static void stress_render_565_matches_8888()
+{
+    const auto t0 = Clock::now();
+    const int W = 240, H = 180;
+    const int draws = 8;
+
+    Framebuffer fb8888(W, H);
+    BasicFramebuffer<Color565> fb565(W, H);
+    const Mesh sphere = sr::meshgen::sphere(1.0f, 24, 16);
+
+    Renderer renderer8888(W, H);
+    Renderer renderer565(W, H);
+    PBRShader shader8888 = makePbr(W, H);
+    PBRShader shader565 = makePbr(W, H);
+
+    renderer8888.clear(fb8888, Color(8, 10, 14));
+    renderer565.clear(fb565, Color(8, 10, 14));
+
+    for (int i = 0; i < draws; ++i)
+    {
+        const Mat4 model = Mat4::translate(0.0f, 0.0f, -float(i % 3)) * Mat4::rotateY(0.4f * float(i));
+        const Mat4 mvp = shader8888.proj * shader8888.view * model;
+        const Mat4 normalMatrix = model.inversed().transposed();
+        shader8888.model = model;
+        shader8888.mvp = mvp;
+        shader8888.normalMatrix = normalMatrix;
+        shader565.model = model;
+        shader565.mvp = mvp;
+        shader565.normalMatrix = normalMatrix;
+        renderer8888.drawMesh(fb8888, sphere, shader8888);
+        renderer565.drawMesh(fb565, sphere, shader565);
+    }
+
+    int maxDiff = 0;
+    int litPixels = 0;
+    for (int y = 0; y < H; ++y)
+    {
+        for (int x = 0; x < W; ++x)
+        {
+            const Color a = fb8888.getPixel(x, y);
+            const Color b = fb565.getPixel(x, y);
+            if (a != Color(8, 10, 14))
+                ++litPixels;
+            maxDiff = std::max({maxDiff, std::abs(int(a.r) - int(b.r)), std::abs(int(a.g) - int(b.g)),
+                                std::abs(int(a.b) - int(b.b))});
+        }
+    }
+
+    const bool ok = litPixels > 0 && maxDiff <= 4 && fb565.byteSize() * 2 == fb8888.byteSize();
+    report("render_565_matches_8888", ok, msSince(t0),
+           "maxDiff=" + std::to_string(maxDiff) + " lit=" + std::to_string(litPixels) + " bytes=" +
+               std::to_string(fb8888.byteSize()) + "->" + std::to_string(fb565.byteSize()));
+}
+
+// 3. 2D UI 直接画进 565 屏幕缓冲：MCU 上最常见的用法。
+//    覆盖范围必须与存储格式无关，内存必须精确减半。
+//    容差取 8：带 AlphaBlend 的图元要把 dst 读回 8888 再量化一次。
+static void stress_draw2d_565_ui()
+{
+    const auto t0 = Clock::now();
+    const int W = 320, H = 240;
+    Framebuffer ref(W, H);
+    BasicFramebuffer<Color565> screen(W, H);
+    ref.clear(colors::black);
+    screen.clear(colors::black);
+
+    auto paint = [&](auto& fb)
+    {
+        draw2d::fillRect(fb, 0, 0, W, H, Color(16, 20, 28));
+        draw2d::fillRect(fb, 8, 8, 150, 90, Color(40, 60, 90));
+        draw2d::fillRoundedRect(fb, 170.0f, 8.0f, 140.0f, 90.0f, 8.0f, Color(70, 40, 90));
+        for (int i = 0; i < 12; ++i)
+            draw2d::drawLine(fb, 10, 110 + i * 10, W - 10, 110 + i * 10,
+                             Color(uint8_t(20 * i), 200, uint8_t(255 - 20 * i)));
+        draw2d::fillCircle(fb, 60.0f, 200.0f, 24.0f, Color(220, 120, 40));
+        draw2d::drawCircle(fb, 140, 200, 30, Color(120, 220, 120), 2);
+        std::vector<Vec2f> poly = {{190.0f, 170.0f}, {260.0f, 160.0f}, {300.0f, 210.0f}, {210.0f, 225.0f}};
+        draw2d::fillPolygon(fb, poly, Color(90, 160, 220));
+        // 半透明椭圆：对不透明背景做一次完整的 plotBlend 混合路径
+        draw2d::fillEllipse(fb, 40.0f, 40.0f, 30.0f, 18.0f, Color(200, 200, 60, 140), BlendMode::AlphaBlend);
+    };
+
+    const int frames = 10;
+    const auto tFrame = Clock::now();
+    for (int f = 0; f < frames; ++f)
+        paint(screen);
+    const double frameMs = msSince(tFrame) / frames;
+
+    paint(ref);  // 参考帧只画一次
+
+    int coverageMismatch = 0;
+    int maxDiff = 0;
+    int lit = 0;
+    for (int y = 0; y < H; ++y)
+    {
+        for (int x = 0; x < W; ++x)
+        {
+            const Color a = ref.getPixel(x, y);
+            const Color b = screen.getPixel(x, y);
+            if (!(a == Color(16, 20, 28)))
+                ++lit;
+            maxDiff = std::max({maxDiff, std::abs(int(a.r) - int(b.r)), std::abs(int(a.g) - int(b.g)),
+                                std::abs(int(a.b) - int(b.b))});
+        }
+    }
+    // 覆盖范围一致性：565 侧只有 (16,20,28) 量化后的值才算"未绘制"。
+    const Color565 bg565 = Color565::fromColor(Color(16, 20, 28));
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x)
+            if ((ref.getPixel(x, y) == Color(16, 20, 28)) != (screen.getPixel(x, y) == bg565.toColor()))
+                ++coverageMismatch;
+
+    const bool ok = lit > W * H / 4 && maxDiff <= 8 && coverageMismatch == 0 &&
+                    screen.byteSize() * 2 == ref.byteSize();
+    report("draw2d_565_ui_frame", ok, msSince(t0),
+           "frame_ms=" + std::to_string(frameMs) + " maxDiff=" + std::to_string(maxDiff) + " cov_mismatch=" +
+               std::to_string(coverageMismatch) + " bytes=" + std::to_string(ref.byteSize()) + "->" +
+               std::to_string(screen.byteSize()));
+}
+
+// 4. 烟花管线的 8888 vs 565 对比（对齐 practice/fireworks.cpp 的实际步骤）。
+//
+// 【为什么要分开计时】浮点 HDR 场景与 bloom 是**与像素格式无关的共用成本**，
+// 只有两步与格式相关：① 色调映射后写 LDR 缓冲；② LDR 放大到输出分辨率。
+// 把共用成本算进格式收益会得出"565 快一倍"的错误结论。
+static void stress_fireworks_565_vs_8888()
+{
+    const auto t0 = Clock::now();
+    const int rw = 320, rh = 180;  // 内部渲染分辨率（fireworks 的 rw/rh）
+    const int W = 640, H = 360;    // 输出分辨率（2× 最近邻放大）
+
+    // ── 共用部分：HDR 场景 + 半分辨率亮部 + 两遍模糊 ──
+    FloatFramebuffer scene(rw, rh);
+    for (int y = 0; y < rh; ++y)
+    {
+        for (int x = 0; x < rw; ++x)
+        {
+            const float dx = (float(x) - rw * 0.5f) / (rw * 0.25f);
+            const float dy = (float(y) - rh * 0.5f) / (rh * 0.25f);
+            const float r2 = dx * dx + dy * dy;
+            scene.setPixel(x, y, Vec3f{2.0f / (1.0f + r2), 1.2f / (1.0f + 2.0f * r2), 0.4f / (1.0f + 4.0f * r2)});
+        }
+    }
+    FloatFramebuffer brightHalf(rw / 2, rh / 2);
+    for (int y = 0; y < rh / 2; ++y)
+        for (int x = 0; x < rw / 2; ++x)
+        {
+            Vec3f sum{};
+            for (int dy = 0; dy < 2; ++dy)
+                for (int dx = 0; dx < 2; ++dx)
+                    sum += scene.getPixel(x * 2 + dx, y * 2 + dy);
+            brightHalf.setPixel(x, y, sum * 0.25f);
+        }
+    FloatFramebuffer blurH(rw / 2, rh / 2), blurV(rw / 2, rh / 2);
+    sr::postprocess::gaussianBlur(brightHalf, blurH, true, 5);
+    sr::postprocess::gaussianBlur(blurH, blurV, false, 5);
+    const double commonMs = msSince(t0);
+
+    const int bloomW = blurV.width();
+    const int bloomH = blurV.height();
+    const int reps = 20;
+
+    // ── 格式相关 ①：色调映射写 LDR ──
+    Framebuffer ldr8888(rw, rh);
+    BasicFramebuffer<Color565> ldr565(rw, rh);
+
+    auto tonemapInto = [&](auto& ldr)
+    {
+        using Pixel = typename std::remove_reference_t<decltype(ldr)>::Pixel;
+        for (int y = 0; y < rh; ++y)
+        {
+            const Vec3f* srow = scene.row(y);
+            const Vec3f* brow = blurV.row(std::min(y / 2, bloomH - 1));
+            Pixel* lrow = ldr.row(y);
+            for (int x = 0; x < rw; ++x)
+            {
+                const Vec3f c = srow[x] + brow[std::min(x / 2, bloomW - 1)] * 1.05f;
+                const Vec3f mapped = sr::postprocess::gammaCorrectFast(sr::postprocess::acesToneMap(c));
+                lrow[x] = Pixel::fromFloat(mapped.x, mapped.y, mapped.z);
+            }
+        }
+    };
+
+    const auto tTonemap = Clock::now();
+    for (int i = 0; i < reps; ++i) tonemapInto(ldr8888);
+    const double tonemap8888Ms = msSince(tTonemap) / reps;
+    const auto tTonemap565 = Clock::now();
+    for (int i = 0; i < reps; ++i) tonemapInto(ldr565);
+    const double tonemap565Ms = msSince(tTonemap565) / reps;
+
+    // ── 格式相关 ②：LDR 放大到输出分辨率 ──
+    Framebuffer out8888(W, H);
+    BasicFramebuffer<Color565> out565(W, H);
+
+    const auto tUp = Clock::now();
+    for (int i = 0; i < reps; ++i)
+        for (int y = 0; y < H; ++y)
+        {
+            const Color* srow = ldr8888.row(y / 2);
+            Color* orow = out8888.row(y);
+            for (int x = 0; x < W; ++x)
+                orow[x] = srow[x / 2];
+        }
+    const double up8888Ms = msSince(tUp) / reps;
+
+    const auto tUp565 = Clock::now();
+    for (int i = 0; i < reps; ++i)
+        for (int y = 0; y < H; ++y)
+        {
+            const Color565* srow = ldr565.row(y / 2);
+            Color565* orow = out565.row(y);
+            for (int x = 0; x < W; ++x)
+                orow[x] = srow[x / 2];
+        }
+    const double up565Ms = msSince(tUp565) / reps;
+
+    // ── 正确性：565 结果展开后与 8888 只差量化 ──
+    int maxDiff = 0;
+    for (int y = 0; y < H; y += 3)
+        for (int x = 0; x < W; x += 3)
+        {
+            const Color a = out8888.getPixel(x, y);
+            const Color b = out565.getPixel(x, y);
+            maxDiff = std::max({maxDiff, std::abs(int(a.r) - int(b.r)), std::abs(int(a.g) - int(b.g)),
+                                std::abs(int(a.b) - int(b.b))});
+        }
+
+    const double frame8888 = commonMs + tonemap8888Ms + up8888Ms;
+    const double frame565 = commonMs + tonemap565Ms + up565Ms;
+    const bool ok = maxDiff <= 4 && out565.byteSize() * 2 == out8888.byteSize();
+
+    report("fireworks_565_vs_8888", ok, msSince(t0),
+           "frame ms 8888=" + std::to_string(frame8888) + " 565=" + std::to_string(frame565) +
+               " | common=" + std::to_string(commonMs) + " tonemap=" + std::to_string(tonemap8888Ms) + "/" +
+               std::to_string(tonemap565Ms) + " upscale=" + std::to_string(up8888Ms) + "/" +
+               std::to_string(up565Ms) + " | out bytes=" + std::to_string(out8888.byteSize()) + "->" +
+               std::to_string(out565.byteSize()) + " maxDiff=" + std::to_string(maxDiff));
+}
+
+// 5. 同格式呈现的快速路径：MCU 上"渲染到 565 → 放大到 565 屏幕"走的就是这条。
+//    对照组是 8888 源 → 565 目标的通用路径（每像素要展开再量化回来）。
+//    两者输出必须逐位一致，差别只应体现在耗时上。
+static void stress_present_same_format_565()
+{
+    const auto t0 = Clock::now();
+    const int rw = 160, rh = 120, W = 320, H = 240;
+
+    BasicFramebuffer<Color565> src565(rw, rh);
+    Framebuffer src8888(rw, rh);
+    for (int y = 0; y < rh; ++y)
+    {
+        for (int x = 0; x < rw; ++x)
+        {
+            const Color c(uint8_t(x), uint8_t(y), uint8_t((x * 3 + y * 5) & 0xFF));
+            src8888.setPixel(x, y, c);
+            src565.setPixel(x, y, c);
+        }
+    }
+
+    NearestUpscaler up;
+    up.resize(rw, rh, W, H);
+    const int reps = 20;
+
+    BasicFramebuffer<Color565> dstSame(W, H);
+    const auto tA = Clock::now();
+    for (int i = 0; i < reps; ++i)
+        up.present(src565, dstSame);
+    const double sameMs = msSince(tA) / reps;
+
+    BasicFramebuffer<Color565> dstCross(W, H);
+    const auto tB = Clock::now();
+    for (int i = 0; i < reps; ++i)
+        up.present(src8888, dstCross);
+    const double crossMs = msSince(tB) / reps;
+
+    int mismatches = 0;
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x)
+            if (dstSame.data()[size_t(y) * W + x].v != dstCross.data()[size_t(y) * W + x].v)
+                ++mismatches;
+
+    const bool ok = mismatches == 0;
+    report("present_same_format_565", ok, msSince(t0),
+           "same=" + std::to_string(sameMs) + "ms cross=" + std::to_string(crossMs) + "ms ratio=" +
+               std::to_string(sameMs / crossMs) + " mismatches=" + std::to_string(mismatches));
+}
+
+SR_SCENARIO("present_upscale_565", stress_present_upscale_565, false);
+SR_SCENARIO("render_565_matches_8888", stress_render_565_matches_8888, false);
+SR_SCENARIO("draw2d_565_ui_frame", stress_draw2d_565_ui, false);
+SR_SCENARIO("fireworks_565_vs_8888", stress_fireworks_565_vs_8888, false);
+SR_SCENARIO("present_same_format_565", stress_present_same_format_565, false);
+
 }  // namespace stress

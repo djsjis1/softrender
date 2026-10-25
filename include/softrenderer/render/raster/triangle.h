@@ -23,10 +23,15 @@
 // ============================================================
 
 // 填充纯色三角形：包围盒遍历 + 覆盖规则判定
+//
+// 【帧缓冲格式无关】fb 是模板参数：既接受 Framebuffer（RGBA8888），
+// 也接受 BasicFramebuffer<Color565> 等紧凑格式。颜色参数保持 Color
+// （运算域），量化由 setPixel 在写入那一刻完成。
 namespace sr
 {
 
-inline void fillTriangle(Framebuffer &fb, Vec2f v0, Vec2f v1, Vec2f v2, Color color)
+template <class FB>
+void fillTriangle(FB &fb, Vec2f v0, Vec2f v1, Vec2f v2, Color color)
 {
     // 1. 求包围盒并夹取到屏幕范围（只遍历可能覆盖的像素）
     const auto coverage = sr::TriangleCoverage::create(v0, v1, v2);
@@ -56,7 +61,8 @@ inline void fillTriangle(Framebuffer &fb, Vec2f v0, Vec2f v1, Vec2f v2, Color co
 
 // 顶点色插值版本：三个顶点各带颜色，内部像素用重心坐标混合。
 // OpenGL 里 varying 变量的插值就是同一件事。
-inline void fillTriangleGradient(Framebuffer &fb, Vec2f v0, Vec2f v1, Vec2f v2, Color c0, Color c1, Color c2)
+template <class FB>
+void fillTriangleGradient(FB &fb, Vec2f v0, Vec2f v1, Vec2f v2, Color c0, Color c1, Color c2)
 {
     const auto coverage = sr::TriangleCoverage::create(v0, v1, v2);
     if (!coverage)

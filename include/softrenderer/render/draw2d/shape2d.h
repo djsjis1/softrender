@@ -61,7 +61,8 @@ struct ClipRect
 // 所有 2D 图元（矩形、圆、多边形……）最终都经过此函数写像素。
 // 职责：边界检查 → scissor 裁剪 → Opaque 快路径 → 混合写入。
 // 绕过它直接调 setPixel 会让 scissor 和 BlendMode 静默失效。
-inline void plotBlend(Framebuffer& fb, int x, int y, Color c,
+template <class FB>
+void plotBlend(FB& fb, int x, int y, Color c,
                       BlendMode mode = BlendMode::Opaque,
                       const ClipRect* clip = nullptr)
 {
@@ -85,7 +86,8 @@ inline void plotBlend(Framebuffer& fb, int x, int y, Color c,
 
 // 基础 Bresenham 画线：纯色、整数、无浮点。
 // 用途：线框调试、UI 分割线、简单连线。
-inline void drawLine(Framebuffer& fb, int x0, int y0, int x1, int y1, Color c,
+template <class FB>
+void drawLine(FB& fb, int x0, int y0, int x1, int y1, Color c,
                      BlendMode mode = BlendMode::Opaque,
                      const ClipRect* clip = nullptr)
 {
@@ -107,7 +109,8 @@ inline void drawLine(Framebuffer& fb, int x0, int y0, int x1, int y1, Color c,
 
 // 渐变线段：从 c0 线性插值到 c1。
 // 用途：地平线渐变、光线、装饰线。
-inline void drawLineGradient(Framebuffer& fb, int x0, int y0, int x1, int y1,
+template <class FB>
+void drawLineGradient(FB& fb, int x0, int y0, int x1, int y1,
                              Color c0, Color c1,
                              BlendMode mode = BlendMode::Opaque,
                              const ClipRect* clip = nullptr)
@@ -132,7 +135,8 @@ inline void drawLineGradient(Framebuffer& fb, int x0, int y0, int x1, int y1,
 
 // 整数粗线：在每个 Bresenham 像素处画 thickness×thickness 方块。
 // 比 drawThickLine（浮点法线扩展）更轻量，适合像素风粗线。
-inline void drawLineThick(Framebuffer& fb, int x0, int y0, int x1, int y1,
+template <class FB>
+void drawLineThick(FB& fb, int x0, int y0, int x1, int y1,
                           Color c, int thickness,
                           BlendMode mode = BlendMode::Opaque,
                           const ClipRect* clip = nullptr)
@@ -152,7 +156,8 @@ inline void drawLineThick(Framebuffer& fb, int x0, int y0, int x1, int y1,
 
 // 虚线：dash 画多长，gap 空多长（像素步数）。
 // 用途：辅助线、选中框、边界标记。
-inline void drawLineDashed(Framebuffer& fb, int x0, int y0, int x1, int y1,
+template <class FB>
+void drawLineDashed(FB& fb, int x0, int y0, int x1, int y1,
                            Color c, int dash = 5, int gap = 3,
                            BlendMode mode = BlendMode::Opaque,
                            const ClipRect* clip = nullptr)
@@ -184,7 +189,8 @@ inline void drawLineDashed(Framebuffer& fb, int x0, int y0, int x1, int y1,
 
 // 抗锯齿线段（简化 Wu 算法）：主线像素 + 相邻像素按误差比例混合。
 // 用途：高质量线条、矢量图形描边。
-inline void drawLineAA(Framebuffer& fb, int x0, int y0, int x1, int y1, Color c,
+template <class FB>
+void drawLineAA(FB& fb, int x0, int y0, int x1, int y1, Color c,
                        BlendMode mode = BlendMode::AlphaBlend,
                        const ClipRect* clip = nullptr)
 {
@@ -218,7 +224,8 @@ inline void drawLineAA(Framebuffer& fb, int x0, int y0, int x1, int y1, Color c,
 
 // 二次贝塞尔曲线：P0→P1→P2，segments 为细分段数。
 // 用途：平滑曲线、图标路径、UI 装饰。
-inline void drawBezier(Framebuffer& fb, int x0, int y0, int x1, int y1, int x2, int y2,
+template <class FB>
+void drawBezier(FB& fb, int x0, int y0, int x1, int y1, int x2, int y2,
                        Color c, int segments = 50,
                        BlendMode mode = BlendMode::Opaque,
                        const ClipRect* clip = nullptr)
@@ -237,7 +244,8 @@ inline void drawBezier(Framebuffer& fb, int x0, int y0, int x1, int y1, int x2, 
 
 // 三次贝塞尔曲线：P0→P1→P2→P3。
 // 用途：字体轮廓、复杂曲线、动画路径可视化。
-inline void drawBezierCubic(Framebuffer& fb, int x0, int y0, int x1, int y1,
+template <class FB>
+void drawBezierCubic(FB& fb, int x0, int y0, int x1, int y1,
                             int x2, int y2, int x3, int y3,
                             Color c, int segments = 50,
                             BlendMode mode = BlendMode::Opaque,
@@ -257,7 +265,8 @@ inline void drawBezierCubic(Framebuffer& fb, int x0, int y0, int x1, int y1,
 
 // 前向声明：drawEllipse / drawPolygon 的加粗描边需要 drawThickLine，
 // 而 drawThickLine 定义在文件后部（依赖 fillPolygon），故先给原型。
-inline void drawThickLine(Framebuffer& fb, float x0, float y0, float x1, float y1,
+template <class FB>
+void drawThickLine(FB& fb, float x0, float y0, float x1, float y1,
                           float thickness, Color c, bool roundCaps,
                           BlendMode mode, const ClipRect* clip);
 
@@ -268,7 +277,8 @@ inline void drawThickLine(Framebuffer& fb, float x0, float y0, float x1, float y
 
 // 填充矩形：(x,y) 为左下角，w/h 为像素数。
 // 先做包围盒裁剪再逐像素画，避免内层循环做越界判断。
-inline void fillRect(Framebuffer& fb, int x, int y, int w, int h, Color c,
+template <class FB>
+void fillRect(FB& fb, int x, int y, int w, int h, Color c,
                      BlendMode mode = BlendMode::Opaque,
                      const ClipRect* clip = nullptr)
 {
@@ -291,7 +301,8 @@ inline void fillRect(Framebuffer& fb, int x, int y, int w, int h, Color c,
 }
 
 // 矩形描边：四条 fillRect 拼成边框，thickness 向内扩展
-inline void drawRect(Framebuffer& fb, int x, int y, int w, int h, Color c, int thickness = 1,
+template <class FB>
+void drawRect(FB& fb, int x, int y, int w, int h, Color c, int thickness = 1,
                      BlendMode mode = BlendMode::Opaque,
                      const ClipRect* clip = nullptr)
 {
@@ -307,7 +318,8 @@ inline void drawRect(Framebuffer& fb, int x, int y, int w, int h, Color c, int t
 // 矩形渐变填充：沿 y（下→上 c0→c1）或沿 x（左→右 c0→c1）。
 // 用途：天空、进度条、光泽面板、UI 渐变背景。
 // t 用像素中心归一化，避免首尾像素只露半截色带。
-inline void fillRectGradient(Framebuffer& fb, int x, int y, int w, int h,
+template <class FB>
+void fillRectGradient(FB& fb, int x, int y, int w, int h,
                              Color c0, Color c1, bool horizontal = false,
                              BlendMode mode = BlendMode::Opaque,
                              const ClipRect* clip = nullptr)
@@ -334,7 +346,8 @@ inline void fillRectGradient(Framebuffer& fb, int x, int y, int w, int h,
 // 填充圆：包围盒内逐像素做勾股距离测试 (dx²+dy² ≤ r²)。
 // 圆心支持浮点坐标，实现亚像素级平滑定位。
 // 先裁剪包围盒到屏幕/裁剪区，避免对屏外像素做无谓的距离测试。
-inline void fillCircle(Framebuffer& fb, float cx, float cy, float r, Color c,   
+template <class FB>
+void fillCircle(FB& fb, float cx, float cy, float r, Color c,   
                        BlendMode mode = BlendMode::Opaque,
                        const ClipRect* clip = nullptr)
 {
@@ -370,7 +383,8 @@ inline void fillCircle(Framebuffer& fb, float cx, float cy, float r, Color c,
 
 // 圆描边：中点圆算法（Bresenham 圆），只算 1/8 弧再八对称镜像。
 // 纯整数增量运算，无浮点无三角函数。thickness>1 时画多圈同心圆近似加粗。
-inline void drawCircle(Framebuffer& fb, int cx, int cy, int r, Color c, int thickness = 1,
+template <class FB>
+void drawCircle(FB& fb, int cx, int cy, int r, Color c, int thickness = 1,
                        BlendMode mode = BlendMode::Opaque,
                        const ClipRect* clip = nullptr)
 {
@@ -405,7 +419,8 @@ inline void drawCircle(Framebuffer& fb, int cx, int cy, int r, Color c, int thic
 }
 
 // 填充椭圆：归一化距离测试 (dx/rx)²+(dy/ry)² ≤ 1
-inline void fillEllipse(Framebuffer& fb, float cx, float cy, float rx, float ry, Color c,
+template <class FB>
+void fillEllipse(FB& fb, float cx, float cy, float rx, float ry, Color c,
                         BlendMode mode = BlendMode::Opaque,
                         const ClipRect* clip = nullptr)
 {
@@ -438,7 +453,8 @@ inline void fillEllipse(Framebuffer& fb, float cx, float cy, float rx, float ry,
 
 // 椭圆描边：参数方程步进 + drawThickLine 连接相邻点。
 // 步数随半径增大（周长 ≈ 2πr），避免大圆出现折线感。
-inline void drawEllipse(Framebuffer& fb, float cx, float cy, float rx, float ry, Color c,
+template <class FB>
+void drawEllipse(FB& fb, float cx, float cy, float rx, float ry, Color c,
                         int thickness = 1,
                         BlendMode mode = BlendMode::Opaque,
                         const ClipRect* clip = nullptr)
@@ -478,7 +494,8 @@ inline bool insideRoundedRect(float px, float py, float x, float y, float w, flo
 }
 
 // 填充圆角矩形：包围盒内逐像素做 SDF 判定
-inline void fillRoundedRect(Framebuffer& fb, float x, float y, float w, float h, float r, Color c,
+template <class FB>
+void fillRoundedRect(FB& fb, float x, float y, float w, float h, float r, Color c,
                             BlendMode mode = BlendMode::Opaque,
                             const ClipRect* clip = nullptr)
 {
@@ -494,7 +511,8 @@ inline void fillRoundedRect(Framebuffer& fb, float x, float y, float w, float h,
 }
 
 // 圆角矩形描边：外层 SDF 内 + 内层（收缩 thickness）SDF 外 = 均匀边框
-inline void drawRoundedRect(Framebuffer& fb, float x, float y, float w, float h, float r,
+template <class FB>
+void drawRoundedRect(FB& fb, float x, float y, float w, float h, float r,
                             Color c, int thickness = 1,
                             BlendMode mode = BlendMode::Opaque,
                             const ClipRect* clip = nullptr)
@@ -528,7 +546,8 @@ inline void drawRoundedRect(Framebuffer& fb, float x, float y, float w, float h,
 // 对每条水平扫描线求与所有边的交点 → 排序 → 成对填充区间。
 // 支持凹多边形（凸多边形每行只有 1 对交点，凹的有多对）。
 // 半开区间 [a.y, b.y) 避免顶点被两条边重复计数。
-inline void fillPolygon(Framebuffer& fb, const std::vector<Vec2f>& pts, Color c,
+template <class FB>
+void fillPolygon(FB& fb, const std::vector<Vec2f>& pts, Color c,
                         BlendMode mode = BlendMode::Opaque,
                         const ClipRect* clip = nullptr)
 {
@@ -590,7 +609,8 @@ inline void fillPolygon(Framebuffer& fb, const std::vector<Vec2f>& pts, Color c,
 }
 
 // 多边形描边：首尾相连画折线。closed=false 时不连回起点（开放路径）。
-inline void drawPolygon(Framebuffer& fb, const std::vector<Vec2f>& pts, Color c,
+template <class FB>
+void drawPolygon(FB& fb, const std::vector<Vec2f>& pts, Color c,
                         bool closed = true, int thickness = 1,
                         BlendMode mode = BlendMode::Opaque,
                         const ClipRect* clip = nullptr)
@@ -610,7 +630,8 @@ inline void drawPolygon(Framebuffer& fb, const std::vector<Vec2f>& pts, Color c,
 // 粗线：线段沿法线两侧各偏移 thickness/2 扩成矩形，末端加圆帽。
 // 比"画多遍 1px 线偏移"更干净，不会留缝隙。
 // 用途：粗描边、连接线、矢量画笔、加粗的多边形轮廓。
-inline void drawThickLine(Framebuffer& fb, float x0, float y0, float x1, float y1,
+template <class FB>
+void drawThickLine(FB& fb, float x0, float y0, float x1, float y1,
                           float thickness, Color c, bool roundCaps = true,
                           BlendMode mode = BlendMode::Opaque,
                           const ClipRect* clip = nullptr)
@@ -639,7 +660,8 @@ inline void drawThickLine(Framebuffer& fb, float x0, float y0, float x1, float y
 // ── 点 ────────────────────────────────────────────────────
 // size=1 画单像素，size>1 画 size×size 方块。
 // 用途：粒子、星空、散点图、调试标记。
-inline void drawPoint(Framebuffer& fb, int x, int y, Color c, int size = 1,
+template <class FB>
+void drawPoint(FB& fb, int x, int y, Color c, int size = 1,
                       BlendMode mode = BlendMode::Opaque,
                       const ClipRect* clip = nullptr)
 {
@@ -651,7 +673,8 @@ inline void drawPoint(Framebuffer& fb, int x, int y, Color c, int size = 1,
 
 // 线框三角形：三条边复用 drawLine。属于 2D 绘制能力（需要扫线算法），
 // 因此放在这里而不是光栅化模块——基础光栅化不应为了画线框而依赖整个 2D 模块。
-inline void wireTriangle(Framebuffer &fb, Vec2f v0, Vec2f v1, Vec2f v2, Color color)
+template <class FB>
+void wireTriangle(FB &fb, Vec2f v0, Vec2f v1, Vec2f v2, Color color)
 {
     drawLine(fb, (int)v0.x, (int)v0.y, (int)v1.x, (int)v1.y, color);
     drawLine(fb, (int)v1.x, (int)v1.y, (int)v2.x, (int)v2.y, color);

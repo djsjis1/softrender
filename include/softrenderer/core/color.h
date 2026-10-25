@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 
 namespace sr
@@ -6,14 +7,33 @@ namespace sr
 
 // ============================================================
 // Color：一个像素的颜色，RGBA 各 8 位（0~255）
-// 软渲染器里 framebuffer 的最小存储单元。
+//
+// 【两个身份】它既是帧缓冲的默认存储单元，也是全库唯一的**运算域**类型：
+// 着色器输出、blend 的五种混合、纹理采样、后处理都在这个域里算。
+// 因为运算需要逐通道算数 + 8 位 alpha，紧凑格式（RGB565 等）不能替代它；
+// 那些格式见 core/pixel_format.h，只作为存储域存在。
+//
+// 下面的 fromColor / toColor 是恒等实现，使 Color 本身满足
+// BasicFramebuffer 的 PixelT 契约，从而 Framebuffer 就是
+// "自带格式的帧缓冲" 在 RGBA8888 上的特例，无需第二套存储类型。
 // ============================================================
 struct Color
 {
     uint8_t r = 0, g = 0, b = 0, a = 255;
 
+    static constexpr size_t kBytes = 4;
+
     Color() = default;
     Color(uint8_t r_, uint8_t g_, uint8_t b_, uint8_t a_ = 255) : r(r_), g(g_), b(b_), a(a_) {}
+
+    // PixelT 契约：RGBA8888 是运算域本身，往返均为恒等映射。
+    static Color fromColor(const Color& c) { return c; }
+    Color toColor() const { return *this; }
+
+    friend bool operator==(const Color& x, const Color& y)
+    {
+        return x.r == y.r && x.g == y.g && x.b == y.b && x.a == y.a;
+    }
 
     // 从 [0,1] 浮点构造，着色计算通常在浮点域进行，最后写入时转 8 位。
     //

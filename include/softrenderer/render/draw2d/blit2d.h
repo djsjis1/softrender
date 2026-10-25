@@ -56,7 +56,8 @@ inline Color tintPixel(Color src, Color tint)
 // sprite 第 0 行是图案顶部；画布 y 向上，故顶部行画在最高处（自动 y 翻转）。
 // (ox,oy) 是精灵左下角。scale 为放大倍数（1=原始像素）。
 // ------------------------------------------------------------
-inline void drawCharSprite(Framebuffer& fb, const std::vector<std::string>& sprite,
+template <class FB>
+void drawCharSprite(FB& fb, const std::vector<std::string>& sprite,
                            const std::vector<SpritePalette>& palette,
                            int ox, int oy, int scale = 1,
                            Color tint = sr::colors::white, char transparent = '.',
@@ -100,7 +101,8 @@ inline void drawCharSprite(Framebuffer& fb, const std::vector<std::string>& spri
 // plotBlend 的边界检查丢弃，每个屏外像素仍要付出采样 + 函数调用的代价
 // （实测 4000×4000 的目标矩形 94% 的调用落在屏外，单次 blit 耗时 3.5 s）。
 // ------------------------------------------------------------
-inline bool clipTargetRect(const Framebuffer& fb, const ClipRect* clip,
+template <class FB>
+bool clipTargetRect(const FB& fb, const ClipRect* clip,
                            long long x, long long y, long long w, long long h,
                            int& x0, int& y0, int& x1, int& y1)
 {
@@ -129,7 +131,8 @@ inline bool clipTargetRect(const Framebuffer& fb, const ClipRect* clip,
 // ------------------------------------------------------------
 // 1:1 位图拷贝：把整张 image 贴到 (dx,dy)。
 // ------------------------------------------------------------
-inline void blitImage(Framebuffer& fb, const sr::Image& img, int dx, int dy,
+template <class FB>
+void blitImage(FB& fb, const sr::Image& img, int dx, int dy,
                       Color tint = sr::colors::white,
                       BlendMode mode = BlendMode::Opaque,
                       const ClipRect* clip = nullptr)
@@ -148,7 +151,8 @@ inline void blitImage(Framebuffer& fb, const sr::Image& img, int dx, int dy,
 // 子矩形拷贝（精灵图集/动画帧）：只贴 image 中 src 指定的那块。
 // src 用图像空间坐标（y 向上，行 0 在底部）。
 // ------------------------------------------------------------
-inline void blitImageRect(Framebuffer& fb, const sr::Image& img, const Recti& src,
+template <class FB>
+void blitImageRect(FB& fb, const sr::Image& img, const Recti& src,
                           int dx, int dy, Color tint = sr::colors::white,
                           BlendMode mode = BlendMode::Opaque,
                           const ClipRect* clip = nullptr)
@@ -170,7 +174,8 @@ inline void blitImageRect(Framebuffer& fb, const sr::Image& img, const Recti& sr
 // 缩放拷贝：把 image 拉伸到 dw×dh（最近邻重采样，像素风锐利）。
 // 需要平滑放大时可先对 Texture 用双线性（见 blitTexture）。
 // ------------------------------------------------------------
-inline void blitImageScaled(Framebuffer& fb, const sr::Image& img,
+template <class FB>
+void blitImageScaled(FB& fb, const sr::Image& img,
                             int dx, int dy, int dw, int dh,
                             Color tint = sr::colors::white,
                             BlendMode mode = BlendMode::Opaque,
@@ -198,7 +203,8 @@ inline void blitImageScaled(Framebuffer& fb, const sr::Image& img,
 // 用反向映射（遍历目标包围盒 + 逆变换求源坐标）保证旋转/缩放不留空洞。
 // bilinear=true 时对源图做双线性采样（缩小时更平滑），否则最近邻。
 // ------------------------------------------------------------
-inline void blitImageTransformed(Framebuffer& fb, const sr::Image& img, const Mat3& xform,
+template <class FB>
+void blitImageTransformed(FB& fb, const sr::Image& img, const Mat3& xform,
                                  Color tint = sr::colors::white, bool bilinear = false,
                                  BlendMode mode = BlendMode::Opaque,
                                  const ClipRect* clip = nullptr)
@@ -263,7 +269,8 @@ inline void blitImageTransformed(Framebuffer& fb, const sr::Image& img, const Ma
 }
 
 // 便捷：绕精灵中心旋转 + 缩放后贴图（cx,cy 为设备空间中心）
-inline void blitImageRotated(Framebuffer& fb, const sr::Image& img,
+template <class FB>
+void blitImageRotated(FB& fb, const sr::Image& img,
                              float cx, float cy, float scale, float angleRad,
                              Color tint = sr::colors::white, bool bilinear = false,
                              BlendMode mode = BlendMode::Opaque,
@@ -278,7 +285,8 @@ inline void blitImageRotated(Framebuffer& fb, const sr::Image& img,
 // ------------------------------------------------------------
 // 图层合成：把另一个 Framebuffer 当作图层贴上来（半透明 UI/特效常用）
 // ------------------------------------------------------------
-inline void blitFramebuffer(Framebuffer& dst, const Framebuffer& src, int dx, int dy,
+template <class DstFB, class SrcFB>
+void blitFramebuffer(DstFB& dst, const SrcFB& src, int dx, int dy,
                             BlendMode mode = BlendMode::AlphaBlend,
                             const ClipRect* clip = nullptr)
 {
@@ -295,7 +303,8 @@ inline void blitFramebuffer(Framebuffer& dst, const Framebuffer& src, int dx, in
 // 相比 sr::Image 的最近邻缩放，放大更平滑、缩小无闪烁。
 // (x,y) 为矩形左下角，w/h 为设备像素尺寸。
 // ------------------------------------------------------------
-inline void blitTexture(Framebuffer& fb, const Texture& tex, int x, int y, int w, int h,
+template <class FB>
+void blitTexture(FB& fb, const Texture& tex, int x, int y, int w, int h,
                         Color tint = sr::colors::white,
                         BlendMode mode = BlendMode::Opaque,
                         const ClipRect* clip = nullptr)
@@ -337,7 +346,8 @@ inline void blitTexture(Framebuffer& fb, const Texture& tex, int x, int y, int w
 // 否则上层只能“静默不画”（Renderer2D::texture 曾如此）。
 // 用逆变换反向映射，保证旋转后不留空洞。
 // ------------------------------------------------------------
-inline void blitTextureTransformed(Framebuffer& fb, const Texture& tex, const Mat3& xform,
+template <class FB>
+void blitTextureTransformed(FB& fb, const Texture& tex, const Mat3& xform,
                                    Color tint = sr::colors::white, bool bilinear = true,
                                    BlendMode mode = BlendMode::Opaque,
                                    const ClipRect* clip = nullptr)

@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -50,8 +51,10 @@
 #include "softrenderer/core/arena.h"
 #include "softrenderer/core/float_framebuffer.h"
 #include "softrenderer/core/framebuffer.h"
+#include "softrenderer/core/framebuffer_convert.h"
 #include "softrenderer/core/gbuffer.h"
 #include "softrenderer/core/msaa_framebuffer.h"
+#include "softrenderer/core/pixel_format.h"
 #include "softrenderer/io/gltf_loader.h"
 #include "softrenderer/io/image_loader.h"
 #include "softrenderer/io/image_write.h"

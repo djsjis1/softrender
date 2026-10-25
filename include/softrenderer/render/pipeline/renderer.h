@@ -23,6 +23,14 @@
 //   6. 光栅化：包围盒遍历 + 重心坐标
 //   7. 深度测试：z 更近才通过
 //   8. 透视校正插值 Varyings -> shader.fragment -> 写像素
+//
+// 【帧缓冲格式无关】drawMesh / rasterTriangle 的帧缓冲参数是模板参数，
+// 而不是固定在 Framebuffer 上：着色器始终输出 Vec3f（高精度运算域），
+// 只有最后一步 `Pixel::fromFloat` 把结果量化进目标缓冲的存储格式。
+// 因此 `renderer.drawMesh(fb8888, ...)` 与 `renderer.drawMesh(fb565, ...)`
+// 走同一条代码路径、同一套覆盖规则，差别仅一行量化。
+// 用模板成员函数而非模板类，是为了让既有调用点（22 个示例、测试、
+// 压测）一行都不用改——实参类型自动推导。
 // ============================================================
 namespace sr
 {
@@ -38,7 +46,9 @@ class Renderer
     int width() const { return width_; }
     int height() const { return height_; }
 
-    void clear(Framebuffer& fb, Color bg)
+    // 清屏：同时清深度。fb 可为任意格式的帧缓冲（见 drawMesh 的说明）。
+    template <class FB>
+    void clear(FB& fb, const Color& bg)
     {
         fb.clear(bg);
         zbuf_.clear();
@@ -51,7 +61,11 @@ class Renderer
 
     // 本函数不做宿主计时：ProfileScope 属于 runtime，由调用方在示例/基准里
     // 包住 drawMesh，避免渲染头依赖时钟、线程与文件写出。
-    void drawMesh(Framebuffer& fb, const Mesh& mesh, Shader& shader)
+    //
+    // FB 只需满足 BasicFramebuffer 的接口（width/height/row），
+    // 像素格式由 FB::Pixel 决定。
+    template <class FB>
+    void drawMesh(FB& fb, const Mesh& mesh, Shader& shader)
     {
         const int vertexCount = int(mesh.vertices.size());
         for (int i = 0; i < mesh.triangleCount(); ++i)
@@ -96,8 +110,13 @@ class Renderer
     // 与基础填充（triangle.h）、标量/SSE2 与 MSAA 路径共用同一套规则，
     // 从而消除共享边被两个三角形重复覆盖的问题（ADR-003）。
     // 顶点属性仍用浮点重心坐标做透视校正插值。
-    void rasterTriangle(Framebuffer& fb, Shader& shader, const ClipVertex& a, const ClipVertex& b, const ClipVertex& c)
+    //
+    // 【与格式无关】Pixel 由调用方传入的帧缓冲类型决定；
+    // fromFloat 是唯一把运算域颜色量化成存储格式的位置。
+    template <class FB>
+    void rasterTriangle(FB& fb, Shader& shader, const ClipVertex& a, const ClipVertex& b, const ClipVertex& c)
     {
+        using Pixel = typename FB::Pixel;
         // 3. 透视除法
         float iw0 = 1.0f / a.pos.w, iw1 = 1.0f / b.pos.w, iw2 = 1.0f / c.pos.w;
         Vec3f n0{a.pos.x * iw0, a.pos.y * iw0, a.pos.z * iw0};
@@ -142,7 +161,7 @@ class Renderer
         {
             // 行指针快速路径：包围盒已在屏幕内，免去逐像素边界检查
             float* zRow = zbuf_.row(y);
-            Color* pixRow = fb.row(y);
+            Pixel* pixRow = fb.row(y);
 
             auto coveragePixel = coverageRow;
             for (int x = bounds.minX; x <= bounds.maxX; ++x)
@@ -166,7 +185,7 @@ class Renderer
                         if (shader.fragment(frag, color))
                         {
                             zRow[x] = z;
-                            pixRow[x] = Color::fromFloat(color.x, color.y, color.z);
+                            pixRow[x] = Pixel::fromFloat(color.x, color.y, color.z);
                         }
                     }
                 }

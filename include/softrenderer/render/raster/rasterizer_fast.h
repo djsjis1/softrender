@@ -104,7 +104,11 @@ inline EdgeSetup setupEdges(const Vec2f& v0, const Vec2f& v1, const Vec2f& v2, i
 }
 
 // 标量版增量光栅化（无 SIMD，但用增量边函数）
-inline void fillTriangleIncremental(Framebuffer& fb, DepthBuffer& zb, const Vec2f& v0, const Vec2f& v1, const Vec2f& v2,
+//
+// 【帧缓冲格式无关】fb 是模板参数，可接受任意 BasicFramebuffer<PixelT>；
+// 颜色以 Color（运算域）传入，量化由 setPixel 完成。
+template <class FB>
+inline void fillTriangleIncremental(FB& fb, DepthBuffer& zb, const Vec2f& v0, const Vec2f& v1, const Vec2f& v2,
                                     float z0, float z1, float z2, Color color)
 {
     const auto coverage = sr::TriangleCoverage::create(v0, v1, v2);
@@ -159,7 +163,9 @@ inline void fillTriangleIncremental(Framebuffer& fb, DepthBuffer& zb, const Vec2
 
 #if SR_HAS_SSE2
 // SSE2 每组四像素，以两个 int64 二元组计算确定性的覆盖掩码。
-inline void fillTriangleSSE2(Framebuffer& fb, DepthBuffer& zb, const Vec2f& v0, const Vec2f& v1, const Vec2f& v2,
+// 与标量版同样接受任意 BasicFramebuffer<PixelT>。
+template <class FB>
+inline void fillTriangleSSE2(FB& fb, DepthBuffer& zb, const Vec2f& v0, const Vec2f& v1, const Vec2f& v2,
                              float z0, float z1, float z2, Color color)
 {
     const auto coverage = sr::TriangleCoverage::create(v0, v1, v2);
@@ -224,7 +230,8 @@ inline void fillTriangleSSE2(Framebuffer& fb, DepthBuffer& zb, const Vec2f& v0, 
 #endif  // SR_HAS_SSE2
 
 // 统一入口：有 SSE2 用 SSE2，否则用标量增量
-inline void fillTriangleFast(Framebuffer& fb, DepthBuffer& zb, const Vec2f& v0, const Vec2f& v1, const Vec2f& v2,
+template <class FB>
+inline void fillTriangleFast(FB& fb, DepthBuffer& zb, const Vec2f& v0, const Vec2f& v1, const Vec2f& v2,
                              float z0, float z1, float z2, Color color)
 {
 #if SR_HAS_SSE2
