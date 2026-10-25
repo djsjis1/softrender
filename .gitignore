@@ -65,6 +65,11 @@ third/entt/build/
 build_log.txt
 cmake_log.txt
 
+# 根目录下脚本/AI 生成的隐藏中间文件（日志、提交信息、一次性 .ps1）。
+# 只匹配以点开头且位于仓库根的文件，不影响 .vscode/ 等目录。
+/.*.txt
+/.*.ps1
+
 # ---------- 渲染输出（示例运行产物，可重新生成）----------
 output/*
 !output/.gitkeep
