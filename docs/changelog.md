@@ -7,6 +7,23 @@
 
 ## 2026-10-25
 
+### 缺陷审查（三）：PBR 零粗糙度
+
+- `render/shader/pbr_shader.h`：`roughness = 0` 时 `a = 0`、`a2 = 0`，GGX 的 D 恒为 0，
+  镜面项完全消失——**完美镜面反而比粗糙表面更暗**，与成员注释「0=镜面」相反。
+  实测 `roughness = 0` 的镜面项为 0，而 `0.8` 为 0.0078。
+  现取感知粗糙度下限 0.04（Filament 同款），并让 `k`、反射采样层与粗糙度衰减
+  都用同一个夹取值，避免几何遮蔽与分布对不上。
+- PBR 着色器此前在单元测试里零覆盖：新增
+  `PBRShader.ZeroRoughnessStillProducesSpecularHighlight`（修前为红）
+  与 `PBRShader.SmootherSurfaceHasStrongerPeakSpecular`（粗糙度单调性）。
+- 复查未发现问题的：`core/blend.h`（五种模式的公式与 alpha 合成）、
+  `render/shader/shaders.h`（Blinn-Phong）、`resource/cubemap.h`（反射/辐照度的退化输入）、
+  `core/image.h`（`pixelCount` 溢出与 `valid` 口径）。
+
+**验证**：构建 0/0；`unit_tests` **253/253**；像素回归 3/3；
+压测 Release **105/105**、Debug+ASAN 85/85（quick）。
+
 ### 缺陷审查（续）：四元数退化轴与压测判据
 
 - `math/quat.h`：`fromAxisAngle` 对零/非有限轴无防护，而 `Vec3::normalized()` 只有
