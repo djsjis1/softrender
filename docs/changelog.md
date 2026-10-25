@@ -7,6 +7,21 @@
 
 ## 2026-10-25
 
+### 缺陷审查（十一）：同一段 BRDF 被复制了两处
+
+- `render/shader/deferred_lighting.h` 的 `lightingPass` 里有一段与 `PBRShader` 几乎逐行相同的
+  Cook-Torrance BRDF。上轮修 PBR 的「roughness = 0 时 a2 = 0，D 恒为 0」时只改了
+  `pbr_shader.h`，**漏了这个复制品**——延迟渲染的完美镜面同样没有高光。
+  现同样取感知粗糙度下限 0.04，并补 `DeferredLighting.ZeroRoughnessStillProducesSpecular`
+  （修前为红）。
+- 这是典型的复制粘贴维护陷阱：修一处漏一处，而两者分别跑在不同的渲染路径上，
+  Demo 里看不出差异。后续如果再改 BRDF，两处需同时改。
+- 补 `Mesh.AllGeneratorsWindingMatchesNormals`：把原有的球体绕序用例推广到 cube /
+  plane / planeGrid / sphere 四个生成器。逐三角形比较面法线（右手定则）与顶点法线同向，
+  零面积面跳过。**四个生成器全部正确**。绕序错误会被背面剔除静默吃掉，是典型的“无报错但画面少一半”。
+
+**验证**：构建 0/0；`unit_tests` **271/271**；像素回归 3/3；压测 105/105。
+
 ### 缺陷审查（十）：阴影采样用了错误的尺寸来源
 
 - `render/shader/advanced_shaders.h` 的 `FinalShader::computeShadow`：边界检查用成员
