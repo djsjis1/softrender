@@ -73,9 +73,11 @@ struct MeshRef
     int meshIndex = -1;
 };
 
+// 与 MeshRef 同一口径：-1 表示「未设置」。0 是合法材质下标，拿它做哨兵
+// 会让默认构造的组件静默指向第一个材质，与 MeshRef 的语义相反。
 struct MaterialRef
 {
-    int materialId = 0;
+    int materialId = -1;
 };
 
 struct Light

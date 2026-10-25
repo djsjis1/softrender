@@ -50,6 +50,14 @@ struct CameraTag
 };
 }  // namespace ecsCanary
 
+// MeshRef 与 MaterialRef 都是「资源下标」语义，未设置必须用 -1：
+// 0 是合法下标，拿它做哨兵会让默认构造的组件静默指向第一个资源。
+TEST(ECS, ReferenceComponentsDefaultToUnset)
+{
+    EXPECT_EQ(sr::MeshRef{}.meshIndex, -1);
+    EXPECT_EQ(sr::MaterialRef{}.materialId, -1);
+}
+
 TEST(ECS, CreateAndDestroy)
 {
     entt::registry registry;
