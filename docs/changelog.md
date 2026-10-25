@@ -7,6 +7,23 @@
 
 ## 2026-10-25
 
+### 缺陷审查（十二）：一次被既有测试拦住的「修复」
+
+- 读 `runtime/command_buffer.h` 时发现：`executeSequential` 遇异常立即中止，
+  而 `executeParallel` 会把剩余命令跑完再抛。初判为“串并行语义不一致”，
+  于是改成“失败后停止领取新任务”。
+- 改完跑全量，既有用例
+  `ThreadFailures.executeParallel_failure_attemptsAllCommandsEvenWithOneThread`
+  当场变红——它明确锁定“一个命令失败不阻止其他命令”是**有意设计**（并行命令
+  通常互不相干，各自完成更有用）。实现已完整回退。
+- 最终产出改为把差异写成显式契约：两个函数各自的异常语义写进注释，并补上此前
+  缺失的 `CommandBuffer.SequentialStopsAtFirstFailure`（串行侧的异常行为
+  之前没有任何用例）。两者对照，以后再改任一侧都会立刻被测试拦住。
+- 教训：**改行为之前先跑既有测试**。本次能及时发现，正是因为改完立即跑了全量，
+  而不是等到收尾批量验证。
+
+**验证**：构建 0/0；`unit_tests` **272/272**；像素回归 3/3；压测 105/105。
+
 ### 缺陷审查（十一）：同一段 BRDF 被复制了两处
 
 - `render/shader/deferred_lighting.h` 的 `lightingPass` 里有一段与 `PBRShader` 几乎逐行相同的
