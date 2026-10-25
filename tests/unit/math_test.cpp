@@ -471,6 +471,27 @@ TEST(Transform2D, Ortho2DMapsWorldToDevice)
     EXPECT_NEAR(p.y, 100.0f, 1e-3f);
 }
 
+// 2D 几何小工具（perp / rotate2D / angleBetween）此前零调用，全仓只有定义。
+TEST(Vec2, PerpRotateAndSignedAngle)
+{
+    const Vec2f v{3.0f, 4.0f};
+    const Vec2f p = perp(v);
+    EXPECT_FLOAT_EQ(p.x, -4.0f);
+    EXPECT_FLOAT_EQ(p.y, 3.0f);
+    EXPECT_NEAR(dot(v, p), 0.0f, 1e-6f); // perp 确实垂直
+
+    const Vec2f r = rotate2D({1.0f, 0.0f}, 1.5707963f); // +90°
+    EXPECT_NEAR(r.x, 0.0f, 1e-5f);
+    EXPECT_NEAR(r.y, 1.0f, 1e-5f);
+
+    // 符号由叉积决定：从 +x 到 +y 为正，反向为负
+    EXPECT_NEAR(angleBetween({1.0f, 0.0f}, {0.0f, 1.0f}), 1.5707963f, 1e-5f);
+    EXPECT_NEAR(angleBetween({0.0f, 1.0f}, {1.0f, 0.0f}), -1.5707963f, 1e-5f);
+
+    // 零向量不得产生 NaN（atan2(0,0) 定义为 0）
+    EXPECT_TRUE(std::isfinite(angleBetween({0.0f, 0.0f}, {1.0f, 0.0f})));
+}
+
 // ==================== Rect2 边界语义（补充） ====================
 // 上面已覆盖 contains 半开与「空矩形不与任何矩形相交」；这里补四类此前
 // 没有断言的契约：不相交时 intersection 返回空矩形而非负尺寸、merged 跳过

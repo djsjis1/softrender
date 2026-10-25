@@ -340,3 +340,31 @@ TEST(Blit2D, EdgeSamplingDoesNotWrapToOppositeSide)
     EXPECT_GT(rightTop.b, 200);
 }
 
+// drawRect 与 blitFramebuffer 此前零调用（全仓只有定义、示例与压测都没用过），
+// 属于从未被执行过的公共 API。这里固定它们的输出行为。
+TEST(Draw2D, DrawRectOutlinesWithoutFillingCenter)
+{
+    Framebuffer fb(16, 16, colors::black);
+    draw2d::drawRect(fb, 2, 2, 12, 12, colors::white, 2);
+    EXPECT_EQ(fb.getPixel(2, 2).r, 255);  // 左下角边框
+    EXPECT_EQ(fb.getPixel(13, 2).r, 255); // 右下角边框
+    EXPECT_EQ(fb.getPixel(8, 8).r, 0);    // 中心保持背景
+
+    // 厚度超过边长时夹到 min(w,h)：整块填满而不是越界
+    Framebuffer small(8, 8, colors::black);
+    draw2d::drawRect(small, 0, 0, 8, 8, colors::white, 99);
+    EXPECT_EQ(small.getPixel(4, 4).r, 255);
+}
+
+TEST(Draw2D, BlitFramebufferRespectsOffset)
+{
+    Framebuffer dst(8, 8, colors::black);
+    Framebuffer src(4, 4, colors::white);
+    draw2d::blitFramebuffer(dst, src, 2, 2);
+
+    EXPECT_EQ(dst.getPixel(2, 2).r, 255); // 覆盖区左下
+    EXPECT_EQ(dst.getPixel(5, 5).r, 255); // 覆盖区右上
+    EXPECT_EQ(dst.getPixel(1, 1).r, 0);   // 偏移之外
+    EXPECT_EQ(dst.getPixel(6, 6).r, 0);   // 4x4 只覆盖 [2,6)
+}
+
