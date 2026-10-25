@@ -77,7 +77,7 @@ AI 修改代码前必须先读目标文件的头注释，快速理解模块职�
 
 * **禁止修改 `Framebuffer` 的坐标约定**（x 向右、y 向上、`(0,0)` 在左下角）
   `include/softrenderer/core/framebuffer.h` 头注释注明「后面所有阶段都遵守」。`Renderer2D`、`sr::io` 的 TGA 写出、
-  `pixel_regression` 比对、全部 22 个示例都依赖此约定。改动会**静默翻转所有输出图像**——
+  `pixel_regression` 比对、全部 19 个离屏示例与 3 个窗口示例都依赖此约定。改动会**静默翻转所有输出图像**——
   不报错、不崩溃，只是图上下颠倒，极难定位。
 
 * **禁止修改 `Varyings`（`render/pipeline/varyings.h`）已有字段的语义**
@@ -178,7 +178,7 @@ cmake --build build --config Release --target unit_tests
 **测试**
 
 ```powershell
-# 开发迭代首选：单进程跑完 246 个用例，约 40 毫秒
+# 开发迭代首选：单进程跑完 324 个用例，约 55 毫秒
 .\build\bin\Release\unit_tests.exe
 
 # 全量 ctest（CI 用的命令；串行约 40 秒，并行约 13 秒）
@@ -194,10 +194,10 @@ ctest --test-dir build -C Release -L fast
 .\build\bin\Release\unit_tests.exe --gtest_filter=RasterizerFast.*
 ```
 
-**压测探针**（`renderer_stress`，98 个场景，退出码即结果）
+**压测探针**（`renderer_stress`，110 个场景，退出码即结果）
 
 ```powershell
-.\build\bin\Release\renderer_stress.exe --quick                 # 78 个非重型场景，约 1.7 秒
+.\build\bin\Release\renderer_stress.exe --quick                 # 90 个非重型场景，约 1.8 秒
 .\build\bin\Release\renderer_stress.exe                           # 全量，约 8 秒
 .\build\bin\Release\renderer_stress.exe --filter=msaa             # 只跑 id/名称含 msaa 的场景
 .\build\bin\Release\renderer_stress.exe --list                    # 列出场景与 heavy 标记
@@ -209,8 +209,8 @@ ctest --test-dir build -C Release -L fast
 > 默认只打印提示；CI 固定在同型号机器时才加 `--strict-baseline`。
 
 > ⚠️ `ctest` 慢的原因：`gtest_discover_tests` 把每个用例注册为独立 ctest 项，
-> 246 用例 = 246 次进程启动，开销全在进程创建而非测试本身。
-> `-LE fast` 排除 `unit_tests_all`，避免与 246 个 discover 项重复跑。
+> 324 用例 = 324 次进程启动，开销全在进程创建而非测试本身。
+> `-LE fast` 排除 `unit_tests_all`，避免与 324 个 discover 项重复跑。
 > 详见 `docs/troubleshooting.md`。
 
 **Sanitizer**（默认关闭，需显式开启）
@@ -253,7 +253,7 @@ $llvm = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools
 >
 > 头文件检查必须带 `-x c++`：否则 `.h` 被当成 C 处理，报 `-std=c++23 not allowed with C`。
 > 静态分析目标聚焦 `clang-analyzer-*` 与 `bugprone-*`（`-*,` 前缀覆盖 `.clang-tidy` 的检查集）：
-> 已扫全部 65 个公共头，139 条诊断中 1 项真实缺陷、16 项范围受控的误报、
+> 已扫全部 67 个公共头，139 条诊断中 1 项真实缺陷、16 项范围受控的误报、
 > 122 条是刻意的 `float→int`。
 >
 > `.clang-format` 仍**从未全仓执行**：实测 60 个 `include/softrenderer/` 头文件的 namespace 体
@@ -271,12 +271,12 @@ $llvm = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools
 
 ```powershell
 cmake --build build --config Release --parallel   # 零错误零警告
-.\build\bin\Release\unit_tests.exe                # 246 用例全绿
+.\build\bin\Release\unit_tests.exe                # 324 用例全绿
 .\build\bin\Release\render_regression.exe         # 3 个像素回归全绿
-.\build\bin\Release\renderer_stress.exe --quick   # 78 个压测场景全绿（改渲染/IO/并发时必跑）
+.\build\bin\Release\renderer_stress.exe --quick   # 90 个压测场景全绿（改渲染/IO/并发时必跑）
 ```
 
-涉及渲染输出的改动额外要求：跑一遍 20 个离屏示例，确认均正常退出（3 个窗口示例 stage03 / stage08_shader_live / stage10_shadow_live 不参与自动运行，只验证能构建）。
+涉及渲染输出的改动额外要求：跑一遍 19 个离屏示例，确认均正常退出（3 个窗口示例 stage03 / stage08_shader_live / stage10_shadow_live 不参与自动运行，只验证能构建）。
 涉及 `CMakeLists.txt` 的改动额外要求：比对可执行目标清单与改动前一致
 （当前基线：Windows 上 **25 个 exe**）。
 

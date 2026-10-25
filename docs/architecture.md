@@ -153,8 +153,10 @@ transform2d.h  → mat3.h, rect.h
 ```
 # core/
 color.h              → （叶子）
+pixel_format.h       → color.h                       （存储格式：Color565 / Gray8）
 depthbuffer.h        → （叶子）
-framebuffer.h        → color.h
+framebuffer.h        → color.h                       （BasicFramebuffer<PixelT> + Framebuffer 别名）
+framebuffer_convert.h→ framebuffer.h                 （convertFramebuffer / NearestUpscaler）
 blend.h              → color.h
 msaa_framebuffer.h   → color.h, depthbuffer.h
 float_framebuffer.h  → color.h, depthbuffer.h, framebuffer.h, math/vec.h

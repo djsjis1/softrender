@@ -7,6 +7,28 @@
 
 ## 2026-10-25
 
+### 像素格式抽象（ADR-005）：RGBA8888 / RGB565 / Gray8 三种存储格式并存
+
+- `core/pixel_format.h`（新）：`Color565`（5/6/5 打包，四舍五入量化 + 位复制扩展）、`Gray8`（Rec.601 76/150/29）。`Color` 补齐 `kBytes` / `fromColor` / `toColor`，成为 `PixelT` 契约的恒等特例，不引入第二个"颜色"概念。
+- `core/framebuffer.h`：`Framebuffer` → `BasicFramebuffer<PixelT>`，并用 `using Framebuffer = BasicFramebuffer<Color>` 保持既有调用点**零改动**；新增 `bytesPerPixel()` / `byteSize()`；`clear` 把量化提到循环外做一次。
+- `core/framebuffer_convert.h`（新）：`convertFramebuffer`（对标 SDL 的 `SDL_ConvertPixels`）+ `NearestUpscaler`（映射表预计算、`presentRow` 逐行输出，用于"小画布渲染 → 屏幕分辨率"）。
+- `render/pipeline/renderer.h`、`render/raster/triangle.h`、`render/raster/rasterizer_fast.h`：帧缓冲参数改为**模板成员/模板函数**而非模板类，`drawMesh` / `fillTriangle*` 的全部调用点（22 个示例 + 测试 + 压测）一行未改。
+- `render/draw2d/shape2d.h`、`render/draw2d/blit2d.h`：23 + 11 个自由函数同样模板化，2D 图元（矩形/圆/多段线/圆角矩形/位图 blit/scissor）可直接画进 565 与灰度缓冲——MCU 上 UI 绘制的核心需求。成立依据是它们只经 `plotBlend` 的 `setPixel`/`getPixel` 读写，混合在 `Color` 域完成、最后一步才量化。唯一受限项是**目标侧 alpha**：565 缓冲读回的 dst 恒为不透明，故半透明图元叠在半透明背景上会退化，已由测试锁定。
+- 仍固定 RGBA8888：`Renderer2D`（有状态包装，内部持有 `Framebuffer*` 成员）与 MSAA（逐样本 8 位颜色 + alpha），二者可"先画 8888 再 convert"。
+- 实现期被单测捕获的真实偏差：灰度原按 77/150/29（和为 256）+ `>> 8` 实现，右移等于除以 256，纯绿 (0,255,0) 得 149，而 Rec.601 应为 150；改为和为 255 的 76/150/29 配 `(sum + 127) / 255` 精确舍入。
+- 验证（Release）：构建零错误零警告；单元测试 **281 → 321**（70 套件；新增 `tests/unit/pixel_format_test.cpp` 40 例，含全部 65536 个 565 值往返穷举、"覆盖范围与格式无关"的 2D 图元一致性、混合模式分级容差）；像素回归 **3/3**；压测 **105 → 108** 场景全绿（新增 `present_upscale_565`、`render_565_matches_8888`、`draw2d_565_ui_frame`；实测 240×180 缓冲 172800 → 86400 字节、320×240 UI 单帧 307200 → 153600 字节且覆盖零错配、与 8888 逐通道最大差 4 = 半个量化步长）；架构门禁（分层 + 无环 + 逐头自包含）通过；下游消费工程 2 项通过；18 个离屏示例退出码 0。
+- 验证（Debug + ASAN，`build/asan`）：单元测试 **318 通过 + 3 跳过**（越界/契约哨兵按约定跳过），压测 **108/108**，156 s，无断言、无 ASAN 报告。
+- 静态分析：新增/修改的 4 个头（`pixel_format.h`、`framebuffer_convert.h`、`framebuffer.h`、`renderer.h`）在项目门禁 `-*,clang-analyzer-*,bugprone-*` 下**零诊断**。
+
+### 性能收敛：原版本无回归 + 同格式呈现快速路径
+
+- **A/B 实测（`git worktree` 检出 HEAD 单独构建，交替采样 4~7 次取中位）**：新版本与原版本的 49 个 ≥1ms 场景**中位比值 0.98**、总和 2851 ms → 2814 ms；`deferred_1080p` 1.00×、`ssao_1080p` 1.00×、`render_1024x1024_x30` 1.02×。模板化后的 RGBA8888 路径生成与改动前等价的机器码。
+- **`Color565::fromFloat` 去冗余**：原先复用 `Color::fromFloat`，会把 alpha 通道也钳制换算成字节，而 565 没有 alpha 位。改为只算三个通道（`PixelQuantize::toByte`，NaN/越界语义与 `Color` 完全一致）。
+- **同格式快速路径**：`convertFramebuffer` 与 `NearestUpscaler::presentRow` 增加 `if constexpr (is_same_v<SrcPixel, DstPixel>)` 分支，同格式不再做"展开成 RGBA8888 再量化回来"的往返。实测 160×120 → 320×240 的 565 呈现：**0.052 ms vs 跨格式 0.44~0.57 ms（约 8~11 倍）**，输出逐位一致（`mismatches=0`）。这条正是"渲染到 565 → 放大到 565 屏幕"的 MCU 主路径。
+- 新增 3 个同格式逐位一致性测试（565 拷贝 / 565 放大 / 灰度拷贝）+ 1 个压测场景 `present_same_format_565`。单测 321 → **324**，压测 109 → **110**（`--quick` 90 个 1.8 s）。
+
+## 2026-10-25
+
 ### 四项验证全部闭环：CI 6/6 全绿，覆盖率 86.2%，并修掉一个只在远端暴露的缺陷
 
 **首次推送就暴露了真问题**

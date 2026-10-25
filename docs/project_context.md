@@ -15,14 +15,14 @@ SoftRenderer 是 C++23 教学型 CPU 渲染器，同时作为可被外部工程�
 | --- | --- |
 | Windows 工具链 | VS Build Tools 2022，MSVC 19.44，CMake 3.31.6 |
 | 独立工程 Release | 19 个离屏示例 + 3 个窗口示例 + 1 个练习 + 2 个测试程序 = 25 个默认可执行目标；另有两个可选基准/压测目标（`SR_BUILD_BENCHMARKS=ON`） |
-| 单元测试 | 281 用例 / 64 套件，Release 全通过；Debug（ASAN）279 通过 + 2 跳过 |
+| 单元测试 | 324 用例 / 70 套件，Release 全通过；Debug（ASAN）321 通过 + 3 跳过 |
 | 集成测试 | 3 场景像素回归通过（PNG 基准图，比较含 alpha）；下游消费工程 2 项通过 |
-| 压测探针 | `renderer_stress` 105 个场景（敌意输入/并发/性能）全通过；Release 全量约 8.2 s、`--quick` 85 个约 1.8 s；Debug+ASAN 同样干净 |
+| 压测探针 | `renderer_stress` 110 个场景（敌意输入/并发/性能/像素格式）全通过；Release 全量约 8.7 s、`--quick` 90 个约 1.8 s；Debug+ASAN 同样 110/110 干净 |
 | 架构门禁 | 逐头独立编译 + 命名空间哨兵（全局声明 60 个同名类型）+ include 白名单 + 循环依赖检查 |
 | 外部消费 | 聚合 / core-only / render-only 三类工程 × `add_subdirectory` 与安装后迁移 `find_package` 均通过；断言安装产物只含公共头 |
-| Debug ASAN | 单元测试与压测探针在 Debug+ASAN 下无断言、无 ASAN 报告（Debug 下两个越界用例按约定 GTEST_SKIP） |
+| Debug ASAN | 单元测试与压测探针在 Debug+ASAN 下无断言、无 ASAN 报告（Debug 下三个越界/契约用例按约定 GTEST_SKIP） |
 | Linux/macOS | 远端 CI（run 40185625656，commit 833fb32）**6/6 job 全绿**：Windows/Ubuntu/macOS 三平台构建测试 + coverage + sanitizers + thread-sanitizer |
-| 静态分析 | clang-tidy 19.1.5（VS BuildTools 自带，路径 `VC/Tools/Llvm/x64/bin`）已扫全部 65 个公共头：139 条诊断 → 1 项真实缺陷已修、16 项核实为范围受控的误报、122 条 narrow-conversions 为刻意的 float→int |
+| 静态分析 | clang-tidy 19.1.5（VS BuildTools 自带，路径 `VC/Tools/Llvm/x64/bin`）已扫全部 65 个公共头：139 条诊断 → 1 项真实缺陷已修、16 项核实为范围受控的误报、122 条 narrow-conversions 为刻意的 float→int（新增的 2 个头尚未重扫） |
 | 覆盖率 | **CI（ubuntu + gcov/lcov）实测：行 86.2%（3588/4164）、函数 95.7%（465/486）**，超过 `testing_rules.md` 的 80% 行覆盖要求。本机仍无法采集（五条工具链路径均已排除），数据来自 CI 的 coverage job |
 | 窗口示例 | 三个窗口示例均已桌面自动化实跑：`stage10_shadow_live`（WASD 引起 61.7% 像素变化、B 键切换阴影）、`stage03_sprite_anim`（空格跳跃，铠甲上移 112px 接近 90px 峰值后落地）、`stage08_shader_live`（1/2/3 切换 Flat/Gouraud/Phong，画面差异 34–37% 对基线 3.4%）；三者均能用 Esc 正常退出 |
 

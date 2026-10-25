@@ -61,8 +61,10 @@
 
 | 文件 | 关键类型 | 说明 |
 | --- | --- | --- |
-| `color.h` | `Color`（RGBA8）、`Color::fromFloat`、`namespace colors` 常量 | 叶子模块 |
-| `framebuffer.h` | `Framebuffer`：`clear` / `setPixel` / `getPixel` / `row(y)` / `data()` | **核心渲染目标**。坐标约定见 `math/` |
+| `color.h` | `Color`（RGBA8）、`Color::fromFloat`、`namespace colors` 常量 | 叶子模块；同时是全库唯一的**运算域**类型 |
+| `pixel_format.h` | `Color565`、`Gray8`、`PixelT` 契约（`kBytes` / `fromColor` / `fromFloat` / `toColor`） | **存储格式**，与运算域分离（ADR-005） |
+| `framebuffer.h` | `BasicFramebuffer<PixelT>`、`using Framebuffer = BasicFramebuffer<Color>`：`clear` / `setPixel` / `getPixel` / `row(y)` / `data()` / `byteSize()` | **核心渲染目标**。写入时按 `PixelT` 量化；坐标约定见 `math/` |
+| `framebuffer_convert.h` | `convertFramebuffer(src, dst)`、`NearestUpscaler` | 同尺寸换格式与"小画布→屏幕"的放大呈现，映射表预计算。源与目标像素类型相同时走 `if constexpr` 快速分支（整行拷贝 / 直接列映射），实测比跨格式路径快 8~11 倍 |
 | `depthbuffer.h` | `DepthBuffer`：`testAndSet` / `get` / `row(y)` / `clear`，`kFar = 1e9f` | 深度约定 `z ∈ [0,1]`，0 = 近平面 |
 | `float_framebuffer.h` | `sr::FloatFramebuffer` | HDR 渲染中间目标 |
 | `msaa_framebuffer.h` | `sr::MSAAFramebuffer`、`sr::kMSAA4Offsets` | 4x MSAA 多重采样 |
@@ -270,6 +272,13 @@ struct Shader {
 **`plotBlend` 是 2D 子系统唯一的像素写入出口**，统一处理：边界裁剪 → `BlendMode`
 混合 → 可选 `ClipRect` scissor。短路规则：仅 `Opaque`，或（`a == 255` 且模式为
 `AlphaBlend` / `Premultiplied`）时直接覆盖；`Additive` / `Multiply` 不短路。
+
+**`shape2d.h` / `blit2d.h` 的全部函数都是模板函数（`template <class FB>`）**，因此可以直接
+画进任意存储格式的帧缓冲（`Framebuffer`、`BasicFramebuffer<Color565>`、`BasicFramebuffer<Gray8>`）。
+成立的原因是它们只经 `plotBlend` 的 `setPixel` / `getPixel` 读写：混合在 `Color`（带 8 位 alpha）
+域内完成，量化发生在写入那一刻。限制是**目标侧 alpha**——565 / 灰度缓冲读回的 dst 恒为不透明，
+故半透明图元叠在半透明背景上会退化为按不透明背景混合（ADR-005）。
+`Renderer2D` 仍持有 `Framebuffer*`，固定 RGBA8888。
 
 > 2D 图元名（`fillRect` / `fillCircle` / `SpritePalette`）收在 `sr::draw2d` 而非 `sr` 根，
 > 避免与 3D 侧同名符号混淆；`triangle.h` / `coverage.h` 属于 3D 光栅化，不放 `draw2d`。
