@@ -21,7 +21,7 @@
 
 **覆盖率：新增一条排除证据**
 
-`winget` 源更新失败，装不上 OpenCppCoverage。至此四条路径全部排除（CodeCoverage.exe 缺失、dotnet-coverage 对原生无效、LLVM 无 llvm-cov、winget 源不可用）。
+`winget` 源更新失败，装不上 OpenCppCoverage。至此**五条**路径全部排除（CodeCoverage.exe 缺失、dotnet-coverage 对原生无效、LLVM 无 llvm-cov、winget 源不可用、MSVC bin 下无 `vsinstr`/`VSPerfCmd`）。
 
 **远端 CI：定位到更准确的原因**
 
