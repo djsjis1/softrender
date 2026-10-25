@@ -1,5 +1,5 @@
 // ============================================================
-// scene 模块单元测试：骨骼蒙皮、粒子系统与 2D 相机
+// scene 模块单元测试：骨骼蒙皮、粒子系统、3D/2D 相机
 //
 // scene 不依赖加载器与窗口：动画解码相关的用例在 animation_test.cpp。
 // ============================================================
@@ -10,6 +10,7 @@
 
 #include "softrenderer/math/mat4.h"
 #include "softrenderer/math/vec.h"
+#include "softrenderer/scene/camera.h"
 #include "softrenderer/scene/camera2d.h"
 #include "softrenderer/scene/particle_system.h"
 #include "softrenderer/scene/skeleton.h"
@@ -243,6 +244,41 @@ TEST(Particle, Lifetime)
 }
 
 // ==================== 资源缓存 ====================
+
+// ==================== Camera（3D）退化参数 ====================
+// 窗口最小化时 aspect = 0；交互逻辑可能把远近平推到重合；
+// pitch 直接赋值 ±90° 时 right() 的叉积为零向量。
+// 这三条都不应产出 inf/NaN：否则整帧几何会被管道静默丢弃（画面全黑、无报错）。
+
+TEST(Camera, DegenerateAspectKeepsProjectionFinite)
+{
+    Camera cam;
+    cam.aspect = 0.0f;
+    const Mat4 p = cam.projMatrix();
+    const Vec4f clip = p * Vec4f(0, 0, -5, 1);
+    EXPECT_TRUE(std::isfinite(p.m[0][0]));
+    EXPECT_TRUE(std::isfinite(clip.x));
+    EXPECT_TRUE(std::isfinite(clip.y));
+    EXPECT_TRUE(std::isfinite(clip.w));
+}
+
+TEST(Camera, CoincidentNearFarKeepsProjectionFinite)
+{
+    Camera cam;
+    cam.nearZ = 1.0f;
+    cam.farZ = 1.0f;
+    const Mat4 p = cam.projMatrix();
+    EXPECT_TRUE(std::isfinite(p.m[2][2]));
+    EXPECT_TRUE(std::isfinite(p.m[2][3]));
+}
+
+TEST(Camera, RightVectorFiniteWhenLookingStraightUp)
+{
+    Camera cam;
+    cam.pitch = 1.5707963f; // 90°：forward 与世界上方向平行
+    const Vec3f r = cam.right();
+    EXPECT_TRUE(std::isfinite(r.x) && std::isfinite(r.y) && std::isfinite(r.z));
+}
 
 TEST(Camera2D, WorldScreenRoundTrip)
 {

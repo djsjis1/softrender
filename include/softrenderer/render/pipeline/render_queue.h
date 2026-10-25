@@ -47,7 +47,8 @@ struct DrawItem
     // 组合排序键：layer(16bit) | distance(32bit) | materialId(16bit)
     //
     // 顺序必须与 sort() 的比较器一致（层 → 距离 → 材质）。旧实现把材质放在
-    // 距离之前，两个入口会得到不同结果。
+    // 距离之前，两个入口会得到不同结果。materialId 按 uint16 解释，负值等同
+    // 于高位分组（-1 = 65535），sort() 的比较器用同一口径比较。
     uint64_t sortKey(bool reverseDistance) const
     {
         uint64_t key = uint64_t(uint16_t(layer)) << 48;
@@ -100,8 +101,11 @@ class RenderQueue
             // 同层：距离优先
             if (a.sortDistance != b.sortDistance)
                 return reverse ? (a.sortDistance > b.sortDistance) : (a.sortDistance < b.sortDistance);
-            // 距离相同：材质分组作为稳定次序
-            return a.materialId < b.materialId;
+            // 距离相同：材质分组作为稳定次序。
+            // 必须与 sortKey() 同口径（uint16 截断）：用有符号比较时 materialId = -1
+            // 在 sort() 里排最前、在 sortKey() 里（65535）排最后，两个入口会对同一
+            // 队列给出相反顺序。
+            return uint16_t(a.materialId) < uint16_t(b.materialId);
         });
     }
 

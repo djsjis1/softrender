@@ -155,6 +155,38 @@ TEST(RenderQueue, SortKeyAgreesWithComparatorOrder)
     EXPECT_LT(farItem.sortKey(true), nearItem.sortKey(true));
 }
 
+// 负 materialId：sortKey() 按 uint16 截断（-1 → 65535），而比较器若用有符号
+// 比较（-1 最小），两个入口会对同一队列给出相反顺序。依赖 sortKey 做桶排序、
+// 又用 sort() 做校对的下游代码就会拿到不一致的绘制序。
+TEST(RenderQueue, SortKeyAgreesWithComparatorForNegativeMaterial)
+{
+    DrawItem negative;
+    negative.layer = RenderLayer::Opaque;
+    negative.sortDistance = 1.0f;
+    negative.materialId = -1;
+
+    DrawItem zero;
+    zero.layer = RenderLayer::Opaque;
+    zero.sortDistance = 1.0f;
+    zero.materialId = 0;
+
+    RenderQueue queue;
+    queue.add(negative);
+    queue.add(zero);
+
+    // 空的 objectPositions 不会覆盖 sortDistance，距离保持相等，材质成为唯一裁决项
+    queue.sort(Vec3f{0, 0, 0}, {});
+
+    const auto &items = queue.items();
+    ASSERT_EQ(items.size(), 2u);
+    const uint16_t firstMaterial = uint16_t(items[0].materialId);
+    const uint16_t secondMaterial = uint16_t(items[1].materialId);
+
+    // 两入口必须同序：sort() 的材质次序与 sortKey() 的升序方向一致
+    EXPECT_LE(firstMaterial, secondMaterial);
+    EXPECT_LE(items[0].sortKey(false), items[1].sortKey(false));
+}
+
 // ==================== Mesh 索引越界 ====================
 
 namespace

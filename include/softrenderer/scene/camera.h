@@ -37,8 +37,11 @@ public:
     }
     Vec3f right() const
     {
-        // 前方向与世界上方向叉积得到右方向
-        return cross(forward(), Vec3f{0, 1, 0}).normalized();
+        // 前方向与世界上方向叉积得到右方向。
+        // forward 与 up 平行时（pitch = ±90°：默认约定夹在 ±89°，但字段是公开的，
+        // 直接赋值可绕过）叉积为零向量，归一化会得到 NaN，后续 view 矩阵与
+        // 所有顶点坐标跟着变 NaN；用归一化兜底回退到世界 X 轴。
+        return cross(forward(), Vec3f{0, 1, 0}).normalizedOr(Vec3f{1, 0, 0});
     }
 
     Mat4 viewMatrix() const
@@ -47,7 +50,16 @@ public:
     }
     Mat4 projMatrix() const
     {
-        return sr::transform::perspective(fovY, aspect, nearZ, farZ);
+        // 退化参数会产出 inf/NaN 投影矩阵，进而让整帧几何被管道静默丢弃——
+        // 表现是“画面全黑但不报错”，比返回一个可用的退化矩阵难查得多。
+        // 最常见的触发：窗口最小化时 aspect = width/height = 0；交互逻辑
+        // 把远平面推到与近平面重合。这里夹到可用范围，
+        // sr::transform::perspective 保持纯计算不变。
+        const float safeAspect = std::clamp(aspect, 1e-4f, 1e4f);
+        const float safeFov = std::clamp(fovY, 1e-3f, 3.14159265f - 1e-3f);
+        const float safeNear = std::max(nearZ, 1e-4f);
+        const float safeFar = std::max(farZ, safeNear + 1e-3f);
+        return sr::transform::perspective(safeFov, safeAspect, safeNear, safeFar);
     }
 
     // ---- 交互 ----
