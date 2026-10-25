@@ -5,7 +5,14 @@ target_link_libraries(renderer_benchmark PRIVATE SoftRenderer::render sr_dev_fla
 # 压测/回归探针：覆盖渲染、后处理、2D、IO、线程、内存与敌意输入。
 # 需要 io（模型/图像加载）与 runtime（线程池/缓存/Profiler），因此跟随聚合目标。
 # 与 renderer_benchmark 分开：后者要能只链 render 组件，用于验证组件边界。
-add_executable(renderer_stress stress_main.cpp)
+#
+# 源文件组织：stress_main.cpp 只放 CLI/汇总；场景在 stress/ 下按主题分文件，
+# 各自用 SR_SCENARIO() 静态登记，新增场景不必修改注册表。
+add_executable(renderer_stress
+    stress_main.cpp
+    stress/stress_scenarios.cpp
+    stress/stress_ext.cpp
+)
 target_link_libraries(renderer_stress PRIVATE SoftRenderer::softrenderer)
 if(MSVC)
     target_compile_options(renderer_stress PRIVATE /utf-8)
