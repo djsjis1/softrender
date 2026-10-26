@@ -160,6 +160,14 @@ int main()
     std::string json = generateSkinGltf();
     std::ofstream out("output/skin_test.gltf", std::ios::binary | std::ios::trunc);
     out.write(json.data(), std::streamsize(json.size()));
+    // ofstream 与 fopen+fclose 不同：write 只落流缓冲。这里接着就要读回同一文件，
+    // 必须显式 flush 落盘，否则加载器读到空文件（demo_gltf 靠块作用域析构侥幸避开）。
+    out.flush();
+    if (!out.good())
+    {
+        printf("写入 output/skin_test.gltf 失败\n");
+        return 1;
+    }
     printf("已生成 output/skin_test.gltf (%zu bytes)\n", json.size());
 
     // ---- 2. 用自有加载器一次拿全：网格 / 节点 / 蒙皮 / 动画片段 ----

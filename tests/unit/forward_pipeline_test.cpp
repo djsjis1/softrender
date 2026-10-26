@@ -138,7 +138,6 @@ TEST(ForwardPipeline, injectedStripExecutorCoversEveryRowOnce)
     pipeline.clearColor = Color(10, 20, 30);
     pipeline.fxaaEnabled = true;
 
-    std::vector<int> rowHits(size_t(H), 0);
     int phases = 0;
     pipeline.postExecutor = [&](int totalRows, const std::function<void(int, int)>& body) {
         ASSERT_EQ(totalRows, H);

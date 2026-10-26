@@ -99,6 +99,12 @@ int main()
         std::filesystem::create_directories("output");
         std::ofstream out("output/test_triangle.gltf", std::ios::binary | std::ios::trunc);
         out.write(json.data(), std::streamsize(json.size()));
+        out.flush(); // 块作用域析构也会刷，这里显式刷掉并立刻进入读回
+        if (!out.good())
+        {
+            printf("写入 output/test_triangle.gltf 失败\n");
+            return 1;
+        }
         printf("已生成 output/test_triangle.gltf (%zu bytes)\n", json.size());
     }
 
