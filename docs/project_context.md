@@ -15,7 +15,7 @@ SoftRenderer 是 C++23 教学型 CPU 渲染器，同时作为可被外部工程�
 | --- | --- |
 | Windows 工具链 | VS Build Tools 2022，MSVC 19.44，CMake 3.31.6 |
 | 独立工程 Release | 20 个离屏示例（含 `demo_forward` 统一管线演示）+ 3 个窗口示例 + 1 个练习 + 3 个测试程序 = 27 个默认可执行目标；另有两个可选基准/压测目标（`SR_BUILD_BENCHMARKS=ON`） |
-| 单元测试 | 353 用例 / 76 套件，Release 全通过；Debug（ASAN）349 通过 + 4 跳过（bloom 分段/FloatFramebuffer 默认构造已回归）；另有 `baremetal_smoke`（operator new 熔断下整帧零堆证明，Release+ASAN 双过） |
+| 单元测试 | 354 用例 / 76 套件，Release 全通过；Debug（ASAN）350 通过 + 4 跳过（bloom 分段/FloatFramebuffer 默认构造已回归）；另有 `baremetal_smoke`（operator new 熔断下整帧零堆证明，含 ForwardPipeline 稳态阶段，Release+ASAN 双过） |
 | 集成测试 | 3 场景像素回归通过（PNG 基准图，比较含 alpha）；下游消费工程 2 项通过 |
 | 压测探针 | `renderer_stress` 114 个场景（敌意输入/并发/性能/像素格式，含分条并行 MT 孪生与半分辨率 Bloom）全通过；Release 全量约 10 s、`--quick` 90 个约 2 s；Debug+ASAN `--quick` 干净（1080p 重场景未纳入 ASAN） |
 | 架构门禁 | 逐头独立编译 + 命名空间哨兵（全局声明 60 个同名类型）+ include 白名单 + 循环依赖检查 + 当前态文档的头文件路径与 README 可执行名存在性（本机含 `.qoder/rules` 共 52 处；该目录属本机助手配置、不入库，CI 只校验仓库内文档）+ 裸机头门禁 `sr_freestanding_headers_check`（`-fno-exceptions -fno-rtti` 逐头编译 core/math/render/resource/scene，GCC/Clang，待 CI Linux 首跑） |

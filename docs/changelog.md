@@ -5,6 +5,42 @@
 > 按 `documentation_rules.md` 要求，每次有意义的变更都必须在此登记。
 > 重大接口变更需同时在变更内容中标注版本号。
 
+## 2026-10-27（夜）
+
+### 审查后修复：阴影图指针失效、零堆声明对齐、哑目标降为 Gray8、分条拷贝去串行
+
+**正确性**
+- `ForwardPipeline::shadowDepth()` 返回的指针在 `shadowResolution` 变化后会悬垂：
+  `ensureShadowMap()` 重建阴影 `Renderer`、旧 `DepthBuffer` 被析构，而`FinalShader`
+  手里还握着旧指针——同一帧内采样就是悬垂读。新增 `shadowMapVersion()`，重建时
+  递增；文档从“地址跨帧稳定”改为“分辨率不变才稳定，变了必须比对版本重取”。
+  新增用例 `ForwardPipeline.shadowResolutionChangeInvalidatesEarlierPointer`。
+
+**内存**
+- 阴影哑目标从 `Framebuffer`（RGBA8888）改为 `BasicFramebuffer<Gray8>`：1024²
+  从 4 MB 降到 1 MB，每帧被写的像素也从 4 字节/个降为 1 字节/个（这些颜色
+  从未被读取）。`renderShadowPass` 的 `lightTarget` 改为模板参数。
+- `ForwardPipeline` 的 casters 从每帧新建 `std::vector` 改为成员复用：阴影开启时
+  每帧一次分配会直接打穿“渲染路径稳态零分配”。
+
+**契约澄清（审查中发现注释与实现不符）**
+- `ForwardPipeline` 的裸机构造注释原称“整条渲染链不经堆分配”，实际门面自身的
+  `Renderer`、阴影图与 FXAA 临时缓冲都是 heap 分配的。改为明确边界：保证的是
+  渲染调用路径的**稳态**零分配（预热后）。
+- `baremetal_smoke` 新增阶段二：预热一帧后开熔断守卫，连续两帧 `ForwardPipeline::render`
+  必须零分配——把上面那句声明变成可验证的门禁（Release 与 Debug+ASAN 均通过）。
+- `gaussianBlurRows` 垂直 pass 的首个核项改为赋值：dst 不再需要预清空，
+  消除了“忘 clear 就得到旧内容叠加”的静默错误，同时少一次全帧写。
+- `FloatFramebuffer` 的三参数外部存储构造补明“深度仍自分配、并非零堆”。
+
+**性能**
+- `ForwardPipeline::applyFxaa` 去掉全帧串行 `memcpy` 回写：改为“拷入 scratch →
+  亮度图 → FXAA 直接写回 fb”三个并行段，1080p 每帧省约 8 MB 的单线程搬运。
+
+- 验证：单测 **354 用例 / 76 套件**（Release 全绿；Debug+ASAN 350 通过 + 4 跳过）；
+  像素回归 3/3；压测 **114/114**；`baremetal_smoke` 两阶段零堆在 Release 与
+  Debug+ASAN 下均通过；架构门禁 2/2。
+
 ## 2026-10-27（晚）
 
 ### Bloom 分段并行（11 ms @1080p）与 DOF 半分辨率的负收益结论
