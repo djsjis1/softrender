@@ -21,7 +21,7 @@ SoftRenderer 是 C++23 教学型 CPU 渲染器，同时作为可被外部工程�
 | 架构门禁 | 逐头独立编译 + 命名空间哨兵（全局声明 60 个同名类型）+ include 白名单 + 循环依赖检查 + 当前态文档的头文件路径与 README 可执行名存在性（本机含 `.qoder/rules` 共 52 处；该目录属本机助手配置、不入库，CI 只校验仓库内文档）+ 裸机头门禁 `sr_freestanding_headers_check`（`-fno-exceptions -fno-rtti` 逐头编译 core/math/render/resource/scene，GCC/Clang，待 CI Linux 首跑） |
 | 外部消费 | 聚合 / core-only / render-only 三类工程 × `add_subdirectory` 与安装后迁移 `find_package` 均通过；断言安装产物只含公共头 |
 | Debug ASAN | 单元测试与压测探针在 Debug+ASAN 下无断言、无 ASAN 报告（Debug 下四个越界/契约用例按约定 GTEST_SKIP） |
-| Linux/macOS | 远端 CI（run 40185625656，commit 833fb32）**6/6 job 全绿**：Windows/Ubuntu/macOS 三平台构建测试 + coverage + sanitizers + thread-sanitizer |
+| Linux/macOS | 远端 CI（767f765 / 9ae16d7 两轮）：macOS 与 **baremetal**（`SR_NO_EXCEPTIONS` 构建+安装+树校验）绿；windows 的 demo_skinning ofstream 未 flush 已修（9ae16d7 确认绿）；Linux 四作业（ubuntu/coverage/sanitizers/thread-sanitizer）因 gcc `-Wrange-loop-construct` 拒绝按值结构化绑定 range-loop（`forward_pipeline_test.cpp`，MSVC 无此告警）失败，修复待第三轮确认 |
 | 静态分析 | clang-tidy 19.1.5（VS BuildTools 自带，路径 `VC/Tools/Llvm/x64/bin`）已扫公共头：早期全量扫描（65 个）得 139 条诊断 → 1 项真实缺陷已修、16 项核实为范围受控的误报、122 条 narrow-conversions 为刻意的 float→int；本轮新增/改动的 4 个头（`pixel_format.h`、`framebuffer_convert.h`、`framebuffer.h`、`renderer.h`）在门禁 `-*,clang-analyzer-*,bugprone-*` 下零诊断，全量 67 个头尚未整体重扫 |
 | 覆盖率 | CI（ubuntu + gcov/lcov）实测：行 86.2%（3588/4164）、函数 95.7%（465/486），超过 `testing_rules.md` 的 80% 行覆盖要求。该数值取自 commit 833fb32 的 coverage job；本轮改动后的 coverage job 同样通过（不含阈值门禁，绿只代表采集成功），新数值在 CI 工件 `coverage-report` 内，工件下载需鉴权，本机无法读取——引用时须以该工件为准，本机仍无法采集 |
 | 窗口示例 | 三个窗口示例均已桌面自动化实跑：`stage10_shadow_live`（WASD 引起 61.7% 像素变化、B 键切换阴影）、`stage03_sprite_anim`（空格跳跃，铠甲上移 112px 接近 90px 峰值后落地）、`stage08_shader_live`（1/2/3 切换 Flat/Gouraud/Phong，画面差异 34–37% 对基线 3.4%）；三者均能用 Esc 正常退出 |

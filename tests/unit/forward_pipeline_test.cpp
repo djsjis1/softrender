@@ -143,7 +143,9 @@ TEST(ForwardPipeline, injectedStripExecutorCoversEveryRowOnce)
         ASSERT_EQ(totalRows, H);
         ++phases;
         // 模拟多线程：切 3 条不重叠的带
-        for (const auto [y0, y1] : {std::pair<int, int>{0, 7}, {7, 13}, {13, H}})
+        // gcc -Wrange-loop-construct（-Wall/-Werror）要求循环变量用引用，
+        // 按值结构化绑定拷贝 pair 会被拒绝编译；MSVC 无此告警。
+        for (const auto& [y0, y1] : {std::pair<int, int>{0, 7}, {7, 13}, {13, H}})
             body(y0, y1);
     };
 
