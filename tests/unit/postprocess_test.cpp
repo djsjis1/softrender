@@ -406,7 +406,11 @@ TEST(PostProcess, DepthOfFieldMatchesNaiveBoxBlur)
                     sum = sum + color.getPixel(std::clamp(x + dx, 0, W - 1), std::clamp(y + dy, 0, H - 1));
                     ++count;
                 }
-            const Vec3f expected = sum * (1.0f / float(count));
+            // 显式挡住 count==0：循环至少执行一次，但 FloatFramebuffer::getPixel
+            // 加了越界分支之后编译器不再能证明这一点，MSVC 会报 C4723（潜在除零），
+            // 在 /WX 下直接变成编译错误。
+            const float invCount = count > 0 ? 1.0f / float(count) : 0.0f;
+            const Vec3f expected = sum * invCount;
             const Vec3f got = out.getPixel(x, y);
             EXPECT_NEAR(got.x, expected.x, 1e-4f) << x << "," << y;
             EXPECT_NEAR(got.y, expected.y, 1e-4f) << x << "," << y;
