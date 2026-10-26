@@ -106,7 +106,7 @@ AI 修改代码前必须先读目标文件的头注释，快速理解模块职�
 
 ### 日志
 
-* **禁止把 `core/log.h` 内置模式改回 C 可变参**（`const char* fmt, ...` + `va_list` + `vfprintf`）
+* **禁止把 `runtime/log.h` 内置模式改回 C 可变参**（`const char* fmt, ...` + `va_list` + `vfprintf`）
   历史上它就是这样，导致三个**真实发生过**的缺陷：
   ① 传 `std::string` 等非 POD 类型经 `...` 是未定义行为（MSVC 报 C4840），
      不是「只是忽略参数」那么无害；
@@ -140,7 +140,7 @@ AI 修改代码前必须先读目标文件的头注释，快速理解模块职�
 
 * **禁止新增自研测试框架**
   统一使用 GoogleTest（`testing_rules.md` 明令「已有成熟开源方案，不得重复造轮子」）。
-  `src/test/test_framework.h` 是待删除的历史违例（见 `docs/tasks/TASK-004`）。
+  历史上自研的测试框架头已随分层重构删除（见 `docs/tasks/TASK-004`），不得再引入同类文件。
 
 * **禁止用「三个顶点取值全相同」的数据写插值类测试**
   本项目已因此漏掉一个真实 bug：`rasterizer_fast.h` 的深度插值重心权重错位，
@@ -178,7 +178,7 @@ cmake --build build --config Release --target unit_tests
 **测试**
 
 ```powershell
-# 开发迭代首选：单进程跑完 324 个用例，约 55 毫秒
+# 开发迭代首选：单进程跑完 325 个用例，约 55 毫秒
 .\build\bin\Release\unit_tests.exe
 
 # 全量 ctest（CI 用的命令；串行约 40 秒，并行约 13 秒）
@@ -194,7 +194,7 @@ ctest --test-dir build -C Release -L fast
 .\build\bin\Release\unit_tests.exe --gtest_filter=RasterizerFast.*
 ```
 
-**压测探针**（`renderer_stress`，110 个场景，退出码即结果）
+**压测探针**（`renderer_stress`，111 个场景，退出码即结果）
 
 ```powershell
 .\build\bin\Release\renderer_stress.exe --quick                 # 90 个非重型场景，约 1.8 秒
@@ -209,8 +209,8 @@ ctest --test-dir build -C Release -L fast
 > 默认只打印提示；CI 固定在同型号机器时才加 `--strict-baseline`。
 
 > ⚠️ `ctest` 慢的原因：`gtest_discover_tests` 把每个用例注册为独立 ctest 项，
-> 324 用例 = 324 次进程启动，开销全在进程创建而非测试本身。
-> `-LE fast` 排除 `unit_tests_all`，避免与 324 个 discover 项重复跑。
+> 325 用例 = 325 次进程启动，开销全在进程创建而非测试本身。
+> `-LE fast` 排除 `unit_tests_all`，避免与 325 个 discover 项重复跑。
 > 详见 `docs/troubleshooting.md`。
 
 **Sanitizer**（默认关闭，需显式开启）
@@ -271,7 +271,7 @@ $llvm = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools
 
 ```powershell
 cmake --build build --config Release --parallel   # 零错误零警告
-.\build\bin\Release\unit_tests.exe                # 324 用例全绿
+.\build\bin\Release\unit_tests.exe                # 325 用例全绿
 .\build\bin\Release\render_regression.exe         # 3 个像素回归全绿
 .\build\bin\Release\renderer_stress.exe --quick   # 90 个压测场景全绿（改渲染/IO/并发时必跑）
 ```

@@ -5,6 +5,34 @@
 > 按 `documentation_rules.md` 要求，每次有意义的变更都必须在此登记。
 > 重大接口变更需同时在变更内容中标注版本号。
 
+## 2026-10-26
+
+### 文档失真修复、访问器契约补齐与两处逐像素优化
+
+- `docs/architecture.md`：依赖图整体重写到 2.0.0 现状 —— 原文件引用了 5 个**已删除**的头
+  （`resource_manager.h`、`gltf_types.h`、`line.h`、`core/profiler.h`、`core/log.h`），
+  且断言「`triangle.h` 与 `line.h` 位于全局命名空间、是唯一刻意的全局符号」，与 ADR-001
+  和 `namespace_sentinel` 门禁直接矛盾，一并删除。原先「第三方头泄漏到公共接口」的警告也已
+  失实（解析器头是 PRIVATE include），改写为「第三方解析器不外露」。
+- 规则对齐：`.qoder/rules/cpp_project_rules.md` 的标准声明由 C++17 改为 **C++23**
+  （与 `CMakeLists.txt` / `targets.cmake` 一致）；`engineering_rules.md` 日志红线里的
+  `core/log.h` 改为 `runtime/log.h`，并删掉已不存在的自研测试框架头路径。
+- `core/float_framebuffer.h`：`getPixel` 补 `assert` + 越界返回黑色哨兵，与
+  `BasicFramebuffer::getPixel`、`setPixel` 同一口径（原实现是裸下标访问，与两者都不一致）。
+  新增用例 `FloatFramebuffer.getPixel_outOfBounds_returnsBlack`（Debug 下按既有约定 SKIP）。
+- `render/draw2d/shape2d.h` 的 `fillEllipse`：内层每像素两次浮点除法改为预计算倒数相乘。
+- `render/postprocess/post_processing.h`：`vignette` 去掉「先 `sqrt` 再 `d*d` 平方回去」的
+  冗余开方；`radialMotionBlur` 的样本循环把 `getPixel`/`setPixel` 换成行指针（`sx/sy` 已 clamp）。
+- 新增门禁 `tests/architecture/check_doc_paths.cmake`（ctest 目标 `architecture_doc_paths`）：
+  校验当前态文档里 48 处 `xxx/yyy.h` 引用真实存在。首跑即抓到 3 处真实失效引用
+  （`draw2d/shape2d.h`、`core/log.h`、已删除的测试框架头），均已修掉。
+- 实测（`git worktree` 检出改动前 HEAD，交替采样 10 次取最小）：
+  `vignette` 1080p 12.98 → **8.37 ms（−35.5%）**；
+  `radialMotionBlur` 1080p / 16 samples 327.25 → **311.97 ms（−4.7%）**。
+  新增压测场景 `postprocess_vignette_blur_1080p`（标 heavy，不进 `--quick`）用于后续基线对比。
+- 验证：构建零错误零警告；单测 **325/325**（71 套件）；像素回归 **3/3**；压测 **111/111**；
+  架构门禁 **2/2**；Debug+ASAN 321 通过 + 4 跳过、压测 `--quick` **90/90** 干净。
+
 ## 2026-10-25
 
 ### 像素格式抽象（ADR-005）：RGBA8888 / RGB565 / Gray8 三种存储格式并存

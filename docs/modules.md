@@ -244,7 +244,7 @@ struct Shader {
 | `coverage.h` | `TriangleCoverage`：整数子像素 top-left 覆盖规则（±2^20 坐标上限） |
 | `rasterizer_fast.h` | `sr::raster`：增量边函数 + SSE2 四像素并行。**实验性，未接入主链路**，见 `architecture.md` §6.1 |
 
-画线 `drawLine` / `drawLineGradient` 已从旧的 `line.h` 迁入 `draw2d/shape2d.h`。
+画线 `drawLine` / `drawLineGradient` 已从旧的 `line.h` 迁入 `render/draw2d/shape2d.h`。
 
 ### pipeline/ — 3D 主链路
 

@@ -67,7 +67,7 @@ SoftRenderer 是**教学型软件渲染器**，两条设计约束优先级最高
 
 这两条约束解释了项目中若干看似「不够优化」的选择，详见「六、已知架构权衡」。
 
-覆盖与属性插值分离：`raster/coverage.h` 提供确定性的 top-left 子像素覆盖，供基础填充、Renderer、标量/SSE2 与 MSAA 共用；MSAA 示例算法提取到 `raster/msaa_renderer.h`。设计见 [ADR-003](adr/ADR-003-raster-coverage.md)，实测见[性能基线](engineering/58-覆盖规则与性能基线.md)。
+覆盖与属性插值分离：`render/raster/coverage.h` 提供确定性的 top-left 子像素覆盖，供基础填充、Renderer、标量/SSE2 与 MSAA 共用；MSAA 示例算法提取到 `render/pipeline/msaa_renderer.h`。设计见 [ADR-003](adr/ADR-003-raster-coverage.md)，实测见[性能基线](engineering/58-覆盖规则与性能基线.md)。
 
 ## 二、分层结构
 
@@ -163,92 +163,125 @@ float_framebuffer.h  → color.h, depthbuffer.h, framebuffer.h, math/vec.h
 gbuffer.h            → math/vec.h, float_framebuffer.h
 arena.h              → （叶子）
 
-# io/
-tga.h                → framebuffer.h
-image_write.h        → framebuffer.h            （实现依赖 stb_image_write）
+# io/（公共入口；解析器实现与第三方类型留在 src/io/ 私有）
+tga.h                → core/framebuffer.h, core/image.h
+image_write.h        → core/framebuffer.h        （实现依赖 stb_image_write）
+image_loader.h       → core/image.h
+obj_loader.h         → resource/mesh.h
+gltf_loader.h        → resource/mesh.h, scene/scene_asset.h
 
 # runtime/
-log.h                → Logger.h（仅当定义 SR_USE_SPDLOG）
+log.h                → （内置模式只用标准库；定义 SR_USE_SPDLOG 时才另接 spdlog）
 profiler.h           → （叶子）
-resource_manager.h   → （叶子，模板 + concepts）
+resource_cache.h     → （叶子，模板 + std::function）
+thread_pool.h        → （叶子，线程池）
 command_buffer.h     → （叶子，线程池）
 
 # render/postprocess/
 post_processing.h    → color.h, framebuffer.h, float_framebuffer.h, math/mat4.h, math/vec.h
 
-# 仍留在 src/
-core/benchmark.h     → （仅标准库）
+# benchmarks/support/（基准测试支撑，不属公共头）
+benchmark.h          → （仅标准库）
 ```
 
 > ⚠️ **`core/` 并非严格的最底层**：`gbuffer.h`、`float_framebuffer.h` 都依赖 `math/`，
 > `render/postprocess/post_processing.h` 还依赖 `float_framebuffer.h`。真实最底层是 `math/` +
 > `core/color.h` + `core/depthbuffer.h`。
 >
-> **已修正的过时描述**：旧文档称 `core/benchmark.h` 反向依赖 `raster/rasterizer_fast.h`，
+> **已修正的过时描述**：旧文档称 `benchmarks/support/benchmark.h` 反向依赖 `render/raster/rasterizer_fast.h`，
 > 实测该头只依赖标准库（`<chrono>` / `<cstdio>` / `<functional>` / `<string>` / `<vector>`），
-> 不存在 `core/ → raster/` 的层次倒置。
+> 不存在 `benchmarks/ → render/` 的层次倒置。
 
-### scene/（依赖 core/ + math/ + 第三方加载器）
-
-```
-mesh.h             → math/vec.h
-texture.h          → core/tga.h, math/vec.h
-gltf_types.h       → math/vec.h, math/mat4.h, texture.h
-cubemap.h          → math/vec.h, texture.h
-camera.h           → math/mat3.h, math/rect.h, math/transform.h
-components.h       → math/vec.h
-particle_system.h  → math/vec.h, core/color.h
-render_queue.h     → math/vec.h
-skeleton.h         → math/mat4.h, math/vec.h
-image_loader.h     → core/tga.h                   （声明 stbi_load）
-obj_loader.h       → mesh.h, tiny_obj_loader.h
-gltf_accessor.h    → tiny_gltf.h（非拥有字节视图）
-gltf_mesh.h        → gltf_accessor.h, mesh.h
-gltf_loader.h      → gltf_mesh.h, gltf_types.h, animation_player.h, tiny_gltf.h
-animation_player.h → math/mat4.h, math/quat.h, math/vec.h, gltf_types.h, gltf_accessor.h
-```
-
-> ⚠️ **第三方头文件泄漏到公共接口**：`gltf_loader.h` 与 `animation_player.h` 在
-> 公共头中 `#include "tiny_gltf.h"`。下游用户 include 这两个头时，必须能找到
-> tinygltf 与 nlohmann/json 的头文件路径。当前由 `third_party_impl` 目标的
-> `PUBLIC` include 目录解决，但这是一个**有意的泄漏**：把 `tinygltf::Model`
-> 暴露给了调用方（`animation_player` 需要直接访问动画采样数据）。
-
-### shader/（依赖 scene/ + core/）
+### resource/ + scene/（依赖 core/ + math/）
 
 ```
-shader.h            → math/mat4.h, scene/mesh.h, scene/texture.h
-shaders.h           → shader.h
-advanced_shaders.h  → core/depthbuffer.h, shaders.h
-pbr_shader.h        → scene/cubemap.h, shader.h
+# resource/
+vertex.h            → math/vec.h
+mesh.h              → math/vec.h, resource/vertex.h
+texture.h           → core/image.h, math/vec.h
+cubemap.h           → math/vec.h, resource/texture.h
+mesh_generator.h    → resource/mesh.h
+texture_generator.h → core/image.h, math/vec.h
+
+# scene/
+components.h        → math/vec.h
+material.h          → math/vec.h
+scene_node.h        → math/mat4.h, math/quat.h, math/vec.h
+animation_clip.h    → math/vec.h
+keyframe_animation.h→ math/mat4.h, math/vec.h
+animation_player.h  → math/mat4.h, math/quat.h, math/vec.h, scene/animation_clip.h, scene/scene_node.h
+skeleton.h          → math/mat4.h, math/vec.h
+skin.h              → math/mat4.h
+camera.h            → math/mat3.h, math/rect.h, math/transform.h
+camera2d.h          → math/mat3.h, math/rect.h, math/vec.h
+particle_system.h   → math/vec.h, core/color.h
+scene_asset.h       → resource/mesh.h, resource/texture.h, scene/animation_clip.h, scene/material.h,
+                      scene/scene_node.h, scene/skin.h
+
+# render/pipeline/
+render_queue.h      → math/vec.h
+
+# src/io/（私有，随组件实现编译，不安装）
+gltf_accessor.h     → tiny_gltf.h（非拥有字节视图）
+gltf_mesh.h         → src/io/gltf_accessor.h, resource/mesh.h
+```
+
+> ✅ **第三方解析器不外露**：`io/` 的公共头（`gltf_loader.h` / `obj_loader.h` / `image_loader.h`）
+> 只暴露 `sr::io` 的接口与 `resource/` / `scene/` 的公共类型，不 include `tinygltf.h` /
+> `tiny_obj_loader.h` / `stb_image.h`。解析器实现与相关类型收在 `third_party_impl` +
+> `src/io/`（`softrenderer_io` 把 third 头作为 **PRIVATE** include），因此下游只需 `-I include`。
+
+### render/pipeline/ + render/shader/（着色器契约与内置实现）
+
+```
+# render/pipeline/
+varyings.h          → math/vec.h
+shader.h            → render/pipeline/varyings.h, resource/vertex.h
+surface_shader.h    → math/mat4.h, math/vec.h, render/pipeline/shader.h, resource/texture.h
+
+# render/shader/
+shaders.h           → render/pipeline/surface_shader.h
+advanced_shaders.h  → core/depthbuffer.h, render/shader/shaders.h
+pbr_shader.h        → math/scalar.h, resource/cubemap.h, render/pipeline/surface_shader.h
+deferred_lighting.h → core/gbuffer.h, math/scalar.h
 ```
 
 `shader.h` 定义 `Shader` 抽象（`vertex` / `geometry` / `fragment` 三段回调）
 与 `Varyings`（跨阶段插值数据），是整个可编程管线的契约中心。
 
-### raster/（顶层，汇聚所有依赖）
+### render/raster/ + render/pipeline/ + render/draw2d/（3D 光栅化与 2D 图元）
 
 ```
-line.h            → core/framebuffer.h
-triangle.h        → core/framebuffer.h, math/vec.h, line.h
-clip.h            → shader/shader.h
-rasterizer_fast.h → core/depthbuffer.h, core/framebuffer.h, math/vec.h
-renderer.h        → core/depthbuffer.h, core/framebuffer.h, core/profiler.h,
-                    math/transform.h, clip.h, triangle.h, shader/shader.h
-shape2d.h         → core/blend.h, core/framebuffer.h, math/rect.h, math/vec.h
-blit2d.h          → core/blend.h, core/framebuffer.h, core/tga.h, math/mat3.h,
-                    math/rect.h, shape2d.h, scene/texture.h
-renderer2d.h      → core/blend.h, core/framebuffer.h, core/tga.h, math/mat3.h,
-                    math/rect.h, blit2d.h, shape2d.h, scene/camera.h, scene/texture.h
+# render/raster/
+coverage.h        → math/vec.h
+triangle.h        → core/framebuffer.h, math/barycentric.h, math/vec.h, render/raster/coverage.h
+rasterizer_fast.h → core/depthbuffer.h, core/framebuffer.h, math/vec.h, render/raster/coverage.h
+
+# render/pipeline/
+clip.h            → render/pipeline/varyings.h      （只依赖 Varyings，不再连带网格与纹理）
+renderer.h        → core/depthbuffer.h, core/framebuffer.h, math/transform.h, resource/mesh.h,
+                    render/pipeline/clip.h, render/pipeline/shader.h,
+                    render/raster/coverage.h, render/raster/triangle.h
+msaa_renderer.h   → core/framebuffer.h, core/msaa_framebuffer.h, math/barycentric.h,
+                    render/raster/coverage.h, render/raster/triangle.h
+render_queue.h    → math/vec.h
+
+# render/draw2d/
+shape2d.h         → core/blend.h, core/framebuffer.h, math/vec.h
+blit2d.h          → core/blend.h, core/framebuffer.h, core/image.h, math/mat3.h, math/rect.h,
+                    render/draw2d/shape2d.h, resource/texture.h
+renderer2d.h      → core/blend.h, core/framebuffer.h, core/image.h, math/mat3.h, math/rect.h,
+                    render/draw2d/blit2d.h, render/draw2d/shape2d.h, resource/texture.h
 ```
 
-> ⚠️ **`raster/clip.h → shader/shader.h` 造成依赖放大**：`ClipVertex` 需要内嵌
-> `Varyings`，因此 include `clip.h` 会连带拉入 `scene/mesh.h` + `scene/texture.h`。
-> `renderer.h` 是最大受益者也是最大受害者——它的编译依赖面覆盖了几乎整个 `src/`。
+> ℹ️ **`clip.h` 的依赖已收敛**：`ClipVertex` 内嵌 `Varyings`，而 `varyings.h` 只依赖
+> `math/vec.h`，因此 include `clip.h` 不再连带拉入网格与纹理。`renderer.h` 直接依赖
+> `resource/mesh.h`（需要 `Mesh`），这是它依赖面最宽的一项。
 
-**3D 与 2D 共享底层图元**：`triangle.h` 与 `line.h` 位于全局命名空间，被
-`renderer.h`（3D）与 `shape2d.h` / `blit2d.h`（2D）共同使用。这是两个子系统
-唯一的交汇点，也是唯一刻意的全局符号。
+**3D 与 2D 的共享面**：`sr::fillTriangle*`（`render/raster/triangle.h`）与
+`sr::draw2d::*`（`render/draw2d/shape2d.h`）同处 `namespace sr` 体系下，但**互不 include**；
+两者共用的只有 `core/framebuffer.h` 的写入接口。全部符号均在 `sr` 内，不存在全局符号
+（由 `tests/architecture/namespace_sentinel.cpp` 锁定）。
 
 ## 四、核心数据流
 
@@ -406,7 +439,7 @@ ADR-001 记录收敛策略（按引用面分批、拒绝别名桥），ADR-004 �
 ### 6.1 `rasterizer_fast.h` 未接入主渲染链路
 
 `raster::fillTriangleFast`（增量边函数 + SSE2 四像素并行）**从未被
-`Renderer` 调用**，全仓引用只有 `core/benchmark.h` 与单元测试。
+`Renderer` 调用**，全仓引用只有 `benchmarks/support/benchmark.h` 与单元测试。
 
 不接入的理由：
 
@@ -421,7 +454,7 @@ ADR-001 记录收敛策略（按引用面分批、拒绝别名桥），ADR-004 �
 
 ### 6.2 日志双模式：内置模式已改为类型安全的变参模板
 
-`core/log.h` 有两种模式，**占位符语法统一为 fmt 风格的 `{}`**：
+`runtime/log.h` 有两种模式，**占位符语法统一为 fmt 风格的 `{}`**：
 
 | 模式 | 触发条件 | 实现 |
 | --- | --- | --- |

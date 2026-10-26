@@ -13,7 +13,7 @@ engineering_rules.md 定义通用编码原则，本文件定义 C++ 工程实践
 
 # C++ 标准规范
 
-统一使用 C++17，新项目可使用 C++20。
+统一使用 **C++23**（源头：`CMakeLists.txt` 的 `CMAKE_CXX_STANDARD 23` 与 `cmake/targets.cmake` 的 `cxx_std_23`）；不得使用高于 C++23 的提案特性。
 
 禁止：
 
@@ -21,12 +21,13 @@ engineering_rules.md 定义通用编码原则，本文件定义 C++ 工程实践
 * 使用已废弃的 C++ 特性（如 `auto_ptr`、`register`）
 * 依赖未定义行为（UB）
 
-推荐使用 C++17 特性：
+推荐使用已在全仓落地的特性（C++17 起）：
 
 * `std::optional` 替代可空指针返回值
 * `std::variant` 替代 union
-* `if constexpr` 替代 SFINAE 模板特化
+* `if constexpr` 替代 SFINAE 模板特化（示例：`core/pixel_format.h` 的同格式快速路径）
 * 结构化绑定 `auto [a, b] = pair`
+* `std::is_same_v` / `std::remove_reference_t` 等 `<type_traits>` 工具（使用前必须显式 include）
 
 ---
 

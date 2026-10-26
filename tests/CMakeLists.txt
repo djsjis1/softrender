@@ -29,6 +29,13 @@ add_test(NAME architecture_boundaries
             -P "${CMAKE_CURRENT_SOURCE_DIR}/architecture/check_boundaries.cmake")
 set_tests_properties(architecture_boundaries PROPERTIES LABELS "packaging" TIMEOUT 60)
 
+# 文档路径门禁：当前态文档里引用的 xxx/yyy.h 必须真实存在。
+# 背景见 tests/architecture/check_doc_paths.cmake 头注释（文档曾连续多轮引用已删头）。
+add_test(NAME architecture_doc_paths
+    COMMAND "${CMAKE_COMMAND}" "-DSR_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/architecture/check_doc_paths.cmake")
+set_tests_properties(architecture_doc_paths PROPERTIES LABELS "packaging" TIMEOUT 60)
+
 # 单元测试与像素回归需要 io（加载真实文件）与 runtime（线程池/缓存）。
 if(NOT SR_BUILD_IO OR NOT SR_BUILD_RUNTIME)
     message(STATUS "SR_BUILD_IO/SR_BUILD_RUNTIME 关闭：只跑架构门禁，跳过单元测试与像素回归")
