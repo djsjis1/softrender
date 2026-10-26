@@ -6,6 +6,9 @@
 // 不做任何堆分配。方法：全局 operator new 熔断守卫——守卫开启期间
 // 任何分配请求立即置违规计数并抛 bad_alloc，由 main 捕获判定失败。
 //
+// 两个阶段：① 裸 Renderer（drawMesh 级）；② ForwardPipeline 稳态
+// （验证门面声明的“渲染调用路径零分配”确实成立，而不是只写在注释里）。
+//
 // 【边界】Mesh 用 std::vector 存顶点，构建期必然分配——构建在守卫
 // 开启前完成；被证明的是**渲染阶段**零分配（裸机场景网格来自静态
 // 数据，等价成立）。本程序只链 SoftRenderer::core + SoftRenderer::render，
@@ -19,6 +22,7 @@
 
 #include "softrenderer/core/framebuffer.h"
 #include "softrenderer/render/pipeline/clip.h"
+#include "softrenderer/render/pipeline/forward_pipeline.h"
 #include "softrenderer/render/pipeline/renderer.h"
 #include "softrenderer/render/shader/shaders.h"
 #include "softrenderer/resource/mesh_generator.h"
@@ -93,6 +97,30 @@ int main()
             renderer.clear(fb, sr::colors::black);
             renderer.drawMesh(fb, mesh, shader);
         }
+    }
+    catch (const std::bad_alloc&)
+    {
+        badAlloc = true;
+    }
+    g_heapForbidden.store(false, std::memory_order_relaxed);
+
+    // ---- 阶段二：ForwardPipeline 稳态零分配 ----
+    // 门面的承诺是「渲染调用路径稳态零分配」，不包含构造期与首次渲染的惰性
+    // 分配（Renderer 对象、队列/顶点缓存容量）。这里先把那些跑一遍，再开守卫。
+    sr::ForwardPipeline pipeline(W, H);
+    pipeline.clearColor = sr::colors::black;
+    sr::ForwardDraw draw;
+    draw.mesh = &mesh;
+    draw.shader = &shader;
+    pipeline.submit(draw);
+
+    pipeline.render(fb);  // 预热：draws_/queue_/positions_/顶点缓存的首次分配在此
+
+    g_heapForbidden.store(true, std::memory_order_relaxed);
+    try
+    {
+        for (int frame = 0; frame < 2; ++frame)
+            pipeline.render(fb);
     }
     catch (const std::bad_alloc&)
     {

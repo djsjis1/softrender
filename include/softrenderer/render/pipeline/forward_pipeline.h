@@ -1,10 +1,12 @@
 #pragma once
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <memory>
 #include <vector>
 
 #include "softrenderer/core/framebuffer.h"
+#include "softrenderer/core/pixel_format.h"
 #include "softrenderer/render/pipeline/render_queue.h"
 #include "softrenderer/render/pipeline/renderer.h"
 #include "softrenderer/render/pipeline/shadow_pass.h"
@@ -65,8 +67,13 @@ class ForwardPipeline
     {
     }
 
-    // 裸机路径：主深度缓冲用外部存储，整条渲染链不经堆分配
-    // （帧缓冲本身也应是外部存储构造；FXAA 需要临时缓冲，与免堆互斥）。
+    // 裸机路径：主深度缓冲用外部存储。
+    //
+    // 能保证的是**渲染调用路径的稳态零分配**：预热一帧后 render() 不再分配
+    // （顶点缓存按 epoch 复用、阴影 casters 向量预留容量、阴影图尺寸不变）。
+    // 不包含的部分必须知道：门面自身的 Renderer 与阴影图是 make_unique 出来的
+    // （构造或首次使用时一次），FXAA 的临时缓冲与亮度图同样要分配——需要整对象
+    // 零堆时应直接用 Renderer + 外部存储自己编排。
     ForwardPipeline(int width, int height, float* depthStorage)
         : width_(width), height_(height),
           mainRenderer_(std::make_unique<Renderer>(width, height, depthStorage))
@@ -96,10 +103,16 @@ class ForwardPipeline
     void clearDraws() { draws_.clear(); }
     void submit(const ForwardDraw& draw) { draws_.push_back(draw); }
 
-    // 阴影贴图访问。指向门面内部缓冲，地址跨帧稳定：自定义 Shader 可在
-    // 首帧前一次性接入（FinalShader::shadowMap / lightVP）。
+    // 阴影贴图访问。指向门面内部缓冲：**只要 shadowResolution 不变**，地址跨帧
+    // 稳定，自定义 Shader 可在首帧前一次性接入（FinalShader::shadowMap / lightVP）。
+    //
+    // ⚠ 改 shadowResolution 会重建阴影 Renderer，此前取得的指针当场失效（同帧内
+    // 采样就是悬垂读）。约定：持有者在渲染前比对 shadowMapVersion()，发现变化必须
+    // 重新取指针。
     // 阴影未启用或首帧未渲染前返回 nullptr。
     const DepthBuffer* shadowDepth() const { return shadowRenderer_ ? &shadowRenderer_->depth() : nullptr; }
+    // 阴影图身份版本：每次因分辨率变化而重建时 +1。
+    uint32_t shadowMapVersion() const { return shadowMapVersion_; }
     int drawnShadowCasters() const { return lastShadowCasters_; }
 
     // 预创建阴影贴图（可选）：首帧前调用一次，让 shader 能先拿到稳定指针。
@@ -108,9 +121,15 @@ class ForwardPipeline
     {
         const int res = shadowResolution > 0 ? shadowResolution : 1024;
         if (!shadowRenderer_ || shadowRenderer_->width() != res)
+        {
             shadowRenderer_ = std::make_unique<Renderer>(res, res);
+            // 指针身份变了：外部持有的 shadowDepth() 全部作废
+            ++shadowMapVersion_;
+        }
+        // 哑目标只承载「颜色输出无意义」的写入，用 1 字节/像素的 Gray8：
+        // 1024² 从 4 MB 降到 1 MB，每帧被写的一百万个字节也不再是 4 倍浪费。
         if (!shadowTarget_ || shadowTarget_->width() != res)
-            shadowTarget_ = std::make_unique<Framebuffer>(res, res);
+            shadowTarget_ = std::make_unique<BasicFramebuffer<Gray8>>(res, res);
     }
 
     // 渲一帧。fb 为 RGBA8888（FXAA 作用于 8 位图像；其他格式请直接用
@@ -161,14 +180,17 @@ class ForwardPipeline
     {
         ensureShadowMap();
 
-        std::vector<ShadowCaster> casters;
-        casters.reserve(draws_.size());
+        // casters_ 是成员而不是每帧新建：阴影开启时每帧一次 vector 分配
+        // 会直接打穿「渲染路径稳态零分配」。
+        if (casters_.capacity() < draws_.size())
+            casters_.reserve(draws_.size());
+        casters_.clear();
         for (const ForwardDraw& draw : draws_)
             if (draw.castShadow && draw.mesh)
-                casters.push_back({draw.mesh, draw.lightMVP});
-        lastShadowCasters_ = int(casters.size());
+                casters_.push_back({draw.mesh, draw.lightMVP});
+        lastShadowCasters_ = int(casters_.size());
 
-        renderShadowPass(*shadowRenderer_, *shadowTarget_, casters);
+        renderShadowPass(*shadowRenderer_, *shadowTarget_, casters_);
     }
 
     void applyFxaa(Framebuffer& fb)
@@ -189,25 +211,33 @@ class ForwardPipeline
             else
                 serialStripExecutor(H, body);
         };
-        runStrips([&](int y0, int y1) { postprocess::buildLuminanceMapRows(fb, lumMap_, y0, y1); });
-        runStrips([&](int y0, int y1) { postprocess::fxaaRows(fb, scratch, lumMap_, y0, y1); });
-
-        // FXAA 需要 src/dst 分离（原地写会污染未处理的输入行），算完拷回
-        for (int y = 0; y < H; ++y)
-            std::memcpy(fb.row(y), scratch.row(y), size_t(W) * sizeof(Color));
+        // 三个并行段：拷入 scratch → 算亮度图 → FXAA 直接写回 fb。
+        // FXAA 需要 src/dst 分离（原地写会污染未处理的输入行），所以先把整帧搬到
+        // scratch；这次拷贝放进并行段，原来「算完再整帧 memcpy 回 fb」的串行搬运
+        // （1080p 约 8 MB）就省掉了。
+        runStrips([&](int y0, int y1) {
+            for (int y = y0; y < y1; ++y)
+                std::memcpy(scratch.row(y), fb.row(y), size_t(W) * sizeof(Color));
+        });
+        runStrips([&](int y0, int y1) { postprocess::buildLuminanceMapRows(scratch, lumMap_, y0, y1); });
+        runStrips([&](int y0, int y1) { postprocess::fxaaRows(scratch, fb, lumMap_, y0, y1); });
     }
 
     int width_, height_;
     std::unique_ptr<Renderer> mainRenderer_;
     std::unique_ptr<Renderer> shadowRenderer_;
-    std::unique_ptr<Framebuffer> shadowTarget_;
+    // 阴影哑目标：颜色无人读取，用 1 字节/像素的 Gray8（1024² 仅 1 MB）
+    std::unique_ptr<BasicFramebuffer<Gray8>> shadowTarget_;
     std::unique_ptr<Framebuffer> fxaaScratch_;
     std::vector<float> lumMap_;
 
     std::vector<ForwardDraw> draws_;
     RenderQueue queue_;
     std::vector<Vec3f> positions_;
+    std::vector<ShadowCaster> casters_;  // 复用：避免阴影开启时每帧分配
     int lastShadowCasters_ = 0;
+    // 阴影图身份版本，供持有 shadowDepth() 指针的一方检测失效
+    uint32_t shadowMapVersion_ = 0;
 };
 
 }  // namespace sr

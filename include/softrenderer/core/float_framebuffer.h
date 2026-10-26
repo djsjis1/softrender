@@ -48,8 +48,9 @@ public:
         std::fill(pixels_, pixels_ + n, Vec3f{0, 0, 0});
     }
 
-    // 外部存储（非拥有）：像素数组由调用方提供；深度仍为自分配。
-    // pixels 须容纳 width*height 个 Vec3f（按 sizeof(Vec3f) 对齐），不做填充。
+    // 外部存储（非拥有）轻量版：只外给像素，深度仍由本类自分配。
+    // pixels 须容纳 width*height 个 Vec3f，不做填充。
+    // 【注意】它并非零堆构造（深度缓冲会 new）——真零堆请用下面的四参数版。
     FloatFramebuffer(int width, int height, Vec3f* pixels)
         : width_(width > 0 && height > 0 ? width : 0), height_(width > 0 && height > 0 ? height : 0),
           pixels_(pixels), ownsPixels_(false), depth_(width_, height_)
@@ -59,7 +60,7 @@ public:
     }
 
     // 外部存储（非拥有）完整版：像素与深度都由调用方提供，构造全程零分配。
-    // depthStorage 须容纳 width*height 个 float。
+    // pixels 须容纳 width*height 个 Vec3f，depthStorage 须容纳同样多个 float。
     FloatFramebuffer(int width, int height, Vec3f* pixels, float* depthStorage)
         : width_(width > 0 && height > 0 ? width : 0), height_(width > 0 && height > 0 ? height : 0),
           pixels_(pixels), ownsPixels_(false), depth_(width_, height_, depthStorage)
@@ -114,6 +115,9 @@ public:
             return;
         if (!ownsPixels_)
         {
+            // 外部存储是定尺寸的，本类无法重新分配调用方的内存，所以尺寸不一致时
+            // 只能空操作——这是既定契约（core_buffer_test 的外部存储用例锁定
+            // “不重建尺寸”）。需要换尺寸时重建对象，而不是指望 resize。
             if (w == width_ && h == height_)
                 clear();
             return;

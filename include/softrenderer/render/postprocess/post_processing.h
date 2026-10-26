@@ -408,7 +408,8 @@ inline void brightPass(const FloatFramebuffer& src, FloatFramebuffer& dst, float
     brightPassRows(src, dst, threshold, 0, src.height());
 }
 
-// 行区间版：dst 先由调用方 resize/clear；核为只读局部数据，条带间无共享写。
+// 行区间版：dst 须已 resize 到与 src 同尺寸。本函数整行覆盖（含垂直 pass
+// 的首个核项直接赋值），因此不需要调用方预清空。
 inline void gaussianBlurRows(const FloatFramebuffer& src, FloatFramebuffer& dst, bool horizontal,
                              int radius, int yBegin, int yEnd)
 {
@@ -452,6 +453,8 @@ inline void gaussianBlurRows(const FloatFramebuffer& src, FloatFramebuffer& dst,
         // 垂直 pass：按核偏移逐行累加，内层在连续内存上循环。
         // 逐像素跨行取 17 次（步长 = 一整行）会把缓存打满，是这条路径的主要瓶颈。
         // 输出行 dstRow[y] 只聚合输入行 [y-r, y+r]，行间写不冲突，可按条带并行。
+        // 首个核项用赋值而不是累加：dst 因此无需预清空，少一次全帧写，也消除了
+        // 「忘 clear 就得到旧内容叠加」这种不报错只发灰的静默错误。
         for (int y = y0; y < y1; ++y)
         {
             Vec3f* dstRow = dst.row(y);
@@ -459,8 +462,16 @@ inline void gaussianBlurRows(const FloatFramebuffer& src, FloatFramebuffer& dst,
             {
                 const Vec3f* srcRow = srcData + size_t(std::clamp(y + i, 0, h0 - 1)) * size_t(w0);
                 const float k = kernel[size_t(i + radius)];
-                for (int x = 0; x < w0; ++x)
-                    dstRow[x] = dstRow[x] + srcRow[x] * k;
+                if (i == -radius)
+                {
+                    for (int x = 0; x < w0; ++x)
+                        dstRow[x] = srcRow[x] * k;
+                }
+                else
+                {
+                    for (int x = 0; x < w0; ++x)
+                        dstRow[x] = dstRow[x] + srcRow[x] * k;
+                }
             }
         }
     }
@@ -907,7 +918,7 @@ inline void chromaticAberration(const FloatFramebuffer& src,
 //   1. scratch.half / scratch.blurH 先按半分辨率 resize + clear（全帧一次）
 //   2. bloomPrepareRows  按 src 的行条带（[0,H)）填 half —— 行独立
 //   3. gaussianBlurRows(half→blurH, 水平) 与 (blurH→half, 垂直) 按 [0,hh) 条带
-//      （垂直 pass 是累加写，dst 须先整帧 clear 一次）
+//      （两个 pass 都整行覆盖，dst 无需预清空）
 //   4. bloomApplyRows    按 src 的行条带写 dst —— 行独立
 //
 // 契约：src 与 dst 不得为同一缓冲（合成要读 src）；dst 尺寸不匹配时整链入口

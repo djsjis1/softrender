@@ -30,8 +30,14 @@ struct ShadowCaster
 // 把 casters 从光源视角渲进 lightRenderer 的深度缓冲。
 // lightRenderer 的尺寸即阴影贴图分辨率；lightTarget 是同尺寸的哑帧缓冲
 // （颜色输出无意义，仅为满足 drawMesh 的接口）。
+//
+// lightTarget 是模板参数，只需满足 BasicFramebuffer 的接口。一张 1024² 的
+// RGBA8888 哑缓冲要 4 MB，而这些像素永远不会被读——传
+// BasicFramebuffer<Gray8> 即可降到 1 MB（每帧被写的一百万个字节里没有有效信息）。
+//
 // 阴影图双面渲入（关闭背面剔除）以减少薄几何漏光——与示例 stage10 同口径。
-inline void renderShadowPass(Renderer& lightRenderer, Framebuffer& lightTarget,
+template <class FB>
+inline void renderShadowPass(Renderer& lightRenderer, FB& lightTarget,
                              const std::vector<ShadowCaster>& casters)
 {
     if (lightRenderer.width() <= 0 || lightRenderer.height() <= 0)

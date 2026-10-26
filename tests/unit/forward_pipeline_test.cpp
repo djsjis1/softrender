@@ -114,6 +114,35 @@ TEST(ForwardPipeline, shadowPassProducesDepthAndCount)
     EXPECT_GT(solid, 64) << "阴影图应包含球的投影";
 }
 
+// 改 shadowResolution 会重建阴影 Renderer，此前取得的指针当场失效。
+// 旧实现只声明了“地址跨帧稳定”，而没有任何手段让持有者发现失效——
+// 同一帧内采样就是悬垂读（FinalShader::shadowMap 正是这么用的）。
+TEST(ForwardPipeline, shadowResolutionChangeInvalidatesEarlierPointer)
+{
+    const int W = 16, H = 16;
+    ForwardPipeline pipeline(W, H);
+    pipeline.shadowEnabled = true;
+    pipeline.shadowResolution = 64;
+    pipeline.ensureShadowMap();
+
+    const DepthBuffer* before = pipeline.shadowDepth();
+    const uint32_t versionBefore = pipeline.shadowMapVersion();
+    ASSERT_NE(before, nullptr);
+    ASSERT_EQ(before->width(), 64);
+
+    // 同分辨率重复调用：不重建，指针与版本都必须保持不变
+    pipeline.ensureShadowMap();
+    EXPECT_EQ(pipeline.shadowDepth(), before) << "同分辨率不应重建";
+    EXPECT_EQ(pipeline.shadowMapVersion(), versionBefore);
+
+    // 改分辨率：版本递增，持有者据此知道必须重取指针
+    pipeline.shadowResolution = 128;
+    pipeline.ensureShadowMap();
+    EXPECT_EQ(pipeline.shadowMapVersion(), versionBefore + 1) << "重建必须递增版本";
+    ASSERT_NE(pipeline.shadowDepth(), nullptr);
+    EXPECT_EQ(pipeline.shadowDepth()->width(), 128) << "新图尺寸应为新分辨率";
+}
+
 TEST(ForwardPipeline, fxaaOnFlatClearColorIsIdentity)
 {
     const int W = 24, H = 24;
@@ -152,7 +181,7 @@ TEST(ForwardPipeline, injectedStripExecutorCoversEveryRowOnce)
     Framebuffer fb(W, H);
     pipeline.render(fb);
 
-    EXPECT_EQ(phases, 2) << "亮度预计算与 FXAA 应用各一个并行段";
+    EXPECT_EQ(phases, 3) << "拷入 scratch、亮度预计算与 FXAA 应用各一个并行段";
     // 行覆盖由 fxaaRows 的 clamp 保证；这里验证执行器确实被用了（非串行路径）
 }
 
