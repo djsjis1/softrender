@@ -51,6 +51,12 @@
   外部存储 2、bloom 属性 3）；Debug+ASAN 348 通过 + 4 跳过；`baremetal_smoke`
   Release + ASAN 双过（零违规）。
 - quick 压测 90/114 全过；doc-paths 门禁通过；像素回归 3/3。
+- 远端 CI 经三轮修复后 **7/7 作业全绿**（8d3952c）：①demo_skinning 的 ofstream
+  write 后未 flush 即读回（windows smoke）；②gcc `-Wrange-loop-construct` 拒绝按值
+  结构化绑定 range-loop（ubuntu/coverage/tsan/sanitizers 构建，MSVC 无此告警）；
+  ③sanitizers 作业构建清单补 `baremetal_smoke`（ctest 按 fast 标签发现，缺产物
+  Not Run）。`SR_NO_EXCEPTIONS` 构建/安装/树校验、`-fno-exceptions` 头门禁与
+  Linux ASAN 下的零堆 smoke 均在远端首验通过。
 
 ## 2026-10-26（晚）
 
