@@ -445,12 +445,18 @@ void fillEllipse(FB& fb, float cx, float cy, float rx, float ry, Color c,
     }
     if (minX > maxX || minY > maxY)
         return;
+    // 倒数预计算：内层原本每像素做两次浮点除法（/rx、/ry），换算成乘法。
+    // rx/ry 已在入口校验为正，1/rx 不会产生 Inf。
+    // 与除法相比乘倒数在最后一位上有舍入差异，边界像素可能翻转 ——
+    // 由 draw2d_test 与像素回归守护；若出现差异就退回除法，不拿确定性换这点性能。
+    const float invRx = 1.0f / rx;
+    const float invRy = 1.0f / ry;
     for (int py = minY; py <= maxY; ++py)
     {
-        float ny = (py + 0.5f - cy) / ry; // 归一化 y 坐标
+        const float ny = (py + 0.5f - cy) * invRy; // 归一化 y 坐标
         for (int px = minX; px <= maxX; ++px)
         {
-            float nx = (px + 0.5f - cx) / rx; // 归一化 x 坐标
+            const float nx = (px + 0.5f - cx) * invRx; // 归一化 x 坐标
             if (nx * nx + ny * ny <= 1.0f)
                 plotBlend(fb, px, py, c, mode, clip);
         }

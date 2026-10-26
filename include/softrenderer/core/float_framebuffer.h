@@ -1,4 +1,5 @@
 #pragma once
+#include <cassert>
 #include <cstddef>
 #include <algorithm>
 #include <cmath>
@@ -67,8 +68,15 @@ public:
         pixels_[size_t(y) * width_ + x] = hdrColor;
     }
 
+    // 读一个像素。
+    // 【契约与 BasicFramebuffer::getPixel 同构】Debug 下 assert 暴露调用方越界，
+    // Release 下返回黑色哨兵（而不是裸下标访问），避免越界读静默传播成 UB。
+    // 旧实现连 assert 都没有，与同类的 setPixel（有运行时检查）口径不一致。
     Vec3f getPixel(int x, int y) const
     {
+        assert(x >= 0 && x < width_ && y >= 0 && y < height_);
+        if (x < 0 || x >= width_ || y < 0 || y >= height_)
+            return Vec3f{0, 0, 0};
         return pixels_[size_t(y) * width_ + x];
     }
 

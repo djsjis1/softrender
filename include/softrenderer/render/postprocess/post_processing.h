@@ -672,9 +672,11 @@ inline void radialMotionBlur(const FloatFramebuffer& color,
     out.resize(W, H);
     const float denom = float(std::max(1, samples - 1));
     const int safeSamples = std::clamp(samples, 1, 256);
+    const float invSamples = 1.0f / float(safeSamples);
     float cx = W * 0.5f, cy = H * 0.5f;
     for (int y = 0; y < H; ++y)
     {
+        Vec3f* dstRow = out.row(y);
         for (int x = 0; x < W; ++x)
         {
             float dx = (x - cx) / float(W);
@@ -688,9 +690,11 @@ inline void radialMotionBlur(const FloatFramebuffer& color,
                 float t = (float(s) / denom - 0.5f) * blur;
                 int sx = std::clamp(int(x + dx * t * W), 0, W - 1);
                 int sy = std::clamp(int(y + dy * t * H), 0, H - 1);
-                sum = sum + color.getPixel(sx, sy);
+                // sx/sy 已 clamp，且入口已校验 color 尺寸 >= W/H，
+                // 因此这里用行指针，省掉每样本一次乘法索引与边界比较。
+                sum = sum + color.row(sy)[sx];
             }
-            out.setPixel(x, y, sum * (1.0f / float(safeSamples)));
+            dstRow[x] = sum * invSamples;
         }
     }
 }
@@ -706,11 +710,12 @@ inline void vignette(FloatFramebuffer& fb, float strength = 0.3f)
     {
         for (int x = 0; x < W; ++x)
         {
-            float dx = (x - cx) / maxDist;
-            float dy = (y - cy) / maxDist;
-            float d = std::sqrt(dx * dx + dy * dy);
-            float factor = 1.0f - d * d * strength;
-            factor = std::max(factor, 0.0f);
+            const float nx = (x - cx) / maxDist;
+            const float ny = (y - cy) / maxDist;
+            // 归一化半径的平方。旧写法先算 sqrt 再用 d*d 平方回去，
+            // 开方白算了一次；直接取平方与数学上恒等且少一次 sqrt。
+            const float r2 = nx * nx + ny * ny;
+            float factor = std::max(1.0f - r2 * strength, 0.0f);
             Vec3f c = fb.getPixel(x, y);
             fb.setPixel(x, y, c * factor);
         }

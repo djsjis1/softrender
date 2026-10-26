@@ -13,6 +13,7 @@
 #include "softrenderer/core/blend.h"
 #include "softrenderer/core/color.h"
 #include "softrenderer/core/depthbuffer.h"
+#include "softrenderer/core/float_framebuffer.h"
 #include "softrenderer/core/framebuffer.h"
 #include "softrenderer/core/gbuffer.h"
 #include "softrenderer/render/shader/deferred_lighting.h"
@@ -82,6 +83,34 @@ TEST(Framebuffer, framebuffer_getPixel_outOfBounds_returnsSentinel)
     fb.setPixel(-1, -1, Color(255, 255, 255));
     fb.setPixel(4, 4, Color(255, 255, 255));
     EXPECT_EQ(fb.getPixel(0, 0).r, 10);
+#endif
+}
+
+// FloatFramebuffer 的 getPixel 曾完全裸下标访问（既无 assert 也无运行时检查），
+// 与同类的 setPixel、BasicFramebuffer::getPixel 口径不一致；这里锁定修好后的契约。
+TEST(FloatFramebuffer, getPixel_outOfBounds_returnsBlack)
+{
+#ifndef NDEBUG
+    GTEST_SKIP() << "越界哨兵仅在 Release（NDEBUG）下可测：Debug 下 assert 会先中止进程";
+#else
+    sr::FloatFramebuffer fb(4, 4);
+    fb.setPixel(1, 2, sr::Vec3f{0.25f, 0.5f, 0.75f});
+
+    // 四个方向都必须返回黑色哨兵，而不是读到别的像素或越界内存
+    for (int i = 0; i < 4; ++i)
+    {
+        const sr::Vec3f c = (i == 0) ? fb.getPixel(-1, 2)
+                            : (i == 1) ? fb.getPixel(4, 2)
+                            : (i == 2) ? fb.getPixel(1, -1)
+                                       : fb.getPixel(1, 4);
+        EXPECT_EQ(c.x, 0.0f) << "direction " << i;
+        EXPECT_EQ(c.y, 0.0f) << "direction " << i;
+        EXPECT_EQ(c.z, 0.0f) << "direction " << i;
+    }
+
+    // 合法位置不受影响
+    EXPECT_EQ(fb.getPixel(1, 2).x, 0.25f);
+    EXPECT_EQ(fb.getPixel(1, 2).z, 0.75f);
 #endif
 }
 

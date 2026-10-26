@@ -793,10 +793,54 @@ static void stress_present_same_format_565()
                std::to_string(sameMs / crossMs) + " mismatches=" + std::to_string(mismatches));
 }
 
+// 6. 后处理里两个逐像素算子的 1080p 成本：暗角与径向运动模糊。
+//    对应本轮的两处优化——vignette 去掉了"sqrt 后再平方回去"的冗余开方，
+//    radialMotionBlur 把样本循环里的 getPixel/setPixel 换成行指针。
+//    固定输入，供 --baseline 对比；heavy 标记把它挡在 --quick 之外。
+static void stress_postprocess_vignette_blur_1080p()
+{
+    const auto t0 = Clock::now();
+    const int W = 1920, H = 1080;
+
+    FloatFramebuffer fb(W, H);
+    for (int y = 0; y < H; ++y)
+    {
+        Vec3f* row = fb.row(y);
+        for (int x = 0; x < W; ++x)
+            row[x] = Vec3f{float(x) / float(W), float(y) / float(H), 0.5f};
+    }
+
+    const int reps = 3;
+
+    const auto tV = Clock::now();
+    for (int i = 0; i < reps; ++i)
+        sr::postprocess::vignette(fb, 0.4f);
+    const double vignetteMs = msSince(tV) / reps;
+
+    FloatFramebuffer blurred(W, H);
+    const auto tB = Clock::now();
+    for (int i = 0; i < reps; ++i)
+        sr::postprocess::radialMotionBlur(fb, W, H, 0.3f, 16, blurred);
+    const double blurMs = msSince(tB) / reps;
+
+    // 正确性：输出有限；暗角必须让角落比中心暗（中心 r=0，factor=1 不变）
+    const Vec3f center = fb.getPixel(W / 2, H / 2);
+    const Vec3f corner = fb.getPixel(1, 1);
+    const Vec3f mid = blurred.getPixel(W / 2, H / 2);
+    const bool finite = std::isfinite(mid.x) && std::isfinite(mid.y) && std::isfinite(mid.z) &&
+                        std::isfinite(corner.x) && std::isfinite(center.x);
+    const bool darker = (corner.x + corner.y + corner.z) < (center.x + center.y + center.z);
+
+    report("postprocess_vignette_blur_1080p", finite && darker, msSince(t0),
+           "vignette=" + std::to_string(vignetteMs) + "ms blur16=" + std::to_string(blurMs) +
+               "ms cornerR=" + std::to_string(corner.x) + " centerR=" + std::to_string(center.x));
+}
+
 SR_SCENARIO("present_upscale_565", stress_present_upscale_565, false);
 SR_SCENARIO("render_565_matches_8888", stress_render_565_matches_8888, false);
 SR_SCENARIO("draw2d_565_ui_frame", stress_draw2d_565_ui, false);
 SR_SCENARIO("fireworks_565_vs_8888", stress_fireworks_565_vs_8888, false);
 SR_SCENARIO("present_same_format_565", stress_present_same_format_565, false);
+SR_SCENARIO("postprocess_vignette_blur_1080p", stress_postprocess_vignette_blur_1080p, true);
 
 }  // namespace stress
