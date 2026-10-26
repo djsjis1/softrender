@@ -31,6 +31,12 @@ namespace sr
 class FloatFramebuffer
 {
 public:
+    // 0×0 空缓冲（不分配）：供 BloomScratch 等聚合体默认构造、
+    // 以及"先声明后 move 赋值"的用法。渲染前须 resize 或移动赋入。
+    // ownsPixels_ 必须为 true：空缓冲属自分配形态，resize 才会走重建路径
+    //（外部存储是定尺寸的，resize 只做同尺寸清空）；析构 delete[] nullptr 安全。
+    FloatFramebuffer() : width_(0), height_(0), pixels_(nullptr), ownsPixels_(true), depth_(0, 0) {}
+
     // 非法尺寸统一落到 0×0：与 resize() 同口径。旧实现直接把 int 负数转 size_t 再相乘，
     // 会在容器分配处抛 length_error，而 resize 只是忽略非法尺寸。
     FloatFramebuffer(int width, int height)

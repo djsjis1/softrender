@@ -681,3 +681,30 @@ TEST(PostProcessBloom, rejectsAliasedBuffersAndKeepsSrc)
     EXPECT_FLOAT_EQ(src.getPixel(8, 8).x, 4.0f) << "src 保持不变";
     EXPECT_GT(dst.getPixel(8, 8).x, 3.9f); // 亮部 + bloom 增益
 }
+
+// ==================== bloom 分条等价 ====================
+
+TEST(PostProcessBloom, stripedOrchestrationMatchesWholeChain)
+{
+    const FloatFramebuffer src = makeHdrPattern(40, 30);
+    FloatFramebuffer whole(40, 30), split(40, 30);
+
+    postprocess::bloom(src, whole, {0.5f, 0.9f, 10});
+
+    // 手工分条编排：与整链同一段数，条带边界任意划分
+    postprocess::BloomScratch scratch;
+    scratch.resizeFor(40, 30);
+    scratch.half.clear();
+    forEachStrip(15, 4, [&](int y0, int y1) { postprocess::bloomPrepareRows(src, scratch, {0.5f, 0.9f, 10}, y0, y1); });
+
+    const int radius = postprocess::bloomHalfRadius({0.5f, 0.9f, 10}, scratch.half.width(), scratch.half.height());
+    scratch.blurH.clear();
+    forEachStrip(scratch.half.height(), 3,
+                 [&](int y0, int y1) { postprocess::gaussianBlurRows(scratch.half, scratch.blurH, true, radius, y0, y1); });
+    scratch.half.clear();
+    forEachStrip(scratch.half.height(), 3,
+                 [&](int y0, int y1) { postprocess::gaussianBlurRows(scratch.blurH, scratch.half, false, radius, y0, y1); });
+    forEachStrip(30, 7, [&](int y0, int y1) { postprocess::bloomApplyRows(src, scratch.half, split, {0.5f, 0.9f, 10}, y0, y1); });
+
+    expectBuffersEqual(whole, split);
+}

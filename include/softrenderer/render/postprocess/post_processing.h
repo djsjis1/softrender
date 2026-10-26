@@ -528,6 +528,8 @@ inline void depthOfField(const FloatFramebuffer& color,
     // 不留上界时 maxBlur=1e6 会让单帧循环变成 (2e6)² 次（实测级别的挂死）。
     maxBlur = std::min(maxBlur, float(std::max(W, H)));
     out.resize(W, H);
+    if (out.width() != W || out.height() != H)
+        return; // 外部存储 out 是定尺寸的：尺寸仍不符说明调用方未按契约准备
 
     // 语义：每个像素 = 以它自己的 CoC 半径、带 clamp 边界的二维盒式平均。
     //
@@ -894,16 +896,23 @@ inline void chromaticAberration(const FloatFramebuffer& src,
     }
 }
 
-// ---- Bloom 整链（半分辨率）----
+// ---- Bloom 整链（半分辨率，可分条并行）----
 //
 // 亮部提取(全分辨率) → 2×2 box 降采样 → 高斯 H/V(半分辨率) → 双线性升采样
 // → dst = src + bloom × intensity。
 // Bloom 是低频信号：模糊核半径超过 2 像素后，半分辨率计算 + 升采样与
 // 全分辨率链视觉不可分，但逐像素工作量降到约 1/4（48 号文路线 B）。
 //
-// 契约：src 与 dst 不得为同一缓冲（合成要读 src）；dst 尺寸不匹配时会
-// resize（外部存储 dst 是定尺寸的，须由调用方保证与 src 同尺寸）。
-// 内部临时缓冲在本函数内分配（宿主便利路径）；裸机/免堆场景请用
+// 编排分段（供线程池分条；单线程直接用下面的 bloom() 整链入口）：
+//   1. scratch.half / scratch.blurH 先按半分辨率 resize + clear（全帧一次）
+//   2. bloomPrepareRows  按 src 的行条带（[0,H)）填 half —— 行独立
+//   3. gaussianBlurRows(half→blurH, 水平) 与 (blurH→half, 垂直) 按 [0,hh) 条带
+//      （垂直 pass 是累加写，dst 须先整帧 clear 一次）
+//   4. bloomApplyRows    按 src 的行条带写 dst —— 行独立
+//
+// 契约：src 与 dst 不得为同一缓冲（合成要读 src）；dst 尺寸不匹配时整链入口
+// 会 resize（外部存储 dst 是定尺寸的，须由调用方保证与 src 同尺寸）。
+// 临时缓冲在 BloomScratch 内分配（宿主便利路径）；裸机/免堆场景请用
 // brightPass/gaussianBlur/addBlend 的 *Rows 算子自行编排外部存储。
 struct BloomParams
 {
@@ -912,48 +921,73 @@ struct BloomParams
     int blurRadius = 12;     // 全分辨率口径的高斯半径（内部折半使用）
 };
 
-inline void bloom(const FloatFramebuffer& src, FloatFramebuffer& dst, const BloomParams& params = {})
+struct BloomScratch
 {
-    if (&src == &dst || src.width() <= 0 || src.height() <= 0)
-        return;
-    const int W = src.width(), H = src.height();
-    const int hw = std::max(1, W / 2), hh = std::max(1, H / 2);
+    FloatFramebuffer half;   // 亮部 + 降采样结果，也是垂直模糊后的最终 bloom 图
+    FloatFramebuffer blurH;  // 水平模糊临时
 
-    // 1. 亮部提取（全分辨率）→ 2. 2×2 平均降采样（一趟完成，免中间全尺寸亮部缓冲）
-    FloatFramebuffer half(hw, hh);
-    const int radius = std::clamp(std::max(1, params.blurRadius / 2), 1, std::max(hw, hh));
-    for (int y = 0; y < hh; ++y)
+    void resizeFor(int W, int H)
     {
-        Vec3f* dstRow = half.row(y);
+        const int hw = std::max(1, W / 2), hh = std::max(1, H / 2);
+        if (half.width() != hw || half.height() != hh)
+            half.resize(hw, hh);
+        if (blurH.width() != hw || blurH.height() != hh)
+            blurH.resize(hw, hh);
+    }
+};
+
+// 半分辨率口径的高斯半径（外部编排调 gaussianBlurRows 时用同一式子）
+inline int bloomHalfRadius(const BloomParams& p, int halfWidth, int halfHeight)
+{
+    return std::clamp(std::max(1, p.blurRadius / 2), 1, std::max(halfWidth, halfHeight));
+}
+
+// 步骤 2：亮部提取 + 2×2 平均降采样（一趟完成），只写 [yBegin, yEnd) 的 half 行。
+inline void bloomPrepareRows(const FloatFramebuffer& src, BloomScratch& scratch,
+                             const BloomParams& params, int yBegin, int yEnd)
+{
+    const int W = src.width(), H = src.height();
+    const int hw = scratch.half.width(), hh = scratch.half.height();
+    if (W <= 0 || H <= 0 || hw <= 0 || hh <= 0)
+        return;
+    if (hw != std::max(1, W / 2) || hh != std::max(1, H / 2))
+        return; // scratch 与 src 不匹配：编排层责任，静默丢弃与整帧版一致
+    const auto [y0, y1] = clampRows(yBegin, yEnd, hh);
+    for (int y = y0; y < y1; ++y)
+    {
+        Vec3f* dstRow = scratch.half.row(y);
         for (int x = 0; x < hw; ++x)
         {
             const int x0 = std::min(2 * x, W - 1), x1 = std::min(2 * x + 1, W - 1);
-            const int y0 = std::min(2 * y, H - 1), y1 = std::min(2 * y + 1, H - 1);
-            Vec3f acc = src.row(y0)[x0] + src.row(y0)[x1] + src.row(y1)[x0] + src.row(y1)[x1];
+            const int yy0 = std::min(2 * y, H - 1), yy1 = std::min(2 * y + 1, H - 1);
+            Vec3f acc = src.row(yy0)[x0] + src.row(yy0)[x1] + src.row(yy1)[x0] + src.row(yy1)[x1];
             acc = acc * 0.25f;
             const float lum = 0.2126f * acc.x + 0.7152f * acc.y + 0.0722f * acc.z;
             dstRow[x] = lum > params.threshold ? acc : Vec3f{0, 0, 0};
         }
     }
+}
 
-    // 3. 半分辨率高斯 H/V
-    FloatFramebuffer blurH(hw, hh);
-    gaussianBlur(half, blurH, true, radius);
-    gaussianBlur(blurH, half, false, radius);
-
-    // 4. 双线性升采样 + 5. 合成（升采样坐标与 SSAO::computeHalfResolution 同式）
-    if (dst.width() != W || dst.height() != H)
-        dst.resize(W, H);
+// 步骤 4：双线性升采样 + 合成，只处理 [yBegin, yEnd) 的 dst 行。
+// bloomHalf 即 scratch.half（垂直模糊完成后）。
+inline void bloomApplyRows(const FloatFramebuffer& src, const FloatFramebuffer& bloomHalf,
+                           FloatFramebuffer& dst, const BloomParams& params, int yBegin, int yEnd)
+{
+    const int W = src.width(), H = src.height();
+    const int hw = bloomHalf.width(), hh = bloomHalf.height();
+    if (W <= 0 || H <= 0 || hw != std::max(1, W / 2) || hh != std::max(1, H / 2))
+        return;
     const float scaleX = float(hw) / float(W);
     const float scaleY = float(hh) / float(H);
-    for (int y = 0; y < H; ++y)
+    const auto [y0, y1] = clampRows(yBegin, yEnd, H);
+    for (int y = y0; y < y1; ++y)
     {
         const float fy = std::clamp((float(y) + 0.5f) * scaleY - 0.5f, 0.0f, float(hh - 1));
-        const int y0 = int(fy);
-        const int y1 = std::min(y0 + 1, hh - 1);
-        const float ty = fy - float(y0);
-        const Vec3f* rowA = half.row(y0);
-        const Vec3f* rowB = half.row(y1);
+        const int yy0 = int(fy);
+        const int yy1 = std::min(yy0 + 1, hh - 1);
+        const float ty = fy - float(yy0);
+        const Vec3f* rowA = bloomHalf.row(yy0);
+        const Vec3f* rowB = bloomHalf.row(yy1);
         Vec3f* dstRow = dst.row(y);
         const Vec3f* srcRow = src.row(y);
         for (int x = 0; x < W; ++x)
@@ -967,6 +1001,31 @@ inline void bloom(const FloatFramebuffer& src, FloatFramebuffer& dst, const Bloo
             dstRow[x] = srcRow[x] + (a + (b - a) * ty) * params.intensity;
         }
     }
+}
+
+// 整链入口（单线程）：分段的参考编排，与分条并行结果逐像素一致。
+inline void bloom(const FloatFramebuffer& src, FloatFramebuffer& dst, const BloomParams& params = {})
+{
+    if (&src == &dst || src.width() <= 0 || src.height() <= 0)
+        return;
+    const int W = src.width(), H = src.height();
+    if (dst.width() != W || dst.height() != H)
+        dst.resize(W, H);
+    if (dst.width() != W || dst.height() != H)
+        return; // 外部存储 dst 是定尺寸的：尺寸仍不符说明调用方未按契约准备
+
+    BloomScratch scratch;
+    scratch.resizeFor(W, H);
+    scratch.half.clear();
+    bloomPrepareRows(src, scratch, params, 0, scratch.half.height());
+
+    const int radius = bloomHalfRadius(params, scratch.half.width(), scratch.half.height());
+    scratch.blurH.clear();
+    gaussianBlurRows(scratch.half, scratch.blurH, true, radius, 0, scratch.half.height());
+    scratch.half.clear();
+    gaussianBlurRows(scratch.blurH, scratch.half, false, radius, 0, scratch.half.height());
+
+    bloomApplyRows(src, scratch.half, dst, params, 0, H);
 }
 
 // ============================================================

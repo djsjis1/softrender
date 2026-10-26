@@ -965,8 +965,68 @@ static void stress_bloom_halfres_1080p()
                                                       std::to_string(dark.x));
 }
 
-SR_SCENARIO("postprocess_chain_1080p_mt", stress_postprocess_chain_1080p_mt, true);
+// ---------------------------------------------------------------- 半分辨率 Bloom（MT 编排）
+// bloom 的分段 API（BloomScratch + prepare/apply/高斯 Rows）喂线程池：
+// 与单线程整链（bloom_halfres_1080p）逐像素一致（有单测锁定），此处量加速比。
+static void stress_bloom_halfres_1080p_mt()
+{
+    const int W = 1920, H = 1080;
+    const auto t0 = Clock::now();
+    FloatFramebuffer scene(W, H);
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x)
+        {
+            const float dx = float(x - W / 2) / float(W), dy = float(y - H / 2) / float(H);
+            const float spot = (dx * dx + dy * dy) < 0.01f ? 6.0f : 0.0f;
+            scene.setPixel(x, y, Vec3f{float(x) / float(W) * 0.3f + spot,
+                                       float(y) / float(H) * 0.3f + spot, 0.2f + spot});
+        }
+
+    ThreadPool pool;
+    const int strips = pool.threadCount();
+    auto runFullStrips = [&](int totalRows, auto&& body) {
+        for (int i = 0; i < strips; ++i)
+        {
+            const auto [y0, y1] = sr::postprocess::stripRows(totalRows, i, strips);
+            if (y1 > y0)
+                pool.submit([&body, y0, y1] { body(y0, y1); });
+        }
+        pool.waitAll();
+    };
+
+    const sr::postprocess::BloomParams params{1.0f, 0.8f, 12};
+    sr::postprocess::BloomScratch scratch;
+    scratch.resizeFor(W, H);
+    FloatFramebuffer dst(W, H);
+
+    double best = 1e30;
+    for (int rep = 0; rep < 3; ++rep)
+    {
+        const auto start = Clock::now();
+        scratch.half.clear();
+        runFullStrips(H, [&](int y0, int y1) { sr::postprocess::bloomPrepareRows(scene, scratch, params, y0, y1); });
+
+        const int radius = sr::postprocess::bloomHalfRadius(params, scratch.half.width(), scratch.half.height());
+        scratch.blurH.clear();
+        runFullStrips(scratch.half.height(), [&](int y0, int y1) {
+            sr::postprocess::gaussianBlurRows(scratch.half, scratch.blurH, true, radius, y0, y1);
+        });
+        scratch.half.clear();
+        runFullStrips(scratch.half.height(), [&](int y0, int y1) {
+            sr::postprocess::gaussianBlurRows(scratch.blurH, scratch.half, false, radius, y0, y1);
+        });
+        runFullStrips(H, [&](int y0, int y1) { sr::postprocess::bloomApplyRows(scene, scratch.half, dst, params, y0, y1); });
+        best = std::min(best, msSince(start));
+    }
+
+    const Vec3f bright = dst.getPixel(W / 2, H / 2);
+    const bool ok = best < 1e29 && std::isfinite(bright.x) && bright.x > 5.5f;
+    report("bloom_halfres_1080p_mt", ok, msSince(t0),
+           "strips=" + std::to_string(strips) + " best=" + std::to_string(int(best)) + "ms");
+}
+
 SR_SCENARIO("bloom_halfres_1080p", stress_bloom_halfres_1080p, true);
+SR_SCENARIO("bloom_halfres_1080p_mt", stress_bloom_halfres_1080p_mt, true);
 
 SR_SCENARIO("present_upscale_565", stress_present_upscale_565, false);
 SR_SCENARIO("render_565_matches_8888", stress_render_565_matches_8888, false);
