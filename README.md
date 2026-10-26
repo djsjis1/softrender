@@ -14,6 +14,19 @@ Framebuffer fb(800, 600);
 Renderer renderer(800, 600);   // 只用 render + core 即可绘制
 ```
 
+要"一条调用画一帧"，用统一前向管线门面（阴影贴图 + 队列排序 + FXAA，
+后处理可注入线程池分条并行，见 `examples/demo_forward.cpp`）：
+
+```cpp
+#include <softrenderer/render/pipeline/forward_pipeline.h>
+
+ForwardPipeline pipeline(800, 600);
+pipeline.view = ...;  pipeline.proj = ...;
+pipeline.shadowEnabled = true;  pipeline.fxaaEnabled = true;
+pipeline.submit({&mesh, &shader, RenderLayer::Opaque, 0, center, lightVP * model});
+pipeline.render(fb);
+```
+
 ```cmake
 find_package(SoftRenderer 2.0 REQUIRED COMPONENTS core render)
 target_link_libraries(app PRIVATE SoftRenderer::core SoftRenderer::render)
@@ -59,10 +72,10 @@ Visual Studio 使用多配置生成器，测试和安装也要指定 `-C Release
 从仓库根目录运行；离屏示例输出到 `output/`：
 
 ```powershell
-.\build\bin\Release\stage4_zbuffer.exe
-.\build\bin\Release\stage10_pbr.exe
+.\build\bin\Release\stage06_depth.exe
+.\build\bin\Release\stage12_pbr.exe
 .\build\bin\Release\demo_2d.exe
-.\build\bin\Release\stage8_realtime.exe  # Windows 实时窗口
+.\build\bin\Release\stage08_shader_live.exe  # Windows 实时窗口
 ```
 
 Ninja/Makefile 的可执行文件位于 `build/bin/`。将练习源码放入 `practice/my_first.cpp` 后，重新构建即可生成 `practice_my_first` 目标，无需手动修改 CMake。
@@ -85,11 +98,25 @@ cmake --install build --config Release --prefix ./build/install
 ```
 
 ```cmake
-find_package(SoftRenderer 1.0 CONFIG REQUIRED)
+find_package(SoftRenderer 2.0 CONFIG REQUIRED)
 target_link_libraries(your_target PRIVATE SoftRenderer::softrenderer)
 ```
 
 配置下游工程时通过 `-DCMAKE_PREFIX_PATH=<安装前缀>` 指定路径。安装树可整体移动；源码和安装模式统一使用 `#include <softrenderer/version.h>`。
+
+## 裸机与嵌入式
+
+core + math + render + resource + scene 全部 header-only，公共头零 `throw`、零 RTTI、零线程/文件依赖，可在 `-fno-exceptions -fno-rtti` 下编译（由 `sr_freestanding_headers_check` 门禁强制）。缓冲可放静态内存/指定 RAM 段，渲染链路不经堆：
+
+```cpp
+static Color g_pixels[320 * 240];
+static float g_depth[320 * 240];
+sr::BasicFramebuffer<sr::Color> fb(320, 240, g_pixels);  // 外部存储，析构不释放
+sr::Renderer renderer(320, 240, g_depth);
+renderer.setExternalVertexCache(g_vcache, g_vstamps, kMaxVerts);  // 顶点缓存同样零堆
+```
+
+裸机构建：`-DSR_NO_EXCEPTIONS=ON`（io/runtime/tests 自动关闭）；RGB565/灰度面板直渲染见 [ADR-005](docs/adr/ADR-005-pixel-formats.md)。完整步骤与契约见[裸机集成指南](docs/engineering/60-裸机与无操作系统集成指南.md)。
 
 ## 目录与文档
 

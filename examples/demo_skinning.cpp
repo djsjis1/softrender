@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -157,12 +158,8 @@ int main()
     // ---- 1. 生成并加载 glTF ----
     std::filesystem::create_directories("output");
     std::string json = generateSkinGltf();
-    FILE* f = std::fopen("output/skin_test.gltf", "w");
-    if (f)
-    {
-        std::fwrite(json.data(), 1, json.size(), f);
-        std::fclose(f);
-    }
+    std::ofstream out("output/skin_test.gltf", std::ios::binary | std::ios::trunc);
+    out.write(json.data(), std::streamsize(json.size()));
     printf("已生成 output/skin_test.gltf (%zu bytes)\n", json.size());
 
     // ---- 2. 用自有加载器一次拿全：网格 / 节点 / 蒙皮 / 动画片段 ----

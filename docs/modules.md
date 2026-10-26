@@ -315,8 +315,9 @@ struct Shader {
 **移植方式**：照此公开接口另写 `SDL2Window` / `GLFWWindow` / `X11Window`，
 渲染器本体一行不改。
 
-> ⚠️ 当前 `examples/` 中三个实时窗口示例**无条件**引用 `Win32Window`，
-> 非 Windows 平台会编译失败。见 `architecture.md` §8 与 `docs/tasks/`。
+> 窗口示例的 CMake 目标已有 `if(WIN32)` 守卫（TASK-004），非 Windows
+> 配置不会生成这三个目标，可直接配置通过。跨平台窗口后端属后续方向，
+> 决策记录见 `docs/adr/README.md` 待立清单。
 
 ---
 

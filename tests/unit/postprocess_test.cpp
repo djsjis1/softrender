@@ -12,6 +12,7 @@
 
 #include "softrenderer/core/float_framebuffer.h"
 #include "softrenderer/core/framebuffer.h"
+#include "softrenderer/math/transform.h"
 #include "softrenderer/render/postprocess/post_processing.h"
 
 using namespace sr;
@@ -450,4 +451,233 @@ TEST(PostProcess, ChromaticAberrationRebuildsMismatchedOutput)
     EXPECT_EQ(out.height(), 6);
     const Vec3f p = out.getPixel(7, 5);
     EXPECT_TRUE(std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z));
+}
+
+// ==================== 分条并行（*Rows）与整帧等价 ====================
+//
+// 分条 API 的核心契约：任意条带划分的结果必须与整帧单线程结果**逐像素一致**
+// （每个算子的逐像素运算不携带跨行状态，条带划分只改变行调度不改变数值）。
+
+namespace
+{
+// 非平凡测试图：线性渐变 + 高频条纹，保证每个算子都有内容可算
+FloatFramebuffer makeHdrPattern(int W, int H)
+{
+    FloatFramebuffer fb(W, H);
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x)
+        {
+            const float u = float(x) / float(std::max(1, W - 1));
+            const float v = float(y) / float(std::max(1, H - 1));
+            fb.setPixel(x, y, {0.2f + 0.6f * u, 0.1f + 0.8f * v,
+                               0.5f + 0.4f * std::sin(u * 12.0f + v * 7.0f)});
+        }
+    return fb;
+}
+
+Framebuffer makeLdrPattern(int W, int H)
+{
+    Framebuffer fb(W, H);
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x)
+        {
+            const float u = float(x) / float(std::max(1, W - 1));
+            const float v = float(y) / float(std::max(1, H - 1));
+            fb.setPixel(x, y, Color::fromFloat(u, v, 0.5f + 0.5f * std::sin(u * 9.0f + v * 5.0f)));
+        }
+    return fb;
+}
+
+// 用任意条带宽度逐段调用 fn(y0, y1)，模拟多线程调度下的行区间覆盖
+template <class Fn>
+void forEachStrip(int height, int stripHeight, Fn&& fn)
+{
+    for (int y = 0; y < height; y += stripHeight)
+        fn(y, std::min(y + stripHeight, height));
+}
+
+void expectBuffersEqual(const FloatFramebuffer& a, const FloatFramebuffer& b)
+{
+    ASSERT_EQ(a.width(), b.width());
+    ASSERT_EQ(a.height(), b.height());
+    for (int y = 0; y < a.height(); ++y)
+        for (int x = 0; x < a.width(); ++x)
+        {
+            const Vec3f pa = a.getPixel(x, y), pb = b.getPixel(x, y);
+            EXPECT_FLOAT_EQ(pa.x, pb.x) << "x=" << x << " y=" << y;
+            EXPECT_FLOAT_EQ(pa.y, pb.y) << "x=" << x << " y=" << y;
+            EXPECT_FLOAT_EQ(pa.z, pb.z) << "x=" << x << " y=" << y;
+        }
+}
+} // namespace
+
+TEST(PostProcessStrips, stripRowsPartitionsExactly)
+{
+    for (int strips = 1; strips <= 7; ++strips)
+    {
+        int covered = 0;
+        int prevEnd = 0;
+        for (int i = 0; i < strips; ++i)
+        {
+            const auto [y0, y1] = postprocess::stripRows(17, i, strips);
+            EXPECT_EQ(y0, prevEnd) << "条带必须首尾相接 strips=" << strips;
+            EXPECT_GT(y1, y0) << "条带不能为空 strips=" << strips;
+            covered += y1 - y0;
+            prevEnd = y1;
+        }
+        EXPECT_EQ(covered, 17);
+        EXPECT_EQ(prevEnd, 17);
+    }
+    // 非法入参返回空区间
+    EXPECT_EQ(postprocess::stripRows(0, 0, 1).second, 0);
+    EXPECT_EQ(postprocess::stripRows(10, 5, 3).second, 0);
+    EXPECT_EQ(postprocess::stripRows(10, 0, 0).second, 0);
+}
+
+TEST(PostProcessStrips, resolveToLdrRowsMatchWholeFrame)
+{
+    const FloatFramebuffer src = makeHdrPattern(23, 11);
+    Framebuffer whole(23, 11), split(23, 11);
+    postprocess::resolveToLdr(src, whole);
+    forEachStrip(11, 3, [&](int y0, int y1) { postprocess::resolveToLdrRows(src, split, y0, y1); });
+    for (int y = 0; y < 11; ++y)
+        for (int x = 0; x < 23; ++x)
+            EXPECT_EQ(whole.getPixel(x, y), split.getPixel(x, y)) << "x=" << x << " y=" << y;
+}
+
+TEST(PostProcessStrips, vignetteRowsMatchWholeFrame)
+{
+    FloatFramebuffer a = makeHdrPattern(19, 13), b = makeHdrPattern(19, 13);
+    postprocess::vignette(a, 0.6f);
+    forEachStrip(13, 4, [&](int y0, int y1) { postprocess::vignetteRows(b, 0.6f, y0, y1); });
+    expectBuffersEqual(a, b);
+}
+
+TEST(PostProcessStrips, radialMotionBlurRowsMatchWholeFrame)
+{
+    const FloatFramebuffer src = makeHdrPattern(20, 20);
+    FloatFramebuffer whole(20, 20), split(20, 20);
+    postprocess::radialMotionBlur(src, 20, 20, 0.8f, 6, whole);
+    split.resize(20, 20);
+    forEachStrip(20, 7, [&](int y0, int y1) {
+        postprocess::radialMotionBlurRows(src, 20, 20, 0.8f, 6, split, y0, y1);
+    });
+    expectBuffersEqual(whole, split);
+}
+
+TEST(PostProcessStrips, bloomChainRowsMatchWholeFrame)
+{
+    const FloatFramebuffer src = makeHdrPattern(21, 15);
+    FloatFramebuffer wholeBloom(21, 15), wholeBlur(21, 15), merged(21, 15);
+    FloatFramebuffer splitBloom(21, 15), splitBlur(21, 15), splitDst(21, 15);
+
+    // 整帧参考链：brightPass -> blur -> blur -> addBlend
+    postprocess::brightPass(src, wholeBloom, 0.55f);
+    postprocess::gaussianBlur(wholeBloom, wholeBlur, true, 2);
+    postprocess::gaussianBlur(wholeBlur, wholeBloom, false, 2);
+    merged.clear();
+    postprocess::addBlend(merged, wholeBloom, 0.7f);
+
+    // 分条等价链（dst 的 resize/clear 是全帧操作，编排侧只做一次）
+    splitDst.clear();
+    forEachStrip(15, 5, [&](int y0, int y1) { postprocess::brightPassRows(src, splitBloom, 0.55f, y0, y1); });
+    forEachStrip(15, 5, [&](int y0, int y1) { postprocess::gaussianBlurRows(splitBloom, splitBlur, true, 2, y0, y1); });
+    splitBloom.clear();
+    forEachStrip(15, 5, [&](int y0, int y1) { postprocess::gaussianBlurRows(splitBlur, splitBloom, false, 2, y0, y1); });
+    forEachStrip(15, 5, [&](int y0, int y1) { postprocess::addBlendRows(splitDst, splitBloom, 0.7f, y0, y1); });
+
+    expectBuffersEqual(merged, splitDst);
+}
+
+TEST(PostProcessStrips, fxaaRowsMatchWholeFrame)
+{
+    const Framebuffer src = makeLdrPattern(24, 16);
+    Framebuffer whole(24, 16), split(24, 16);
+    postprocess::fxaa(src, whole);
+    std::vector<float> lumMap;
+    postprocess::buildLuminanceMap(src, lumMap);
+    forEachStrip(16, 5, [&](int y0, int y1) { postprocess::fxaaRows(src, split, lumMap, y0, y1); });
+    for (int y = 0; y < 16; ++y)
+        for (int x = 0; x < 24; ++x)
+            EXPECT_EQ(whole.getPixel(x, y), split.getPixel(x, y)) << "x=" << x << " y=" << y;
+}
+
+TEST(PostProcessStrips, ssaoComputeRowsMatchWholeFrame)
+{
+    const int W = 12, H = 9;
+    std::vector<Vec3f> viewPos(size_t(W) * H), viewNormal(size_t(W) * H);
+    std::vector<float> depth(size_t(W) * H);
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x)
+        {
+            const size_t idx = size_t(y) * W + x;
+            viewPos[idx] = {float(x) * 0.1f - 0.6f, float(y) * 0.1f - 0.4f, -2.0f};
+            viewNormal[idx] = {0.0f, 0.0f, 1.0f};
+            // 一块"前景矮墙"制造遮挡关系，背景深度置 1（会被跳过）
+            depth[idx] = (x > 2 && x < 9 && y > 2) ? 0.4f + 0.01f * float(x) : 0.999f;
+        }
+    const Mat4 viewProj = sr::transform::perspective(1.2f, float(W) / float(H), 0.1f, 10.0f);
+
+    postprocess::SSAO ssao;
+    std::vector<float> whole, split(size_t(W) * H, 1.0f);
+    ssao.compute(viewPos, viewNormal, depth, W, H, viewProj, whole);
+    forEachStrip(H, 4, [&](int y0, int y1) {
+        ssao.computeRows(viewPos, viewNormal, depth, W, H, viewProj, split, y0, y1);
+    });
+    ASSERT_EQ(whole.size(), split.size());
+    for (size_t i = 0; i < whole.size(); ++i)
+        EXPECT_FLOAT_EQ(whole[i], split[i]) << "idx=" << i;
+}
+
+// ==================== 半分辨率 Bloom 整链 ====================
+
+TEST(PostProcessBloom, darkImageUnchangedBelowThreshold)
+{
+    FloatFramebuffer src(32, 32), dst(32, 32);
+    src.clear(Vec3f{0.2f, 0.2f, 0.2f}); // 亮度 0.2 < 阈值 1.0
+    postprocess::bloom(src, dst);
+    for (int y = 0; y < 32; ++y)
+        for (int x = 0; x < 32; ++x)
+        {
+            const Vec3f p = dst.getPixel(x, y);
+            EXPECT_NEAR(p.x, 0.2f, 1e-5f);
+            EXPECT_NEAR(p.y, 0.2f, 1e-5f);
+            EXPECT_NEAR(p.z, 0.2f, 1e-5f);
+        }
+}
+
+TEST(PostProcessBloom, brightImpulseSpreadsAndDecays)
+{
+    FloatFramebuffer src(64, 48), dst(64, 48);
+    src.clear(Vec3f{0, 0, 0});
+    src.setPixel(32, 24, Vec3f{6, 6, 6}); // 单个超阈值亮像素
+
+    postprocess::bloom(src, dst, {1.0f, 1.0f, 10});
+
+    // 亮核处应有 bloom 增益，随距离衰减；全图有限
+    const Vec3f center = dst.getPixel(32, 24);
+    const Vec3f near = dst.getPixel(36, 24);
+    const Vec3f far = dst.getPixel(52, 24);
+    EXPECT_GT(center.x, 0.0f);
+    EXPECT_GT(near.x, 0.0f);
+    EXPECT_NEAR(far.x, 0.0f, 1e-4f);
+    EXPECT_GT(near.x, far.x);
+    for (int y = 0; y < 48; y += 7)
+        for (int x = 0; x < 64; x += 5)
+        {
+            const Vec3f p = dst.getPixel(x, y);
+            EXPECT_TRUE(std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z));
+        }
+}
+
+TEST(PostProcessBloom, rejectsAliasedBuffersAndKeepsSrc)
+{
+    FloatFramebuffer src(16, 16), dst(16, 16);
+    src.setPixel(8, 8, Vec3f{4, 4, 4});
+    postprocess::bloom(src, src); // 同缓冲：空操作
+    EXPECT_FLOAT_EQ(src.getPixel(8, 8).x, 4.0f) << "同缓冲不得清掉输入";
+
+    postprocess::bloom(src, dst);
+    EXPECT_FLOAT_EQ(src.getPixel(8, 8).x, 4.0f) << "src 保持不变";
+    EXPECT_GT(dst.getPixel(8, 8).x, 3.9f); // 亮部 + bloom 增益
 }

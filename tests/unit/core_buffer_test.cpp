@@ -354,3 +354,106 @@ TEST(Blend, PremultipliedKeepsCompositeAlpha)
 
 // ==================== Cubemap ====================
 
+
+// ==================== 外部存储（裸机免堆路径） ====================
+//
+// 契约：外部存储构造不分配内存、析构不释放、值语义与自分配版本一致；
+// 移动只转移指针与所属权（ASAN 构建下任何双重释放都会暴露）。
+
+TEST(DepthBuffer, externalStorage_behavesLikeOwning)
+{
+    std::vector<float> storage(16, DepthBuffer::kFar);
+    {
+        DepthBuffer db(4, 4, storage.data());
+        EXPECT_EQ(db.width(), 4);
+        EXPECT_EQ(db.height(), 4);
+        EXPECT_TRUE(db.testAndSet(1, 1, 0.5f));
+        EXPECT_FALSE(db.testAndSet(1, 1, 0.8f));
+        EXPECT_FLOAT_EQ(db.get(1, 1), 0.5f);
+        db.clear();
+        EXPECT_FLOAT_EQ(db.get(1, 1), DepthBuffer::kFar);
+        // row 指针必须落在外部存储上（光栅化行直写路径依赖它）
+        db.row(2)[3] = 0.25f;
+    }
+    EXPECT_FLOAT_EQ(storage[2 * 4 + 3], 0.25f);
+}
+
+TEST(DepthBuffer, externalStorage_moveTransfersWithoutFreeing)
+{
+    std::vector<float> storage(9, 0.5f);
+    DepthBuffer a(3, 3, storage.data());
+    DepthBuffer b(std::move(a));
+    EXPECT_EQ(b.width(), 3);
+    b.clear();
+    EXPECT_FLOAT_EQ(storage[4], DepthBuffer::kFar);
+
+    DepthBuffer c(1, 1); // 自分配，稍后被移动赋值覆盖
+    c = std::move(b);
+    EXPECT_EQ(c.width(), 3);
+    EXPECT_FLOAT_EQ(c.get(0, 0), DepthBuffer::kFar);
+    EXPECT_FLOAT_EQ(storage[4], DepthBuffer::kFar);
+}
+
+TEST(Framebuffer, externalStorage_behavesLikeOwning)
+{
+    std::vector<Color> storage(16);
+    {
+        Framebuffer fb(4, 4, storage.data());
+        EXPECT_EQ(fb.width(), 4);
+        fb.clear(Color(10, 20, 30));
+        EXPECT_EQ(fb.getPixel(1, 2).r, 10);
+        fb.row(0)[0] = Color::fromFloat(1.0f, 0.0f, 0.0f);
+    }
+    // 析构不释放：外部存储的写入仍在，且 vector 正常析构（无双重释放）
+    EXPECT_EQ(storage[0].r, 255);
+    EXPECT_EQ(storage[1 * 4 + 2].r, 10);
+}
+
+TEST(Framebuffer, externalStorage_moveKeepsStorageAlive)
+{
+    std::vector<Color> storage(9);
+    Framebuffer a(3, 3, storage.data());
+    a.clear(Color(7, 8, 9));
+    Framebuffer b(std::move(a));
+    b.setPixel(0, 0, Color(1, 1, 1));
+    EXPECT_EQ(storage[0].r, 1);
+    EXPECT_EQ(storage[1 * 3 + 1].g, 8); // clear 的内容仍在外部存储里
+}
+
+TEST(FloatFramebuffer, externalStorageFullRenderPathZeroAlloc)
+{
+    std::vector<Vec3f> pixels(64);
+    std::vector<float> depth(64, 0.5f);
+    {
+        FloatFramebuffer fb(8, 8, pixels.data(), depth.data());
+        EXPECT_EQ(fb.width(), 8);
+        fb.clear(Vec3f{0.25f, 0.5f, 0.75f});
+        fb.setPixel(3, 4, Vec3f{2, 4, 8});
+        EXPECT_TRUE(fb.depth().testAndSet(3, 4, 0.3f));
+        // 写入直接落在外部存储上（渲染行直写路径依赖这一点）
+        EXPECT_FLOAT_EQ(pixels[4 * 8 + 3].z, 8.0f);
+        EXPECT_FLOAT_EQ(depth[4 * 8 + 3], 0.3f);
+
+        // 定尺寸契约：同尺寸 resize 等价于无参 clear（清空），不同尺寸为空操作
+        fb.resize(8, 8);
+        EXPECT_FLOAT_EQ(fb.getPixel(0, 0).y, 0.0f) << "同尺寸 resize 清空内容";
+        EXPECT_FLOAT_EQ(fb.getPixel(3, 4).z, 0.0f);
+        fb.setPixel(1, 1, Vec3f{9, 9, 9});
+        fb.resize(4, 4);
+        EXPECT_EQ(fb.width(), 8) << "外部存储不重建尺寸";
+        EXPECT_FLOAT_EQ(pixels[1 * 8 + 1].x, 9.0f) << "空操作不得破坏内容";
+    }
+    // 析构不释放：外部存储可读（无双重释放/无提前失效）
+    EXPECT_FLOAT_EQ(pixels[1 * 8 + 1].x, 9.0f);
+}
+
+TEST(FloatFramebuffer, externalStorageMoveKeepsAlive)
+{
+    std::vector<Vec3f> pixels(16);
+    FloatFramebuffer a(4, 4, pixels.data());
+    a.clear(Vec3f{1, 2, 3});
+    FloatFramebuffer b(std::move(a));
+    b.setPixel(0, 0, Vec3f{7, 7, 7});
+    EXPECT_FLOAT_EQ(pixels[0].x, 7.0f);
+    EXPECT_FLOAT_EQ(pixels[1 * 4 + 1].y, 2.0f); // clear 内容仍在外部存储
+}

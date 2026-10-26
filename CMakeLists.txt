@@ -23,6 +23,21 @@ option(SR_ENABLE_ENTT "Install and export the optional EnTT adapter component" O
 option(SR_ENABLE_SPDLOG "Enable spdlog logging for examples and practice" ON)
 option(SR_ENABLE_SANITIZERS "Enable sanitizers only for Debug" OFF)
 option(SR_UPDATE_GOLDEN "Create missing golden images (local maintenance only)" OFF)
+option(SR_NO_EXCEPTIONS "裸机模式：禁用异常/RTTI，只构建 core/render/scene 组件" OFF)
+# 裸机/自由独立环境：core/render/scene 公共头不含 throw 与 RTTI，可整体以
+# -fno-exceptions -fno-rtti 编译；io（第三方解析器）、runtime（线程池依赖
+# 异常传播）与测试（gtest）依赖异常与宿主设施，裸机模式下统一关闭。
+if(SR_NO_EXCEPTIONS)
+    if(SR_BUILD_IO OR SR_BUILD_RUNTIME OR SR_BUILD_TESTS OR SR_BUILD_EXAMPLES OR SR_BUILD_PRACTICE OR SR_BUILD_BENCHMARKS)
+        message(STATUS "SR_NO_EXCEPTIONS=ON：io/runtime/tests/examples/practice/benchmarks 依赖异常或宿主设施，自动关闭")
+    endif()
+    set(SR_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(SR_BUILD_PRACTICE OFF CACHE BOOL "" FORCE)
+    set(SR_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(SR_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+    set(SR_BUILD_IO OFF CACHE BOOL "" FORCE)
+    set(SR_BUILD_RUNTIME OFF CACHE BOOL "" FORCE)
+endif()
 include(GNUInstallDirs)
 include(cmake/version.cmake)
 

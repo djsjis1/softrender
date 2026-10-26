@@ -196,6 +196,33 @@ jobs:
           -R '^(ThreadFailures|ThreadPool|CommandBuffer|ResourceCache)\.'
 
   # ============================================================
+  # 裸机/freestanding（ADR-007）：core 组件必须能在 -fno-exceptions -fno-rtti
+  # 下构建与安装。两层验证：
+  #   1. sr_freestanding_headers_check（随任何 GCC/Clang 构建编译）：
+  #      core/math/render/resource/scene 公共头逐个无异常编译，新增
+  #      throw/RTTI/线程依赖会在这一步失败；
+  #   2. SR_NO_EXCEPTIONS=ON 消费流：io/runtime/tests 自动裁剪，
+  #      安装产物只含 core/render/scene（+可选 entt）。
+  # ============================================================
+  baremetal:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure baremetal (no exceptions / no RTTI)
+        run: cmake -S . -B build-baremetal -DSR_NO_EXCEPTIONS=ON
+      - name: Build core components and freestanding header gate
+        run: cmake --build build-baremetal --parallel 2
+      - name: Install core components
+        run: cmake --install build-baremetal --prefix build-baremetal/install
+      - name: Verify install tree
+        run: |
+          test -f build-baremetal/install/lib/cmake/SoftRenderer/SoftRendererConfig.cmake
+          test -f build-baremetal/install/include/softrenderer/version.h
+          ! ls build-baremetal/install/lib/libsoftrenderer_io* 2>/dev/null
+
+
+  # ============================================================
   # 覆盖率（testing_rules.md：核心模块行覆盖率 ≥ 80%、分支 ≥ 60%，
   # 且「覆盖率报告纳入 CI」）
   #

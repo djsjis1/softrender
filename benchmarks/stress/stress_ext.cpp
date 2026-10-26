@@ -836,6 +836,138 @@ static void stress_postprocess_vignette_blur_1080p()
                "ms cornerR=" + std::to_string(corner.x) + " centerR=" + std::to_string(center.x));
 }
 
+// ---------------------------------------------------------------- MT 后处理链 1080p
+// 与 stress_postprocess_chain_1080p 同一条 Bloom 链，但每步用 *Rows 行区间变体
+// 按条带喂给 ThreadPool。与单线程场景同进程先后执行，两次 report 的 detail
+// 可直接对比分条并行的整帧加速比；正确性判据同源。
+static void stress_postprocess_chain_1080p_mt()
+{
+    const int W = 1920, H = 1080;
+    const auto t0 = Clock::now();
+    FloatFramebuffer scene(W, H);
+    FloatFramebuffer bright(W, H);
+    FloatFramebuffer blur(W, H);
+    Framebuffer ldr(W, H);
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x)
+            scene.setPixel(x, y, Vec3f{float(x) / float(W), float(y) / float(H), 0.4f});
+
+    ThreadPool pool;
+    const int strips = pool.threadCount();
+    double best = 1e30;
+    for (int rep = 0; rep < 2; ++rep)
+    {
+        const auto start = Clock::now();
+        // brightPass/gaussianBlur 的 resize/clear 是全帧操作，编排侧做一次，
+        // 行区间变体只负责各自条带的填充（与整帧结果逐像素等价）。
+        bright.resize(W, H);
+        bright.clear();
+        for (int i = 0; i < strips; ++i)
+        {
+            const auto [y0, y1] = sr::postprocess::stripRows(H, i, strips);
+            if (y1 > y0)
+                pool.submit([&scene, &bright, y0, y1] {
+                    sr::postprocess::brightPassRows(scene, bright, 0.8f, y0, y1);
+                });
+        }
+        pool.waitAll();
+
+        blur.resize(W, H);
+        blur.clear();
+        for (int i = 0; i < strips; ++i)
+        {
+            const auto [y0, y1] = sr::postprocess::stripRows(H, i, strips);
+            if (y1 > y0)
+                pool.submit([&bright, &blur, y0, y1] {
+                    sr::postprocess::gaussianBlurRows(bright, blur, true, 8, y0, y1);
+                });
+        }
+        pool.waitAll();
+
+        bright.clear();
+        for (int i = 0; i < strips; ++i)
+        {
+            const auto [y0, y1] = sr::postprocess::stripRows(H, i, strips);
+            if (y1 > y0)
+                pool.submit([&blur, &bright, y0, y1] {
+                    sr::postprocess::gaussianBlurRows(blur, bright, false, 8, y0, y1);
+                });
+        }
+        pool.waitAll();
+
+        for (int i = 0; i < strips; ++i)
+        {
+            const auto [y0, y1] = sr::postprocess::stripRows(H, i, strips);
+            if (y1 > y0)
+                pool.submit([&scene, &bright, y0, y1] {
+                    sr::postprocess::addBlendRows(scene, bright, 0.6f, y0, y1);
+                });
+        }
+        pool.waitAll();
+
+        for (int i = 0; i < strips; ++i)
+        {
+            const auto [y0, y1] = sr::postprocess::stripRows(H, i, strips);
+            if (y1 > y0)
+                pool.submit([&scene, &ldr, y0, y1] {
+                    sr::postprocess::resolveToLdrRows(scene, ldr, y0, y1);
+                });
+        }
+        pool.waitAll();
+
+        best = std::min(best, msSince(start));
+    }
+    const bool ok = best < 1e29 && ldr.getPixel(W / 2, H / 2).r + ldr.getPixel(W / 2, H / 2).g > 0;
+    report("postprocess_chain_1080p_mt", ok, msSince(t0),
+           "strips=" + std::to_string(strips) + " best=" + std::to_string(int(best)) + "ms");
+}
+
+// ---------------------------------------------------------------- 半分辨率 Bloom 整链
+// postprocess::bloom：亮部提取 + 半分辨率高斯 + 双线性升采样 + 合成一趟完成。
+// 与 postprocess_chain_1080p（全分辨率手排链，best≈307ms 单线程）对比；
+// 正确性判据：暗区不变、亮区有增益、全图有限。
+static void stress_bloom_halfres_1080p()
+{
+    const int W = 1920, H = 1080;
+    const auto t0 = Clock::now();
+    FloatFramebuffer scene(W, H);
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x)
+        {
+            // 中心一个超阈值亮斑 + 低亮度渐变背景
+            const float dx = float(x - W / 2) / float(W), dy = float(y - H / 2) / float(H);
+            const float spot = (dx * dx + dy * dy) < 0.01f ? 6.0f : 0.0f;
+            scene.setPixel(x, y, Vec3f{float(x) / float(W) * 0.3f + spot,
+                                       float(y) / float(H) * 0.3f + spot, 0.2f + spot});
+        }
+
+    FloatFramebuffer dst(W, H);
+    double best = 1e30;
+    for (int rep = 0; rep < 3; ++rep)
+    {
+        const auto start = Clock::now();
+        sr::postprocess::bloom(scene, dst, {1.0f, 0.8f, 12});
+        best = std::min(best, msSince(start));
+    }
+
+    const Vec3f bright = dst.getPixel(W / 2, H / 2);
+    const Vec3f dark = dst.getPixel(20, 20);
+    bool finite = true;
+    for (int y = 0; y < H; y += 61)
+        for (int x = 0; x < W; x += 53)
+        {
+            const Vec3f p = dst.getPixel(x, y);
+            finite = finite && std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z);
+        }
+    const bool ok = best < 1e29 && finite && bright.x > 5.5f && dark.x < 0.35f;
+    report("bloom_halfres_1080p", ok, msSince(t0), "best=" + std::to_string(int(best)) + "ms bright=" +
+                                                      std::to_string(bright.x) + " dark=" +
+                                                      std::to_string(dark.x));
+}
+
+SR_SCENARIO("postprocess_chain_1080p_mt", stress_postprocess_chain_1080p_mt, true);
+SR_SCENARIO("bloom_halfres_1080p", stress_bloom_halfres_1080p, true);
+
 SR_SCENARIO("present_upscale_565", stress_present_upscale_565, false);
 SR_SCENARIO("render_565_matches_8888", stress_render_565_matches_8888, false);
 SR_SCENARIO("draw2d_565_ui_frame", stress_draw2d_565_ui, false);

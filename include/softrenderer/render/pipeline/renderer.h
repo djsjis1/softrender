@@ -1,6 +1,9 @@
 #pragma once
 #include <algorithm>  // std::min / std::max / std::abs
+#include <cassert>
 #include <cmath>      // std::floor / std::ceil（包围盒取整）
+#include <cstdint>
+#include <vector>
 
 #include "softrenderer/core/depthbuffer.h"
 #include "softrenderer/core/framebuffer.h"
@@ -43,6 +46,30 @@ class Renderer
     {
     }
 
+    // 裸机路径：深度缓冲用调用方提供的外部存储，整个渲染
+    // （外部存储 Framebuffer + 本构造 + drawMesh）不经任何堆分配。
+    // storage 须容纳 width*height 个 float，生命周期覆盖本渲染器。
+    Renderer(int width, int height, float* depthStorage)
+        : width_(width), height_(height), zbuf_(width, height, depthStorage),
+          viewport_(sr::transform::viewport(width, height))
+    {
+        assert(depthStorage != nullptr);
+    }
+
+    // 裸机路径（续）：顶点缓存同样用外部存储，drawMesh 内部零堆分配。
+    // cache 须容纳 capacity 个 ClipVertex、stamps 须容纳 capacity 个 uint32_t，
+    // capacity >= 所有将绘制网格的顶点数；不足时该次 drawMesh 回退到内部
+    // vector（会分配堆）。设置时 stamps 会被清零。
+    // 【与外部深度存储配合，构成完整的零堆渲染路径；见 docs/engineering/60】
+    void setExternalVertexCache(ClipVertex* cache, uint32_t* stamps, int capacity)
+    {
+        extCache_ = cache;
+        extStamps_ = stamps;
+        extCapacity_ = capacity > 0 ? capacity : 0;
+        if (extCapacity_ > 0)
+            std::fill(extStamps_, extStamps_ + extCapacity_, 0u);
+    }
+
     int width() const { return width_; }
     int height() const { return height_; }
 
@@ -64,10 +91,23 @@ class Renderer
     //
     // FB 只需满足 BasicFramebuffer 的接口（width/height/row），
     // 像素格式由 FB::Pixel 决定。
+    //
+    // 【顶点缓存】同一次 drawMesh 内按索引缓存顶点着色结果（GPU 的
+    // post-transform cache 同款思想）：索引网格中每个共享顶点只执行一次
+    // shader.vertex，而不是每三角形重复 3 次。由此推论两点契约：
+    //   1. shader.vertex 必须只依赖 (顶点输入, 本次 draw 期间的 uniform 状态)，
+    //      与「这是第几个三角形」无关——GPU 顶点着色同样没有三角形上下文；
+    //   2. 顶点着色次数从 3×三角形数 变为 去重后的顶点数，依赖调用计数的
+    //      着色器（如统计用途）看到的次数会与旧版本不同。
+    // 缓存按调用分代（epoch），两次 drawMesh 之间不跨帧复用。
     template <class FB>
     void drawMesh(FB& fb, const Mesh& mesh, Shader& shader)
     {
         const int vertexCount = int(mesh.vertices.size());
+        if (vertexCount <= 0 || mesh.triangleCount() <= 0)
+            return;
+        prepareVertexCache(vertexCount);
+
         for (int i = 0; i < mesh.triangleCount(); ++i)
         {
             // 索引越界的三角形直接丢弃。Mesh 是公共结构，可以被使用者手工构造，
@@ -78,11 +118,9 @@ class Renderer
             if (i0 < 0 || i1 < 0 || i2 < 0 || i0 >= vertexCount || i1 >= vertexCount || i2 >= vertexCount)
                 continue;
 
-            // 1. 顶点着色
-            ClipVertex tri[3];
-            tri[0].pos = shader.vertex(mesh.vertices[size_t(i0)], tri[0].var);
-            tri[1].pos = shader.vertex(mesh.vertices[size_t(i1)], tri[1].var);
-            tri[2].pos = shader.vertex(mesh.vertices[size_t(i2)], tri[2].var);
+            // 1. 顶点着色（命中缓存的顶点直接复用上次的输出）
+            ClipVertex tri[3] = {fetchVertex(shader, mesh, i0), fetchVertex(shader, mesh, i1),
+                                 fetchVertex(shader, mesh, i2)};
 
             if (nearClip)
             {
@@ -195,9 +233,72 @@ class Renderer
         }
     }
 
+    // 顶点缓存：一次 drawMesh 内，同一索引的顶点只着色一次。
+    // stamp 记录每个顶点最近一次被变换时的 epoch，不匹配即重算。
+    // 存储二选一：外部（setExternalVertexCache，零堆）或内部 vector；
+    // 每次调用把 cache_/stamps_/cacheCapacity_ 解析到实际使用的存储上。
+    void prepareVertexCache(int vertexCount)
+    {
+        if (extCache_ && extCapacity_ >= vertexCount)
+        {
+            // 外部路径的 epoch 耗尽：外部 stamps 归零后从 1 重新计数。
+            if (xformEpoch_ == 0xFFFFFFFFu)
+            {
+                std::fill(extStamps_, extStamps_ + extCapacity_, 0u);
+                xformEpoch_ = 0;
+            }
+            cache_ = extCache_;
+            stamps_ = extStamps_;
+            cacheCapacity_ = extCapacity_;
+        }
+        else
+        {
+            if (int(xformStamp_.size()) < vertexCount)
+            {
+                xformStamp_.assign(size_t(vertexCount), 0);
+                xformCache_.resize(size_t(vertexCount));
+                xformEpoch_ = 0; // stamp 全量清零后 epoch 归零，本调用内必然全部重算
+            }
+            else if (xformEpoch_ == 0xFFFFFFFFu)
+            {
+                // epoch 耗尽：清空 stamp 再从 1 重新计数（约 40 亿次 drawMesh 才发生一次）。
+                std::fill(xformStamp_.begin(), xformStamp_.end(), 0u);
+                xformEpoch_ = 0;
+            }
+            cache_ = xformCache_.data();
+            stamps_ = xformStamp_.data();
+            cacheCapacity_ = int(xformCache_.size());
+        }
+        ++xformEpoch_;
+    }
+
+    ClipVertex& fetchVertex(Shader& shader, const Mesh& mesh, int index)
+    {
+        // index 已在 drawMesh 里通过 [0, vertexCount) 校验，且
+        // vertexCount <= cacheCapacity_（prepareVertexCache 的解析保证）。
+        ClipVertex& cv = cache_[size_t(index)];
+        if (stamps_[size_t(index)] != xformEpoch_)
+        {
+            cv.pos = shader.vertex(mesh.vertices[size_t(index)], cv.var);
+            stamps_[size_t(index)] = xformEpoch_;
+        }
+        return cv;
+    }
+
     int width_, height_;
     DepthBuffer zbuf_;
     Mat4 viewport_;
+    // 内部（自分配）顶点缓存；外部（非拥有）缓存经 prepareVertexCache
+    // 解析到 cache_/stamps_/cacheCapacity_ 三个指针上
+    std::vector<ClipVertex> xformCache_;
+    std::vector<uint32_t> xformStamp_;
+    ClipVertex* extCache_ = nullptr;
+    uint32_t* extStamps_ = nullptr;
+    int extCapacity_ = 0;
+    ClipVertex* cache_ = nullptr;
+    uint32_t* stamps_ = nullptr;
+    int cacheCapacity_ = 0;
+    uint32_t xformEpoch_ = 0;
 };
 
 }  // namespace sr

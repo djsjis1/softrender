@@ -49,7 +49,45 @@ target_include_directories(softrenderer_core INTERFACE ${SR_PUBLIC_INCLUDE_DIRS}
 target_compile_features(softrenderer_core INTERFACE cxx_std_23)
 if(MSVC)
     target_compile_options(softrenderer_core INTERFACE /utf-8)
-    target_compile_definitions(softrenderer_core INTERFACE _CRT_SECURE_NO_WARNINGS)
+endif()
+
+# ---------------- 裸机开关 ----------------
+# core 是全部组件的 flag 源头：render/scene 链接 core，io/runtime 的自有源
+# 文件也随之启用。SR_NO_EXCEPTIONS=ON 时消费方以 -fno-exceptions -fno-rtti
+# 编译；公共头不含 throw 与 RTTI 依赖（由 tests 的 freestanding 头编译门禁
+# 在 GCC/Clang 上强制）。MSVC 的 STL 组合不支持关闭异常，只禁 RTTI。
+if(SR_NO_EXCEPTIONS)
+    if(MSVC)
+        target_compile_options(softrenderer_core INTERFACE /GR-)
+    else()
+        target_compile_options(softrenderer_core INTERFACE -fno-exceptions -fno-rtti)
+    endif()
+endif()
+
+# ---------------- 裸机头文件门禁 ----------------
+# 裸机承诺只覆盖 core/math/render/resource/scene（io/runtime 依赖异常与
+# 线程，属宿主组件）。把这一子集的公共头逐个以 -fno-exceptions -fno-rtti
+# 编译一遍：任何公共头新增 throw/RTTI/线程依赖都会在构建期失败。
+# MSVC 的 STL 不支持关闭异常，只在 GCC/Clang 上启用（CI Linux 作业执行）。
+# SR_NO_EXCEPTIONS=ON 时 tests 被关闭，所以门禁放在 targets.cmake 里，
+# 裸机消费构建同样会执行它。
+if(SR_IS_TOP_LEVEL AND NOT MSVC AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    file(GLOB_RECURSE SR_FREESTANDING_HEADERS RELATIVE "${PROJECT_SOURCE_DIR}/include"
+        "${PROJECT_SOURCE_DIR}/include/softrenderer/core/*.h"
+        "${PROJECT_SOURCE_DIR}/include/softrenderer/math/*.h"
+        "${PROJECT_SOURCE_DIR}/include/softrenderer/render/*.h"
+        "${PROJECT_SOURCE_DIR}/include/softrenderer/resource/*.h"
+        "${PROJECT_SOURCE_DIR}/include/softrenderer/scene/*.h")
+    set(SR_FREESTANDING_TUS "")
+    foreach(header IN LISTS SR_FREESTANDING_HEADERS)
+        string(MAKE_C_IDENTIFIER "${header}" header_id)
+        set(tu "${PROJECT_BINARY_DIR}/generated/freestanding_header_${header_id}.cpp")
+        file(WRITE "${tu}" "#include <${header}>\nvoid sr_freestanding_${header_id}() {}\n")
+        list(APPEND SR_FREESTANDING_TUS "${tu}")
+    endforeach()
+    add_library(sr_freestanding_headers_check OBJECT ${SR_FREESTANDING_TUS})
+    target_link_libraries(sr_freestanding_headers_check PRIVATE SoftRenderer::core sr_dev_flags)
+    target_compile_options(sr_freestanding_headers_check PRIVATE -fno-exceptions -fno-rtti)
 endif()
 
 # ---------------- render ----------------

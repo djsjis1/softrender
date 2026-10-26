@@ -56,6 +56,7 @@ add_executable(unit_tests
     unit/pixel_format_test.cpp
     unit/resource_test.cpp
     unit/render_pipeline_test.cpp
+    unit/forward_pipeline_test.cpp
     unit/postprocess_test.cpp
     unit/renderer_test.cpp
     unit/coverage_test.cpp
@@ -93,6 +94,13 @@ if(SR_UPDATE_GOLDEN)
 endif()
 add_test(NAME render_regression COMMAND render_regression)
 set_tests_properties(render_regression PROPERTIES LABELS "regression" TIMEOUT 30)
+
+# 裸机零堆证明：全局 operator new 熔断下完成整帧渲染（ADR-007 的可执行验证）。
+# 只链 core+render，兼作组件边界验证；不链 gtest（自定义 operator new 会与其冲突）。
+add_executable(baremetal_smoke integration/baremetal_smoke.cpp)
+target_link_libraries(baremetal_smoke PRIVATE SoftRenderer::core SoftRenderer::render sr_dev_flags)
+add_test(NAME baremetal_smoke COMMAND baremetal_smoke)
+set_tests_properties(baremetal_smoke PROPERTIES LABELS "fast" TIMEOUT 30)
 
 # 下游验证单独标记：快速迭代可只运行 fast|regression，CI 默认会覆盖 packaging。
 foreach(mode IN ITEMS subdirectory installed)

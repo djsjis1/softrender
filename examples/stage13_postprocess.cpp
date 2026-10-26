@@ -20,6 +20,7 @@
 #include "softrenderer/render/raster/triangle.h"
 #include "softrenderer/resource/mesh.h"
 #include "softrenderer/resource/mesh_generator.h"
+#include "softrenderer/runtime/thread_pool.h"
 #include "softrenderer/math/barycentric.h"
 
 // 本库公共符号正逐步迁入 namespace sr（见 docs/adr/ADR-001）。
@@ -117,18 +118,43 @@ int main()
             left.setPixel(x, y, Color::fromFloat(std::min(c.x, 1.0f), std::min(c.y, 1.0f), std::min(c.z, 1.0f)));
         }
 
-    // ---- 右半屏：Bloom + ACES ----
-    // 1. 亮部提取
+    // ---- 右半屏：Bloom + ACES（线程池分条并行）----
+    // *Rows 行区间变体 + stripRows 切条：结果与整帧逐像素一致，多核近线性加速。
+    // 调度器由示例提供（render/postprocess 组件本身不碰线程）。
+    ThreadPool pool;
+    const int strips = pool.threadCount();
+    auto runStrips = [&](int totalRows, auto&& body) {
+        for (int i = 0; i < strips; ++i)
+        {
+            const auto [y0, y1] = postprocess::stripRows(totalRows, i, strips);
+            if (y1 > y0)
+                pool.submit([&body, y0, y1] { body(y0, y1); });
+        }
+        pool.waitAll();
+    };
+
+    // 1. 亮部提取（resize/clear 是全帧操作，行区间只管填充）
     FloatFramebuffer bright(W, H), blurH(W, H), blurV(W, H);
-    sr::postprocess::brightPass(hdr, bright, 1.0f);
+    bright.resize(W, H);
+    bright.clear();
+    runStrips(H, [&](int y0, int y1) { sr::postprocess::brightPassRows(hdr, bright, 1.0f, y0, y1); });
     // 2. 两遍高斯模糊（水平 + 垂直）
-    sr::postprocess::gaussianBlur(bright, blurH, true, 12);
-    sr::postprocess::gaussianBlur(blurH, blurV, false, 12);
-    // 3. 合成：HDR + bloom
+    blurH.resize(W, H);
+    blurH.clear();
+    runStrips(H, [&](int y0, int y1) { sr::postprocess::gaussianBlurRows(bright, blurH, true, 12, y0, y1); });
+    blurV.resize(W, H);
+    blurV.clear();
+    runStrips(H, [&](int y0, int y1) { sr::postprocess::gaussianBlurRows(blurH, blurV, false, 12, y0, y1); });
+    // 3. 合成：HDR + bloom（行指针直写，等价于 copy + addBlend）
     FloatFramebuffer combined(W, H);
     for (int y = 0; y < H; ++y)
+    {
+        const Vec3f* src = hdr.row(y);
+        const Vec3f* bloom = blurV.row(y);
+        Vec3f* dst = combined.row(y);
         for (int x = 0; x < W; ++x)
-            combined.setPixel(x, y, hdr.getPixel(x, y) + blurV.getPixel(x, y) * 0.8f);
+            dst[x] = src[x] + bloom[x] * 0.8f;
+    }
 
     // 4. ACES 色调映射 + gamma
     Framebuffer right(W / 2, H);

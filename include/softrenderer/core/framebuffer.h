@@ -38,33 +38,60 @@ class BasicFramebuffer
    public:
     using Pixel = PixelT;
 
-    // 初始化列表必须与成员声明顺序一致（pixels_ → width_ → height_），
+    // 初始化列表必须与成员声明顺序一致（pixels_ → width_ → height_ → owns_），
     // 否则 GCC/Clang 会以 -Wreorder -Werror 拒绝编译。
     //
     // 分配放在构造函数体内而非初始化列表：参数非法的断言必须先执行，
     // 否则 size_t(负数) 会先膨胀成天文数字并在 new 处抛 bad_alloc。
     BasicFramebuffer(int width, int height, const Color& fill = colors::black)
-        : pixels_(nullptr), width_(width), height_(height)
+        : pixels_(nullptr), width_(width), height_(height), owns_(true)
     {
         assert(width > 0 && height > 0);
         pixels_ = new PixelT[size_t(width) * height];
         clear(fill);
     }
 
-    ~BasicFramebuffer() { delete[] pixels_; }
+    // 外部存储（非拥有）：裸机/嵌入式把像素数组放进静态内存、内存池或
+    // 指定 RAM 段，构造路径不经堆。storage 必须能容纳 width*height 个
+    // PixelT（按 alignof(PixelT) 对齐），且生命周期覆盖本对象。
+    // 不做任何填充：初始内容由调用方随后 clear() 决定。
+    BasicFramebuffer(int width, int height, PixelT* storage)
+        : pixels_(storage), width_(width), height_(height), owns_(false)
+    {
+        assert(width > 0 && height > 0);
+        assert(storage != nullptr);
+    }
 
-    // 禁止拷贝，允许移动
+    ~BasicFramebuffer()
+    {
+        if (owns_)
+            delete[] pixels_;
+    }
+
+    // 禁止拷贝，允许移动（外部存储对象可移动：只转移指针与所属权）
     BasicFramebuffer(const BasicFramebuffer&) = delete;
     BasicFramebuffer& operator=(const BasicFramebuffer&) = delete;
     BasicFramebuffer(BasicFramebuffer&& other) noexcept
-        : pixels_(other.pixels_), width_(other.width_), height_(other.height_)
+        : pixels_(other.pixels_), width_(other.width_), height_(other.height_), owns_(other.owns_)
     {
         other.pixels_ = nullptr;
         other.width_ = other.height_ = 0;
+        other.owns_ = false;
     }
     BasicFramebuffer& operator=(BasicFramebuffer&& other) noexcept
     {
-        if (this != &other) { delete[] pixels_; pixels_ = other.pixels_; width_ = other.width_; height_ = other.height_; other.pixels_ = nullptr; other.width_ = other.height_ = 0; }
+        if (this != &other)
+        {
+            if (owns_)
+                delete[] pixels_;
+            pixels_ = other.pixels_;
+            width_ = other.width_;
+            height_ = other.height_;
+            owns_ = other.owns_;
+            other.pixels_ = nullptr;
+            other.width_ = other.height_ = 0;
+            other.owns_ = false;
+        }
         return *this;
     }
 
@@ -123,6 +150,8 @@ class BasicFramebuffer
     PixelT* pixels_;
     int width_;
     int height_;
+    // true = 构造时自行分配并在析构释放；false = 外部存储，析构不释放。
+    bool owns_;
 };
 
 // 默认格式：RGBA8888。既有代码全部通过这个别名使用帧缓冲。

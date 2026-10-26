@@ -5,6 +5,107 @@
 > 按 `documentation_rules.md` 要求，每次有意义的变更都必须在此登记。
 > 重大接口变更需同时在变更内容中标注版本号。
 
+## 2026-10-27
+
+### 裸机零堆闭环 + 半分辨率 Bloom（3.4×）+ 分条并行实测：整帧 197 → 60 ms
+
+**裸机零堆闭环（ADR-007 补全）**
+
+- `Renderer::setExternalVertexCache(cache, stamps, capacity)`（新）：顶点缓存用调用方存储，
+  `drawMesh` 内部零堆分配；容量不足的网格自动回退内部 vector（正确性不变）。
+  此前顶点缓存默认走 `std::vector`，是裸机零堆路径的最后一个缺口。
+- `FloatFramebuffer` 外部存储构造（新）：`(w, h, Vec3f* pixels)` 与
+  `(w, h, Vec3f* pixels, float* depthStorage)`，HDR 路径像素与深度均可零堆；
+  外部存储为定尺寸（resize 同尺寸=清空、异尺寸=空操作），存储由 `std::vector`
+  改裸指针 + `owns_` 标志（禁拷贝/可移动，resize 分配顺序改为全 RAII 后提交）。
+- **`baremetal_smoke` 集成测试**（新，`tests/integration/baremetal_smoke.cpp`）：
+  全局 `operator new` 熔断守卫开启期间连续渲染两帧——任何分配请求即判失败。
+  通过 = 整帧渲染路径（外部存储帧缓冲/深度/顶点缓存 + drawMesh）**零堆分配的可执行证明**。
+  只链 `SoftRenderer::core + SoftRenderer::render`，兼作组件边界验证。Release 与
+  Debug+ASAN 均通过。
+
+**半分辨率 Bloom（48 号文路线 B 剩余部分）**
+
+- `postprocess::bloom(src, dst, BloomParams)`（新）：亮部提取 + 2×2 降采样 +
+  半分辨率高斯 H/V + 双线性升采样 + 合成一趟完成；压测场景 `bloom_halfres_1080p`。
+- 实测（同进程对比，9700X 16 线程）：全分辨率手排链 357 ms → **bloom 整链 105 ms
+  （单线程，3.4×）**，甚至快于 16 线程分条并行的全分辨率链（95 ms 量级）——
+  半分辨率与分条并行正交，叠加空间仍开放。
+
+**分条并行落地实测（前一日工作补测）**
+
+- 压测新增 MT 孪生场景：`postprocess_chain_1080p_mt`（Bloom 链分条）与
+  `frame_budget_1080p_mt`（FXAA 段分条），压测场景 111 → 114。
+- 实测：Bloom 链 best 307 → 127 ms（2.4×，单独运行口径）；整帧预算 total 197 → **60 ms**
+  （3.3×），其中 FXAA 段 159 → 20 ms（8.0×）。达成 48 号文对路线 B 的 60 ms 预估，
+  数字已回写 48 号文 §四。`stage13_postprocess` 右半屏 Bloom 链已改分条并行模式。
+
+**CI**
+
+- ci.yml 新增 `baremetal` 作业（ubuntu）：`SR_NO_EXCEPTIONS=ON` 构建 + 安装 + 安装树
+  校验（不含 io 运行库）；`sr_freestanding_headers_check` 门禁随一切 GCC/Clang 构建编译。
+
+**验证**
+
+- 单测 **352 用例 / 76 套件** Release 全绿（新增 7：外部顶点缓存 2、FloatFramebuffer
+  外部存储 2、bloom 属性 3）；Debug+ASAN 348 通过 + 4 跳过；`baremetal_smoke`
+  Release + ASAN 双过（零违规）。
+- quick 压测 90/114 全过；doc-paths 门禁通过；像素回归 3/3。
+
+## 2026-10-26（晚）
+
+### 裸机支持（ADR-007）、统一前向管线门面、顶点缓存与分条并行后处理
+
+**裸机 / freestanding（ADR-007）**
+
+- `core/framebuffer.h` / `core/depthbuffer.h`：新增**外部存储构造**（非拥有）——
+  `BasicFramebuffer(w, h, PixelT* storage)`、`DepthBuffer(w, h, float* storage)`，
+  构造零分配、析构不释放；`DepthBuffer` 存储由 `std::vector` 改为裸指针（禁拷贝/可移动）。
+  `render/pipeline/renderer.h`：`Renderer(w, h, float* depthStorage)` 同步支持，
+  整条渲染链（外部存储帧缓冲 + drawMesh）不经堆。
+- CMake 新增 `SR_NO_EXCEPTIONS` 选项：core 接口以 `-fno-exceptions -fno-rtti`
+  （MSVC 仅 `/GR-`）编译并传导；io/runtime/tests/examples 自动关闭。
+  新增门禁目标 `sr_freestanding_headers_check`：core/math/render/resource/scene
+  全部公共头逐个以 `-fno-exceptions -fno-rtti` 编译（GCC/Clang，CI Linux 作业执行）。
+- 公共头去 insecure CRT：`runtime/profiler.h` 的 `fopen/fwrite/fclose` 改 `std::ofstream`；
+  移除 core 接口级 `_CRT_SECURE_NO_WARNINGS`（不再传染下游）；示例/测试中 4 处 `fopen` 同步迁移。
+- 审计结论（锁定为门禁）：core/math/render/resource/scene 公共头零 `throw`、零 `dynamic_cast`/`typeid`、零线程/文件头。
+- 新文档 `docs/engineering/60-裸机与无操作系统集成指南.md` + ADR-007；README 增裸机章节；
+  `CMakePresets.json` 提供 `baremetal` / `linux-baremetal` preset。
+
+**统一入口与性能**
+
+- `render/pipeline/forward_pipeline.h`（新）：`ForwardPipeline` 门面——阴影贴图 pass
+  （`shadow_pass.h` 的 `renderShadowPass` 收敛进库）→ `RenderQueue` 排序 → 主 pass →
+  FXAA；后处理经 `StripExecutor` 回调注入调度器（render 组件保持零线程依赖）。
+  新示例 `demo_forward`（线程池分条并行 FXAA），5 个门面行为单测。
+- `render/pipeline/renderer.h` `drawMesh`：**后变换顶点缓存**（GPU post-transform cache
+  同款）——一次 draw 内共享顶点只执行一次 `shader.vertex`（索引网格从 3×三角形数
+  降到去重顶点数）。契约注释写明：`shader.vertex` 不得依赖三角形上下文。像素回归 3/3 逐位不变。
+- `render/postprocess/post_processing.h`：分条并行 API——`stripRows` 切条助手 +
+  `fxaaRows`/`buildLuminanceMapRows`/`resolveToLdrRows`/`vignetteRows`/
+  `radialMotionBlurRows`/`brightPassRows`/`gaussianBlurRows`/`addBlendRows`/
+  `SSAO::computeRows/blurRows` 行区间变体；任意条带划分与整帧结果**逐像素一致**
+  （8 个等价单测锁定）。`vignette` 顺带从逐像素 get/set 改为行指针直写。
+
+**文档与门禁**
+
+- README：可执行名修正（`stage4_zbuffer` → `stage06_depth` 等 3 处）、`find_package` 版本统一 2.0、
+  统一入口代码示例；`check_doc_paths` 门禁扩展**README exe 名校验**（支持 foreach ITEMS 定义形态）。
+- ADR：索引补录 ADR-005；新增 ADR-006（`rasterizer_fast` 定位为覆盖规则验证工具，不接入
+  主链路，悬置决策落定）与 ADR-007。
+- 文档失真修复：30/48 号文的 `core/benchmark.h` 引用改为实际位置 `benchmarks/support/`；
+  modules.md 的「窗口示例非 Windows 必然编译失败」更新为 TASK-004 后的 `if(WIN32)` 守卫现状。
+- `keyframe_animation.h` 维持软废弃（头部遗留标记已完整，删除与否留待 3.0 接口决策）。
+
+**验证**
+
+- 单测全绿：**345 用例 / 75 套件**（新增 20 用例：分条等价 7、外部存储 4、顶点缓存 3、门面 5、
+  裸机渲染器 1）；Debug+ASAN 341 通过 + 4 跳过（外部存储所有权改动无 ASAN 报告）；
+  像素回归 3/3；下游 consumer subdirectory/installed 2/2；doc-paths 门禁
+  52 处引用通过；`demo_forward` 实跑出图（3 阴影投射物）；`baremetal` preset（MSVC /GR-）构建零错误。
+- 待 CI 验证：Linux 上的 `-fno-exceptions` 头门禁（`linux-baremetal` preset）首次执行。
+
 ## 2026-10-26
 
 ### 文档失真修复、访问器契约补齐与两处逐像素优化

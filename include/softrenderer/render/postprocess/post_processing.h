@@ -32,6 +32,45 @@ namespace sr::postprocess
 using sr::FloatFramebuffer;
 
 // ============================================================
+// 分条并行契约（*Rows 行区间变体 + stripRows 切条助手）
+//
+// 后处理逐像素计算都是行独立的（输出行 y 只读输入缓冲），把整帧按行
+// 切成条带交给调用方的调度器（线程池 / 多核裸机调度 / 单线程），即可
+// 近线性加速——render 组件本身保持零线程依赖，调度权留给使用者。
+//
+// 多线程调用约定：
+//   - 各线程处理互不重叠的行区间（写入无冲突）；
+//   - 读越出区间边界的邻域行是允许的（输入缓冲在整个并行段内只读）；
+//   - 需要"先全帧预处理"的效果（FXAA 亮度图、DOF 半径图）把预处理
+//     拆成独立的行区间函数，先并行预处理、再并行应用。
+// ============================================================
+
+// 把 [0, height) 切成 stripCount 个近似等高的行区间，返回第 stripIndex 条
+// 的 [yBegin, yEnd)。height/stripCount 非法或 stripIndex 越界返回 {0,0}。
+inline std::pair<int, int> stripRows(int height, int stripIndex, int stripCount)
+{
+    if (height <= 0 || stripCount <= 0 || stripIndex < 0 || stripIndex >= stripCount)
+        return {0, 0};
+    const int base = height / stripCount;
+    const int extra = height % stripCount;
+    const int yBegin = stripIndex * base + std::min(stripIndex, extra);
+    const int yEnd = yBegin + base + (stripIndex < extra ? 1 : 0);
+    return {yBegin, yEnd};
+}
+
+// 行区间统一夹取：负值与越界收进 [0, total)，逆序区间返回 {0,0}。
+inline std::pair<int, int> clampRows(int yBegin, int yEnd, int total)
+{
+    if (total <= 0)
+        return {0, 0};
+    yBegin = std::clamp(yBegin, 0, total);
+    yEnd = std::clamp(yEnd, 0, total);
+    if (yBegin >= yEnd)
+        return {0, 0};
+    return {yBegin, yEnd};
+}
+
+// ============================================================
 // 1. FXAA — Fast Approximate Anti-Aliasing
 // ============================================================
 //
@@ -75,11 +114,42 @@ inline Color sampleBilinearClamped(const Framebuffer& src, float u, float v)
     return Color::lerp(c0, c1, ty);
 }
 
-// 对 Framebuffer 做 FXAA，结果写入 dst（同尺寸）
-inline void fxaa(const Framebuffer& src, Framebuffer& dst)
+// ---- FXAA 分条变体 ----
+
+// 亮度图行区间预计算：lumMap 必须已按整帧（W*H）分配，各条带只写各自的行段。
+inline void buildLuminanceMapRows(const Framebuffer& src, std::vector<float>& lumMap, int yBegin, int yEnd)
+{
+    const int W = src.width(), H = src.height();
+    if (W <= 0 || H <= 0 || lumMap.size() < size_t(W) * size_t(H))
+        return;
+    const auto [y0, y1] = clampRows(yBegin, yEnd, H);
+    const Color* srcData = src.data();
+    for (int y = y0; y < y1; ++y)
+    {
+        const Color* srcRow = srcData + size_t(y) * size_t(W);
+        float* lumRow = lumMap.data() + size_t(y) * size_t(W);
+        for (int x = 0; x < W; ++x)
+            lumRow[x] = luminance(srcRow[x]);
+    }
+}
+
+// 整帧亮度图（单线程便捷入口；并行调度请按条带调 buildLuminanceMapRows）。
+inline void buildLuminanceMap(const Framebuffer& src, std::vector<float>& lumMap)
 {
     const int W = src.width(), H = src.height();
     if (W <= 0 || H <= 0)
+        return;
+    lumMap.resize(size_t(W) * size_t(H));
+    buildLuminanceMapRows(src, lumMap, 0, H);
+}
+
+// FXAA 行区间应用：只处理 [yBegin, yEnd)，各条带共享同一份只读亮度图。
+// 与整帧版逐像素一致：亮度图相同、逐像素计算不携带跨行状态。
+inline void fxaaRows(const Framebuffer& src, Framebuffer& dst, const std::vector<float>& lumMap,
+                     int yBegin, int yEnd)
+{
+    const int W = src.width(), H = src.height();
+    if (W <= 0 || H <= 0 || lumMap.size() < size_t(W) * size_t(H))
         return;
 
     // 可调参数
@@ -87,33 +157,22 @@ inline void fxaa(const Framebuffer& src, Framebuffer& dst)
     const float FXAA_EDGE_THRESHOLD_MIN = 1.0f / 128.0f;  // 亮度下限
     const int FXAA_SEARCH_STEPS = 8;                       // 边缘搜索步数
 
-    // 亮度图预计算。
-    // 原实现每个像素要算 9 次亮度（3×3 邻域），而每个亮度又被它周围 9 个像素
-    // 各算一次——整体是 9 倍冗余，1080p 下等于 1800 万次 getPixel+luminance。
-    // 预计算后每像素 1 次，搜索阶段也变成连续的数组读取。
-    const Color* srcData = src.data();
-    std::vector<float> lumMap(size_t(W) * size_t(H));
-    for (int y = 0; y < H; ++y)
-    {
-        const Color* srcRow = srcData + size_t(y) * size_t(W);
-        float* lumRow = lumMap.data() + size_t(y) * size_t(W);
-        for (int x = 0; x < W; ++x)
-            lumRow[x] = luminance(srcRow[x]);
-    }
     auto lumAt = [&](int px, int py) {
         const int cx = std::clamp(px, 0, W - 1);
         const int cy = std::clamp(py, 0, H - 1);
         return lumMap[size_t(cy) * size_t(W) + size_t(cx)];
     };
 
+    const Color* srcData = src.data();
     // 先整行拷回去：低对比度像素（绝大多数）根本不需要处理，
     // 没必要为它们走一遍 setPixel。尺寸不一致时只拷交集。
     const int copyW = std::min(W, dst.width());
     const int copyH = std::min(H, dst.height());
-    for (int y = 0; y < copyH; ++y)
+    const auto [y0, y1] = clampRows(yBegin, yEnd, copyH);
+    for (int y = y0; y < y1; ++y)
         std::copy(srcData + size_t(y) * size_t(W), srcData + size_t(y) * size_t(W) + copyW, dst.row(y));
 
-    for (int y = 0; y < copyH; ++y)
+    for (int y = y0; y < y1; ++y)
     {
         // 行指针一次算好：x 方向的 clamp 只剩 2 次，y 方向完全不用 clamp。
         const float* rowN = lumMap.data() + size_t(std::max(y - 1, 0)) * size_t(W);
@@ -207,6 +266,23 @@ inline void fxaa(const Framebuffer& src, Framebuffer& dst)
     }
 }
 
+// 对 Framebuffer 做 FXAA，结果写入 dst（同尺寸）。
+// 并行用法：先按条带 buildLuminanceMapRows 填满亮度图，再按条带 fxaaRows。
+inline void fxaa(const Framebuffer& src, Framebuffer& dst)
+{
+    const int W = src.width(), H = src.height();
+    if (W <= 0 || H <= 0)
+        return;
+
+    // 亮度图预计算。
+    // 原实现每个像素要算 9 次亮度（3×3 邻域），而每个亮度又被它周围 9 个像素
+    // 各算一次——整体是 9 倍冗余，1080p 下等于 1800 万次 getPixel+luminance。
+    // 预计算后每像素 1 次，搜索阶段也变成连续的数组读取。
+    std::vector<float> lumMap(size_t(W) * size_t(H));
+    buildLuminanceMap(src, lumMap);
+    fxaaRows(src, dst, lumMap, 0, H);
+}
+
 // ============================================================
 // 2. HDR 后处理效果（FloatFramebuffer 输入输出）
 // ============================================================
@@ -273,14 +349,15 @@ inline Vec3f gammaCorrectFast(Vec3f linear)
     return {gammaCorrectFast(linear.x), gammaCorrectFast(linear.y), gammaCorrectFast(linear.z)};
 }
 
-// 把 HDR 缓冲经色调映射 + gamma 转到 8 位 Framebuffer
-inline void resolveToLdr(const FloatFramebuffer& src, Framebuffer& dst)
+// 行区间版：只处理 [yBegin, yEnd)。色调映射查表只读，天然行独立。
+inline void resolveToLdrRows(const FloatFramebuffer& src, Framebuffer& dst, int yBegin, int yEnd)
 {
     // 行指针直写：全屏 200 万像素上，逐像素 getPixel/setPixel 的边界检查
     // 本身是可观测的开销；尺寸取交集保持“越界静默丢弃”的原语义。
     const int w = std::min(src.width(), dst.width());
     const int h = std::min(src.height(), dst.height());
-    for (int y = 0; y < h; ++y)
+    const auto [y0, y1] = clampRows(yBegin, yEnd, h);
+    for (int y = y0; y < y1; ++y)
     {
         const Vec3f* srcRow = src.row(y);
         Color* dstRow = dst.row(y);
@@ -292,18 +369,21 @@ inline void resolveToLdr(const FloatFramebuffer& src, Framebuffer& dst)
     }
 }
 
+// 把 HDR 缓冲经色调映射 + gamma 转到 8 位 Framebuffer
+inline void resolveToLdr(const FloatFramebuffer& src, Framebuffer& dst)
+{
+    resolveToLdrRows(src, dst, 0, std::min(src.height(), dst.height()));
+}
+
 // ---- Bloom 基础算子 ----
 
-// 亮部提取：只保留亮度 > threshold 的像素（用于 Bloom）
-inline void brightPass(const FloatFramebuffer& src, FloatFramebuffer& dst, float threshold)
+// 行区间版：dst 先由调用方 resize/clear（brightPass 编排这些全帧操作）。
+inline void brightPassRows(const FloatFramebuffer& src, FloatFramebuffer& dst, float threshold,
+                           int yBegin, int yEnd)
 {
-    // 先 resize/clear 再读 src：若两者是同一个缓冲，清空会先把输入抹掉。
-    if (&src == &dst)
-        return;
-    dst.resize(src.width(), src.height());
-    dst.clear();
+    const auto [y0, y1] = clampRows(yBegin, yEnd, src.height());
     const int w = src.width();
-    for (int y = 0; y < src.height(); ++y)
+    for (int y = y0; y < y1; ++y)
     {
         const Vec3f* srcRow = src.row(y);
         Vec3f* dstRow = dst.row(y);
@@ -317,16 +397,26 @@ inline void brightPass(const FloatFramebuffer& src, FloatFramebuffer& dst, float
     }
 }
 
-// 可分离高斯模糊（水平或垂直 pass）
-inline void gaussianBlur(const FloatFramebuffer& src, FloatFramebuffer& dst, bool horizontal, int radius)
+// 亮部提取：只保留亮度 > threshold 的像素（用于 Bloom）
+inline void brightPass(const FloatFramebuffer& src, FloatFramebuffer& dst, float threshold)
+{
+    // 先 resize/clear 再读 src：若两者是同一个缓冲，清空会先把输入抹掉。
+    if (&src == &dst)
+        return;
+    dst.resize(src.width(), src.height());
+    dst.clear();
+    brightPassRows(src, dst, threshold, 0, src.height());
+}
+
+// 行区间版：dst 先由调用方 resize/clear；核为只读局部数据，条带间无共享写。
+inline void gaussianBlurRows(const FloatFramebuffer& src, FloatFramebuffer& dst, bool horizontal,
+                             int radius, int yBegin, int yEnd)
 {
     if (&src == &dst || src.width() <= 0 || src.height() <= 0)
         return;
     // radius<=0 时 sigma=0 会产生 NaN 核；负 radius 还会让核的 size 回绕成巨值。
     radius = std::clamp(radius, 1, std::max(src.width(), src.height()));
-    dst.resize(src.width(), src.height());
-    dst.clear();
-    // 预计算 1D 高斯核
+    // 预计算 1D 高斯核（每条带一份，代价相对 O(W×H×radius) 可忽略）
     std::vector<float> kernel(size_t(radius) * 2 + 1);
     float sigma = radius / 3.0f;
     float sum = 0;
@@ -341,9 +431,10 @@ inline void gaussianBlur(const FloatFramebuffer& src, FloatFramebuffer& dst, boo
 
     const int w0 = src.width(), h0 = src.height();
     const Vec3f* srcData = src.data();
+    const auto [y0, y1] = clampRows(yBegin, yEnd, h0);
     if (horizontal)
     {
-        for (int y = 0; y < h0; ++y)
+        for (int y = y0; y < y1; ++y)
         {
             const Vec3f* srcRow = srcData + size_t(y) * size_t(w0);
             Vec3f* dstRow = dst.row(y);
@@ -360,7 +451,8 @@ inline void gaussianBlur(const FloatFramebuffer& src, FloatFramebuffer& dst, boo
     {
         // 垂直 pass：按核偏移逐行累加，内层在连续内存上循环。
         // 逐像素跨行取 17 次（步长 = 一整行）会把缓存打满，是这条路径的主要瓶颈。
-        for (int y = 0; y < h0; ++y)
+        // 输出行 dstRow[y] 只聚合输入行 [y-r, y+r]，行间写不冲突，可按条带并行。
+        for (int y = y0; y < y1; ++y)
         {
             Vec3f* dstRow = dst.row(y);
             for (int i = -radius; i <= radius; ++i)
@@ -374,18 +466,36 @@ inline void gaussianBlur(const FloatFramebuffer& src, FloatFramebuffer& dst, boo
     }
 }
 
-// 加法合成：dst += src * intensity（Bloom 叠加）
-inline void addBlend(FloatFramebuffer& dst, const FloatFramebuffer& src, float intensity = 1.0f)
+// 可分离高斯模糊（水平或垂直 pass）
+inline void gaussianBlur(const FloatFramebuffer& src, FloatFramebuffer& dst, bool horizontal, int radius)
+{
+    if (&src == &dst || src.width() <= 0 || src.height() <= 0)
+        return;
+    dst.resize(src.width(), src.height());
+    dst.clear();
+    gaussianBlurRows(src, dst, horizontal, radius, 0, src.height());
+}
+
+// 行区间版：dst += src * intensity 的条带应用。
+inline void addBlendRows(FloatFramebuffer& dst, const FloatFramebuffer& src, float intensity,
+                         int yBegin, int yEnd)
 {
     const int w = std::min(dst.width(), src.width());
     const int h = std::min(dst.height(), src.height());
-    for (int y = 0; y < h; ++y)
+    const auto [y0, y1] = clampRows(yBegin, yEnd, h);
+    for (int y = y0; y < y1; ++y)
     {
         Vec3f* dstRow = dst.row(y);
         const Vec3f* srcRow = src.row(y);
         for (int x = 0; x < w; ++x)
             dstRow[x] = dstRow[x] + srcRow[x] * intensity;
     }
+}
+
+// 加法合成：dst += src * intensity（Bloom 叠加）
+inline void addBlend(FloatFramebuffer& dst, const FloatFramebuffer& src, float intensity = 1.0f)
+{
+    addBlendRows(dst, src, intensity, 0, std::min(dst.height(), src.height()));
 }
 
 // ---- DOF 景深 ----
@@ -655,13 +765,10 @@ inline void depthOfField(const FloatFramebuffer& color,
     }
 }
 
-// ---- 径向运动模糊 ----
-// 以屏幕中心为原点，沿径向方向模糊，模拟相机前进的运动感。
-// strength: 0~1，samples: 采样数
-inline void radialMotionBlur(const FloatFramebuffer& color,
-                             int W, int H,
-                             float strength, int samples,
-                             FloatFramebuffer& out)
+// 行区间版：只处理 [yBegin, yEnd)。
+inline void radialMotionBlurRows(const FloatFramebuffer& color, int W, int H,
+                                 float strength, int samples,
+                                 FloatFramebuffer& out, int yBegin, int yEnd)
 {
     // samples=1 时 (s / (samples-1)) 是 0/0；输出尺寸不匹配时 setPixel 越界。
     if (W <= 0 || H <= 0 || samples < 1 || color.width() < W || color.height() < H)
@@ -669,12 +776,14 @@ inline void radialMotionBlur(const FloatFramebuffer& color,
     // strength 参与 int(x + dx*t*W)：非有限值会让浮点转整成为未定义行为。
     if (!std::isfinite(strength))
         return;
-    out.resize(W, H);
+    if (out.width() < W || out.height() < H)
+        return; // 行区间版不重建输出：尺寸由调用方保证（整帧版负责 resize）
     const float denom = float(std::max(1, samples - 1));
     const int safeSamples = std::clamp(samples, 1, 256);
     const float invSamples = 1.0f / float(safeSamples);
     float cx = W * 0.5f, cy = H * 0.5f;
-    for (int y = 0; y < H; ++y)
+    const auto [y0, y1] = clampRows(yBegin, yEnd, H);
+    for (int y = y0; y < y1; ++y)
     {
         Vec3f* dstRow = out.row(y);
         for (int x = 0; x < W; ++x)
@@ -699,15 +808,33 @@ inline void radialMotionBlur(const FloatFramebuffer& color,
     }
 }
 
-// ---- 暗角 ----
-// 屏幕边缘变暗，模拟镜头光学特性。strength: 0~1
-inline void vignette(FloatFramebuffer& fb, float strength = 0.3f)
+// ---- 径向运动模糊 ----
+// 以屏幕中心为原点，沿径向方向模糊，模拟相机前进的运动感。
+// strength: 0~1，samples: 采样数
+inline void radialMotionBlur(const FloatFramebuffer& color,
+                             int W, int H,
+                             float strength, int samples,
+                             FloatFramebuffer& out)
+{
+    // 保持原契约：先按 W×H 重建输出（清零），再整帧计算。
+    if (W <= 0 || H <= 0 || samples < 1 || color.width() < W || color.height() < H)
+        return;
+    if (!std::isfinite(strength))
+        return;
+    out.resize(W, H);
+    radialMotionBlurRows(color, W, H, strength, samples, out, 0, H);
+}
+
+// 行区间版：只处理 [yBegin, yEnd)。行指针直写替代逐像素 getPixel/setPixel。
+inline void vignetteRows(FloatFramebuffer& fb, float strength, int yBegin, int yEnd)
 {
     int W = fb.width(), H = fb.height();
     float cx = W * 0.5f, cy = H * 0.5f;
     float maxDist = std::sqrt(cx * cx + cy * cy);
-    for (int y = 0; y < H; ++y)
+    const auto [y0, y1] = clampRows(yBegin, yEnd, H);
+    for (int y = y0; y < y1; ++y)
     {
+        Vec3f* row = fb.row(y);
         for (int x = 0; x < W; ++x)
         {
             const float nx = (x - cx) / maxDist;
@@ -716,10 +843,16 @@ inline void vignette(FloatFramebuffer& fb, float strength = 0.3f)
             // 开方白算了一次；直接取平方与数学上恒等且少一次 sqrt。
             const float r2 = nx * nx + ny * ny;
             float factor = std::max(1.0f - r2 * strength, 0.0f);
-            Vec3f c = fb.getPixel(x, y);
-            fb.setPixel(x, y, c * factor);
+            row[x] = row[x] * factor;
         }
     }
+}
+
+// ---- 暗角 ----
+// 屏幕边缘变暗，模拟镜头光学特性。strength: 0~1
+inline void vignette(FloatFramebuffer& fb, float strength = 0.3f)
+{
+    vignetteRows(fb, strength, 0, fb.height());
 }
 
 // ---- 色差 ----
@@ -757,6 +890,81 @@ inline void chromaticAberration(const FloatFramebuffer& src,
             Vec3f cg = src.getPixel(x, y);
             Vec3f cb = src.getPixel(bx, by);
             out.setPixel(x, y, Vec3f{cr.x, cg.y, cb.z});
+        }
+    }
+}
+
+// ---- Bloom 整链（半分辨率）----
+//
+// 亮部提取(全分辨率) → 2×2 box 降采样 → 高斯 H/V(半分辨率) → 双线性升采样
+// → dst = src + bloom × intensity。
+// Bloom 是低频信号：模糊核半径超过 2 像素后，半分辨率计算 + 升采样与
+// 全分辨率链视觉不可分，但逐像素工作量降到约 1/4（48 号文路线 B）。
+//
+// 契约：src 与 dst 不得为同一缓冲（合成要读 src）；dst 尺寸不匹配时会
+// resize（外部存储 dst 是定尺寸的，须由调用方保证与 src 同尺寸）。
+// 内部临时缓冲在本函数内分配（宿主便利路径）；裸机/免堆场景请用
+// brightPass/gaussianBlur/addBlend 的 *Rows 算子自行编排外部存储。
+struct BloomParams
+{
+    float threshold = 1.0f;  // 亮度阈值
+    float intensity = 0.8f;  // 叠加强度
+    int blurRadius = 12;     // 全分辨率口径的高斯半径（内部折半使用）
+};
+
+inline void bloom(const FloatFramebuffer& src, FloatFramebuffer& dst, const BloomParams& params = {})
+{
+    if (&src == &dst || src.width() <= 0 || src.height() <= 0)
+        return;
+    const int W = src.width(), H = src.height();
+    const int hw = std::max(1, W / 2), hh = std::max(1, H / 2);
+
+    // 1. 亮部提取（全分辨率）→ 2. 2×2 平均降采样（一趟完成，免中间全尺寸亮部缓冲）
+    FloatFramebuffer half(hw, hh);
+    const int radius = std::clamp(std::max(1, params.blurRadius / 2), 1, std::max(hw, hh));
+    for (int y = 0; y < hh; ++y)
+    {
+        Vec3f* dstRow = half.row(y);
+        for (int x = 0; x < hw; ++x)
+        {
+            const int x0 = std::min(2 * x, W - 1), x1 = std::min(2 * x + 1, W - 1);
+            const int y0 = std::min(2 * y, H - 1), y1 = std::min(2 * y + 1, H - 1);
+            Vec3f acc = src.row(y0)[x0] + src.row(y0)[x1] + src.row(y1)[x0] + src.row(y1)[x1];
+            acc = acc * 0.25f;
+            const float lum = 0.2126f * acc.x + 0.7152f * acc.y + 0.0722f * acc.z;
+            dstRow[x] = lum > params.threshold ? acc : Vec3f{0, 0, 0};
+        }
+    }
+
+    // 3. 半分辨率高斯 H/V
+    FloatFramebuffer blurH(hw, hh);
+    gaussianBlur(half, blurH, true, radius);
+    gaussianBlur(blurH, half, false, radius);
+
+    // 4. 双线性升采样 + 5. 合成（升采样坐标与 SSAO::computeHalfResolution 同式）
+    if (dst.width() != W || dst.height() != H)
+        dst.resize(W, H);
+    const float scaleX = float(hw) / float(W);
+    const float scaleY = float(hh) / float(H);
+    for (int y = 0; y < H; ++y)
+    {
+        const float fy = std::clamp((float(y) + 0.5f) * scaleY - 0.5f, 0.0f, float(hh - 1));
+        const int y0 = int(fy);
+        const int y1 = std::min(y0 + 1, hh - 1);
+        const float ty = fy - float(y0);
+        const Vec3f* rowA = half.row(y0);
+        const Vec3f* rowB = half.row(y1);
+        Vec3f* dstRow = dst.row(y);
+        const Vec3f* srcRow = src.row(y);
+        for (int x = 0; x < W; ++x)
+        {
+            const float fx = std::clamp((float(x) + 0.5f) * scaleX - 0.5f, 0.0f, float(hw - 1));
+            const int x0 = int(fx);
+            const int x1 = std::min(x0 + 1, hw - 1);
+            const float tx = fx - float(x0);
+            const Vec3f a = rowA[x0] + (rowA[x1] - rowA[x0]) * tx;
+            const Vec3f b = rowB[x0] + (rowB[x1] - rowB[x0]) * tx;
+            dstRow[x] = srcRow[x] + (a + (b - a) * ty) * params.intensity;
         }
     }
 }
@@ -803,33 +1011,29 @@ class SSAO
         generateNoise();
     }
 
-    // 生成 AO 图
-    // viewPos: 每像素的视图空间位置 (x,y,z)
-    // viewNormal: 每像素的视图空间法线
-    // depth: 深度缓冲（NDC [0,1]）
-    // viewProj: 视图*投影矩阵（用于把采样点投回屏幕）
-    void compute(const std::vector<Vec3f>& viewPos, const std::vector<Vec3f>& viewNormal,
-                 const std::vector<float>& depth, int W, int H, const Mat4& viewProj,
-                 std::vector<float>& aoOut)
+    // 行区间版：只计算 [yBegin, yEnd) 行。输入与 aoOut 均为整帧尺寸；
+    // aoOut 须先由调用方填满 1.0（compute 编排），条带间写不冲突。
+    void computeRows(const std::vector<Vec3f>& viewPos, const std::vector<Vec3f>& viewNormal,
+                     const std::vector<float>& depth, int W, int H, const Mat4& viewProj,
+                     std::vector<float>& aoOut, int yBegin, int yEnd)
     {
-        aoOut.clear();
         if (W <= 0 || H <= 0)
             return;
         const size_t pixelCount = size_t(W) * size_t(H);
         // 三路输入长度不足时下面的逐像素读取会越界。
         if (viewPos.size() < pixelCount || viewNormal.size() < pixelCount || depth.size() < pixelCount)
             return;
+        if (aoOut.size() < pixelCount)
+            return;
         const size_t noiseCount = size_t(config_.noiseSize) * size_t(config_.noiseSize);
         if (kernel_.empty() || noise_.size() < noiseCount)
             return;
-        // 每帧重新填满：resize 在尺寸不变时不会重置，被 continue 跳过的像素
-        // 会残留上一帧的 AO。
-        aoOut.assign(pixelCount, 1.0f);
         const float* depthData = depth.data();
         int noiseScale_x = W / config_.noiseSize;
         int noiseScale_y = H / config_.noiseSize;
+        const auto [y0, y1] = clampRows(yBegin, yEnd, H);
 
-        for (int y = 0; y < H; ++y)
+        for (int y = y0; y < y1; ++y)
         {
             for (int x = 0; x < W; ++x)
             {
@@ -886,6 +1090,26 @@ class SSAO
                 aoOut[idx] = 1.0f - (occlusion / float(samples));
             }
         }
+    }
+
+    // 生成 AO 图
+    // viewPos: 每像素的视图空间位置 (x,y,z)
+    // viewNormal: 每像素的视图空间法线
+    // depth: 深度缓冲（NDC [0,1]）
+    // viewProj: 视图*投影矩阵（用于把采样点投回屏幕）
+    // 并行用法：先 aoOut.assign(N, 1.0f)，再按条带调 computeRows。
+    void compute(const std::vector<Vec3f>& viewPos, const std::vector<Vec3f>& viewNormal,
+                 const std::vector<float>& depth, int W, int H, const Mat4& viewProj,
+                 std::vector<float>& aoOut)
+    {
+        aoOut.clear();
+        if (W <= 0 || H <= 0)
+            return;
+        const size_t pixelCount = size_t(W) * size_t(H);
+        // 每帧重新填满：resize 在尺寸不变时不会重置，被 continue 跳过的像素
+        // 会残留上一帧的 AO。
+        aoOut.assign(pixelCount, 1.0f);
+        computeRows(viewPos, viewNormal, depth, W, H, viewProj, aoOut, 0, H);
     }
 
     // 半分辨率 SSAO：AO 是低频信号，半分辨率计算 + 双线性上采样后
@@ -948,19 +1172,18 @@ class SSAO
         }
     }
 
-    // 对 AO 图做简单 box blur 降噪
-    static void blur(const std::vector<float>& aoIn, int W, int H,
-                     std::vector<float>& aoOut, int radius = 2)
+    // 对 AO 图做简单 box blur 降噪（行区间版：条带间写不冲突，可并行）
+    static void blurRows(const std::vector<float>& aoIn, int W, int H,
+                         std::vector<float>& aoOut, int radius, int yBegin, int yEnd)
     {
-        aoOut.clear();
         if (W <= 0 || H <= 0)
             return;
         const size_t pixelCount = size_t(W) * size_t(H);
-        if (aoIn.size() < pixelCount)
+        if (aoIn.size() < pixelCount || aoOut.size() < pixelCount)
             return;
         radius = std::clamp(radius, 0, std::max(W, H));
-        aoOut.assign(pixelCount, 0.0f);
-        for (int y = 0; y < H; ++y)
+        const auto [y0, y1] = clampRows(yBegin, yEnd, H);
+        for (int y = y0; y < y1; ++y)
         {
             for (int x = 0; x < W; ++x)
             {
@@ -977,6 +1200,17 @@ class SSAO
                 aoOut[size_t(y) * W + x] = sum / count;
             }
         }
+    }
+
+    // 对 AO 图做简单 box blur 降噪
+    static void blur(const std::vector<float>& aoIn, int W, int H,
+                     std::vector<float>& aoOut, int radius = 2)
+    {
+        aoOut.clear();
+        if (W <= 0 || H <= 0)
+            return;
+        aoOut.assign(size_t(W) * size_t(H), 0.0f);
+        blurRows(aoIn, W, H, aoOut, radius, 0, H);
     }
 
    private:

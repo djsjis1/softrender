@@ -5,6 +5,7 @@
 #include <utility>
 #include <chrono>
 #include <cstdio>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -110,7 +111,7 @@ class Profiler
 
     // 输出 Chrome Trace JSON
     //
-    // 先在内存里拼完整份文档再一次 fwrite：旧实现逐事件 fprintf，
+    // 先在内存里拼完整份文档再一次 write：旧实现逐事件 fprintf，
     // 200k 事件时 25 MB 要经过 200k 次 libc 格式化 + 缓冲检查，实测占了总耗时的 90%。
     void flush(const char* path)
     {
@@ -122,8 +123,11 @@ class Profiler
             events = events_;
             dropped = dropped_;
         }
-        FILE* f = std::fopen(path, "w");
-        if (!f)
+        // std::ofstream 而非 std::fopen：公共头里出现 insecure CRT 函数会把
+        // _CRT_SECURE_NO_WARNINGS 的需求传染给所有下游（MSVC 下抑制他们自己的
+        // C4996）。流接口不触发该告警，头文件保持对下游零定义污染。
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        if (!file)
             return;
 
         std::string out;
@@ -158,8 +162,7 @@ class Profiler
         out += std::to_string(dropped);
         out += "}\n";
 
-        std::fwrite(out.data(), 1, out.size(), f);
-        std::fclose(f);
+        file.write(out.data(), std::streamsize(out.size()));
     }
 
     void clear()

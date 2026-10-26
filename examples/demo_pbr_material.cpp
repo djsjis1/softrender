@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -154,12 +155,8 @@ int main()
         SR_PROFILE_SCOPE("generate_gltf");
         std::string json = generatePbrGltf();
         std::filesystem::create_directories("output");
-        FILE* f = std::fopen("output/pbr_materials.gltf", "w");
-        if (f)
-        {
-            std::fwrite(json.data(), 1, json.size(), f);
-            std::fclose(f);
-        }
+        std::ofstream out("output/pbr_materials.gltf", std::ios::binary | std::ios::trunc);
+        out.write(json.data(), std::streamsize(json.size()));
         printf("已生成 output/pbr_materials.gltf\n");
     }
 

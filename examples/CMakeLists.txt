@@ -17,7 +17,7 @@ foreach(name IN ITEMS
     stage06_depth stage07_texture stage08_shader stage09_clip
     stage10_shadow stage11_msaa stage12_pbr stage13_postprocess
     stage14_threaded demo_stars demo_gltf demo_pbr_material
-    demo_ibl_pbr demo_skinning demo_2d)
+    demo_ibl_pbr demo_skinning demo_2d demo_forward)
     sr_add_example(${name})
 endforeach()
 

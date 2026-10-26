@@ -4196,6 +4196,71 @@ static void stress_frame_budget_1080p()
                std::to_string(sphere.triangleCount()));
 }
 
+// ---------------------------------------------------------------- 整帧预算（MT 后处理）
+// 与 frame_budget_1080p 同一帧（3D/2D 段逐行相同），仅 FXAA 段改用
+// ThreadPool + *Rows 分条并行。同进程先后执行，两个 report 直接给出
+// "后处理并行化对整帧预算"的加速比。
+static void stress_frame_budget_1080p_mt()
+{
+    const int W = 1920, H = 1080;
+    const auto t0 = Clock::now();
+
+    Framebuffer fb(W, H, Color(10, 12, 16));
+    Renderer renderer(W, H);
+    const Mesh sphere = sr::meshgen::sphere(1.0f, 48, 32);
+    auto shader = makePbr(W, H);
+
+    const auto t3d = Clock::now();
+    renderer.clear(fb, Color(10, 12, 16));
+    shader.model = Mat4::rotateY(0.4f);
+    shader.mvp = shader.proj * shader.view * shader.model;
+    shader.normalMatrix = shader.model.inversed().transposed();
+    renderer.drawMesh(fb, sphere, shader);
+    const double ms3d = msSince(t3d);
+
+    const auto t2d = Clock::now();
+    Renderer2D ui;
+    ui.begin(fb);
+    ui.setBlend(BlendMode::AlphaBlend);
+    for (int i = 0; i < 20; ++i)
+    {
+        ui.setColor(Color(uint8_t(40 + i * 8), 60, uint8_t(120 - i * 4), 180));
+        ui.fillRect(20.0f + float(i % 5) * 200.0f, 20.0f + float(i / 5) * 120.0f, 180.0f, 100.0f);
+    }
+    ui.setColor(sr::colors::white);
+    for (int i = 0; i < 5; ++i)
+        ui.text(30.0f, 40.0f + float(i) * 24.0f, "FRAME BUDGET 1080p", 1.5f);
+    ui.end();
+    const double ms2d = msSince(t2d);
+
+    // FXAA 分条并行：亮度图与应用各一个并行段（与整帧 fxaa() 逐像素一致）
+    Framebuffer post(W, H);
+    ThreadPool pool;
+    const int strips = pool.threadCount();
+    std::vector<float> lumMap(size_t(W) * size_t(H));
+    const auto tPost = Clock::now();
+    auto runStrips = [&](auto&& body) {
+        for (int i = 0; i < strips; ++i)
+        {
+            const auto [y0, y1] = sr::postprocess::stripRows(H, i, strips);
+            if (y1 > y0)
+                pool.submit([&body, y0, y1] { body(y0, y1); });
+        }
+        pool.waitAll();
+    };
+    runStrips([&](int y0, int y1) { sr::postprocess::buildLuminanceMapRows(fb, lumMap, y0, y1); });
+    runStrips([&](int y0, int y1) { sr::postprocess::fxaaRows(fb, post, lumMap, y0, y1); });
+    const double msPost = msSince(tPost);
+
+    const double total = ms3d + ms2d + msPost;
+    const Color center = post.getPixel(W / 2, H / 2);
+    const bool ok = ms3d > 0.0 && ms2d > 0.0 && msPost > 0.0 && center.r + center.g + center.b > 0;
+    report("frame_budget_1080p_mt", ok, msSince(t0),
+           "3d=" + std::to_string(int(ms3d)) + "ms 2d=" + std::to_string(int(ms2d)) + "ms postMT=" +
+               std::to_string(int(msPost)) + "ms strips=" + std::to_string(strips) + " total=" +
+               std::to_string(int(total)) + "ms tris=" + std::to_string(sphere.triangleCount()));
+}
+
 // 场景注册表
 //
 // 新增场景只需：写一个 static void stress_xxx() + 在本表加一行。
@@ -4302,5 +4367,6 @@ SR_SCENARIO("cubemap_face_mapping", stress_cubemap_face_mapping, false);
 SR_SCENARIO("renderer2d_state_reset", stress_renderer2d_state_reset, false);
 SR_SCENARIO("gltf_node_hierarchy", stress_gltf_node_hierarchy, false);
 SR_SCENARIO("frame_budget_1080p", stress_frame_budget_1080p, true);
+SR_SCENARIO("frame_budget_1080p_mt", stress_frame_budget_1080p_mt, true);
 
 }  // namespace stress

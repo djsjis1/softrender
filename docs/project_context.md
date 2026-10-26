@@ -1,6 +1,6 @@
 # 项目上下文
 
-> 当前事实入口，更新于 2026-10-25（全仓缺陷修复与压测扩展完成）。历史任务中的数字与状态只描述当时情况。
+> 当前事实入口，更新于 2026-10-26（裸机支持 + ForwardPipeline 门面落地）。历史任务中的数字与状态只描述当时情况。
 > 架构见 [architecture.md](architecture.md)，当前任务见 [ACTIVE](tasks/ACTIVE.md)。
 
 SoftRenderer 是 C++23 教学型 CPU 渲染器，同时作为可被外部工程复用的渲染库发布（2.0.0）。
@@ -14,11 +14,11 @@ SoftRenderer 是 C++23 教学型 CPU 渲染器，同时作为可被外部工程�
 | 项目 | 结果 |
 | --- | --- |
 | Windows 工具链 | VS Build Tools 2022，MSVC 19.44，CMake 3.31.6 |
-| 独立工程 Release | 19 个离屏示例 + 3 个窗口示例 + 1 个练习 + 2 个测试程序 = 25 个默认可执行目标；另有两个可选基准/压测目标（`SR_BUILD_BENCHMARKS=ON`） |
-| 单元测试 | 325 用例 / 71 套件，Release 全通过；Debug（ASAN）321 通过 + 4 跳过 |
+| 独立工程 Release | 20 个离屏示例（含 `demo_forward` 统一管线演示）+ 3 个窗口示例 + 1 个练习 + 3 个测试程序 = 27 个默认可执行目标；另有两个可选基准/压测目标（`SR_BUILD_BENCHMARKS=ON`） |
+| 单元测试 | 352 用例 / 76 套件，Release 全通过；Debug（ASAN）348 通过 + 4 跳过；另有 `baremetal_smoke`（operator new 熔断下整帧零堆证明，Release+ASAN 双过） |
 | 集成测试 | 3 场景像素回归通过（PNG 基准图，比较含 alpha）；下游消费工程 2 项通过 |
-| 压测探针 | `renderer_stress` 111 个场景（敌意输入/并发/性能/像素格式）全通过；Release 全量约 9.8 s、`--quick` 90 个约 2 s；Debug+ASAN `--quick` 90/90 干净（1080p 重场景未纳入 ASAN） |
-| 架构门禁 | 逐头独立编译 + 命名空间哨兵（全局声明 60 个同名类型）+ include 白名单 + 循环依赖检查 + 当前态文档的头文件路径存在性（本机含 `.qoder/rules` 共 48 处；该目录属本机助手配置、不入库，CI 只校验仓库内文档） |
+| 压测探针 | `renderer_stress` 114 个场景（敌意输入/并发/性能/像素格式，含分条并行 MT 孪生与半分辨率 Bloom）全通过；Release 全量约 10 s、`--quick` 90 个约 2 s；Debug+ASAN `--quick` 干净（1080p 重场景未纳入 ASAN） |
+| 架构门禁 | 逐头独立编译 + 命名空间哨兵（全局声明 60 个同名类型）+ include 白名单 + 循环依赖检查 + 当前态文档的头文件路径与 README 可执行名存在性（本机含 `.qoder/rules` 共 52 处；该目录属本机助手配置、不入库，CI 只校验仓库内文档）+ 裸机头门禁 `sr_freestanding_headers_check`（`-fno-exceptions -fno-rtti` 逐头编译 core/math/render/resource/scene，GCC/Clang，待 CI Linux 首跑） |
 | 外部消费 | 聚合 / core-only / render-only 三类工程 × `add_subdirectory` 与安装后迁移 `find_package` 均通过；断言安装产物只含公共头 |
 | Debug ASAN | 单元测试与压测探针在 Debug+ASAN 下无断言、无 ASAN 报告（Debug 下四个越界/契约用例按约定 GTEST_SKIP） |
 | Linux/macOS | 远端 CI（run 40185625656，commit 833fb32）**6/6 job 全绿**：Windows/Ubuntu/macOS 三平台构建测试 + coverage + sanitizers + thread-sanitizer |
@@ -52,8 +52,18 @@ SoftRenderer 是 C++23 教学型 CPU 渲染器，同时作为可被外部工程�
 
 ## 下一步
 
-覆盖率实测（llvm-cov/gcov 任一）、三平台远端作业、clang-tidy 基线；渲染能力上阴影贴图与
-IBL 预计算尚未收敛进库。未完成的验收依赖真实运行，不得据文档宣称通过。
+更新于 2026-10-27（分条并行实测落地后）：
+
+- ~~后处理分条并行~~ **已落地并实测**：1080p 整帧 197 → 60 ms（3.3×），数字在 48 号文 §四；
+  `demo_forward` 与 `stage13` 均已展示调度器注入模式。
+- **CI 验证裸机门禁**：`baremetal` 作业已入 ci.yml，待下次 push 首跑；
+  主矩阵 Linux 构建同样编译 `sr_freestanding_headers_check`。
+- **后处理再提速**（未实施）：SSAO/Bloom/DOF 半分辨率（路线 B 剩余部分，预计再把
+  127 ms 的 Bloom 链压到约 1/4）或路线 A（主链路 SIMD，先立 ADR）。
+- **门面延伸**：`ForwardPipeline` 目前为 MVP（阴影 + 排序 + FXAA）；IBL 预计算、SSAO/Bloom
+  接入与透明层混合回调待按需补。
+- 未完成的验收依赖真实运行，不得据文档宣称通过。覆盖率/clang-tidy 基线见上方验证快照
+  （以 CI 工件为准）。
 
 ## 常用命令
 

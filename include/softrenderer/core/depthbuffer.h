@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cassert>
 #include <limits>
-#include <vector>
 
 // ============================================================
 // DepthBuffer（Z-buffer）：与 Framebuffer 同尺寸的深度图，
@@ -22,20 +21,73 @@ namespace sr
 class DepthBuffer
 {
    public:
-    // 非法尺寸统一落到 0×0：构造器与 resize 同口径。旧实现直接算 size_t(width) * height，
-    // 传负数时负数先转成 ~2^64 再相乘，在 vector 分配处抛 length_error，
+    // 非法尺寸统一落到 0×0：构造器与外部存储构造同口径。旧实现直接算 size_t(width) * height，
+    // 传负数时负数先转成 ~2^64 再相乘，在容器分配处抛 length_error，
     // 而同样是非法尺寸，调用 resize 却只是忽略——两条路径行为不一致。
     // 任一边非法就整体置空，而不是留下 0×N 这种半有效缓冲。
     DepthBuffer(int width, int height)
-        : width_(width > 0 && height > 0 ? width : 0), height_(width > 0 && height > 0 ? height : 0),
-          depth_(size_t(width_) * size_t(height_), kFar)
+        : width_(width > 0 && height > 0 ? width : 0),
+          height_(width > 0 && height > 0 ? height : 0), depth_(nullptr), owns_(true)
     {
+        const size_t n = size_t(width_) * size_t(height_);
+        depth_ = new float[n];
+        std::fill(depth_, depth_ + n, kFar);
+    }
+
+    // 外部存储（非拥有）：裸机/嵌入式把深度数组放进静态内存、内存池或
+    // 指定 RAM 段，构造路径不经堆。storage 必须能容纳 width*height 个
+    // float（4 字节对齐天然满足），且生命周期覆盖本对象。
+    // 不做任何填充：初始内容由调用方随后 clear() 决定。
+    DepthBuffer(int width, int height, float* storage)
+        : width_(width > 0 && height > 0 ? width : 0),
+          height_(width > 0 && height > 0 ? height : 0), depth_(storage), owns_(false)
+    {
+        assert(width > 0 && height > 0);
+        assert(storage != nullptr);
+    }
+
+    ~DepthBuffer()
+    {
+        if (owns_)
+            delete[] depth_;
+    }
+
+    // 存储从 std::vector 换成裸指针后不再有深拷贝语义：禁止拷贝，
+    // 允许移动（FloatFramebuffer::resize 依赖移动赋值转移存储）。
+    DepthBuffer(const DepthBuffer&) = delete;
+    DepthBuffer& operator=(const DepthBuffer&) = delete;
+    DepthBuffer(DepthBuffer&& other) noexcept
+        : width_(other.width_), height_(other.height_), depth_(other.depth_), owns_(other.owns_)
+    {
+        other.width_ = other.height_ = 0;
+        other.depth_ = nullptr;
+        other.owns_ = false;
+    }
+    DepthBuffer& operator=(DepthBuffer&& other) noexcept
+    {
+        if (this != &other)
+        {
+            if (owns_)
+                delete[] depth_;
+            width_ = other.width_;
+            height_ = other.height_;
+            depth_ = other.depth_;
+            owns_ = other.owns_;
+            other.width_ = other.height_ = 0;
+            other.depth_ = nullptr;
+            other.owns_ = false;
+        }
+        return *this;
     }
 
     int width() const { return width_; }
     int height() const { return height_; }
 
-    void clear(float v = kFar) { std::fill(depth_.begin(), depth_.end(), v); }
+    void clear(float v = kFar)
+    {
+        const size_t n = size_t(width_) * size_t(height_);
+        std::fill(depth_, depth_ + n, v);
+    }
 
     // 深度测试 + 更新：若 z 更近则写入并返回 true（应绘制该像素）
     bool testAndSet(int x, int y, float z)
@@ -59,7 +111,7 @@ class DepthBuffer
     float* row(int y)
     {
         assert(y >= 0 && y < height_);
-        return depth_.data() + size_t(y) * width_;
+        return depth_ + size_t(y) * width_;
     }
 
     // 读一个深度值。越界返回 kFar。
@@ -85,7 +137,9 @@ class DepthBuffer
 
    private:
     int width_, height_;
-    std::vector<float> depth_;
+    float* depth_;
+    // true = 构造时自行分配并在析构释放；false = 外部存储，析构不释放。
+    bool owns_;
 };
 
 }  // namespace sr

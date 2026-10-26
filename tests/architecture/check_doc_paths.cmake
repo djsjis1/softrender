@@ -85,6 +85,47 @@ foreach(doc IN LISTS DOC_FILES)
     endforeach()
 endforeach()
 
+# ---- README 可执行名校验 ----
+# 与头路径同类的历史问题：README 引用的示例可执行名（stage4_zbuffer.exe 等）
+# 与实际目标名脱节。目标名的唯一来源是 examples/CMakeLists.txt —— 两种定义
+# 形态都要识别：sr_add_example(<literal>) 直呼，以及
+# foreach(name IN ITEMS a b c) + sr_add_example(${name}) 循环。
+# practice 目标由文件名自动生成，按 practice_ 前缀放行。
+set(SR_README "${SR_SOURCE_DIR}/README.md")
+set(SR_EXAMPLES_CMAKE "${SR_SOURCE_DIR}/examples/CMakeLists.txt")
+if(EXISTS "${SR_README}" AND EXISTS "${SR_EXAMPLES_CMAKE}")
+    file(READ "${SR_README}" sr_readme)
+    file(READ "${SR_EXAMPLES_CMAKE}" sr_examples_cmake)
+    set(SR_EXE_NAMES "")
+    # 直呼形态
+    string(REGEX MATCHALL "sr_add_example\\(([a-zA-Z0-9_]+)\\)" _sr_example_hits "${sr_examples_cmake}")
+    foreach(_h IN LISTS _sr_example_hits)
+        string(REGEX REPLACE "sr_add_example\\(([a-zA-Z0-9_]+)\\)" "\\1" _name "${_h}")
+        if(NOT _name STREQUAL "name") # 循环形态的 ${name} 占位，跳过
+            list(APPEND SR_EXE_NAMES "${_name}")
+        endif()
+    endforeach()
+    # foreach(name IN ITEMS ...) 形态：收集所有 ITEMS 列表里的标识符
+    string(REGEX MATCHALL "IN ITEMS[ \t\r\n]*[^)]*" _sr_item_blocks "${sr_examples_cmake}")
+    foreach(_block IN LISTS _sr_item_blocks)
+        string(REGEX MATCHALL "[a-zA-Z0-9_]+" _items "${_block}")
+        list(REMOVE_ITEM _items "IN" "ITEMS" "name")
+        list(APPEND SR_EXE_NAMES ${_items})
+    endforeach()
+    string(REGEX MATCHALL "[A-Za-z0-9_]+\\.exe" _sr_readme_exes "${sr_readme}")
+    foreach(_exe IN LISTS _sr_readme_exes)
+        string(REGEX REPLACE "\\.exe$" "" _name "${_exe}")
+        if(_name MATCHES "^practice_")
+            continue()
+        endif()
+        list(FIND SR_EXE_NAMES "${_name}" _idx)
+        math(EXPR CHECKED "${CHECKED} + 1")
+        if(_idx EQUAL -1)
+            list(APPEND FAILURES "README.md: 可执行目标不存在: ${_exe}")
+        endif()
+    endforeach()
+endif()
+
 if(FAILURES)
     string(REPLACE ";" "\n  " report "${FAILURES}")
     message(FATAL_ERROR
@@ -93,4 +134,4 @@ if(FAILURES)
         "若确属历史记录，请移到 changelog / tasks/DONE 而不是写在当前态文档里。")
 endif()
 
-message(STATUS "Doc paths OK (${CHECKED} header references verified)")
+message(STATUS "Doc paths OK (${CHECKED} references verified)")

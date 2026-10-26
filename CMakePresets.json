@@ -1,0 +1,80 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Visual Studio 17 2022",
+      "architecture": { "value": "x64", "strategy": "set" },
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "default",
+      "displayName": "默认（全量：示例+练习+测试）",
+      "inherits": "base"
+    },
+    {
+      "name": "release-core",
+      "displayName": "仅核心组件（core/render/scene，下游子项目视角）",
+      "inherits": "base",
+      "cacheVariables": {
+        "SR_BUILD_EXAMPLES": "OFF",
+        "SR_BUILD_PRACTICE": "OFF",
+        "SR_BUILD_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "baremetal",
+      "displayName": "裸机模式（无异常/RTTI，仅核心组件）",
+      "inherits": "base",
+      "cacheVariables": {
+        "SR_NO_EXCEPTIONS": "ON"
+      }
+    },
+    {
+      "name": "linux-default",
+      "displayName": "Linux（Ninja 单配置）",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "linux-baremetal",
+      "displayName": "Linux 裸机模式（执行 -fno-exceptions 头门禁）",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SR_NO_EXCEPTIONS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "default", "configurePreset": "default", "configuration": "Release" },
+    { "name": "release-core", "configurePreset": "release-core", "configuration": "Release" },
+    { "name": "baremetal", "configurePreset": "baremetal", "configuration": "Release" },
+    { "name": "linux-default", "configurePreset": "linux-default" },
+    { "name": "linux-baremetal", "configurePreset": "linux-baremetal" }
+  ],
+  "testPresets": [
+    {
+      "name": "default",
+      "configurePreset": "default",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true },
+      "filter": { "include": { "label": "fast|regression" } }
+    },
+    {
+      "name": "full",
+      "configurePreset": "default",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

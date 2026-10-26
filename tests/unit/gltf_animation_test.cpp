@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -124,12 +125,11 @@ TEST(GltfAnimation, samplesAfterLoaderReturned)
     namespace fs = std::filesystem;
     const fs::path file = fs::temp_directory_path() / "sr_anim_after_load.gltf";
     {
-        std::FILE *fp = std::fopen(file.string().c_str(), "wb");
-        ASSERT_NE(fp, nullptr) << "无法写入临时 glTF";
         const std::string json = buildAnimatedGltfJson();
-        const size_t written = std::fwrite(json.data(), 1, json.size(), fp);
-        std::fclose(fp);
-        ASSERT_EQ(written, json.size());
+        std::ofstream out(file, std::ios::binary | std::ios::trunc);
+        ASSERT_TRUE(out.is_open()) << "无法写入临时 glTF";
+        out.write(json.data(), std::streamsize(json.size()));
+        ASSERT_TRUE(out.good());
     }
 
     SceneAsset asset;
