@@ -160,7 +160,9 @@ jobs:
           -DSR_ENABLE_SANITIZERS=ON -DSR_BUILD_BENCHMARKS=ON
           -DSR_BUILD_EXAMPLES=OFF -DSR_BUILD_PRACTICE=OFF
       - name: Build tests and stress probe
-        run: cmake --build build-asan --parallel 2 --target unit_tests render_regression renderer_stress
+        # baremetal_smoke 必须一起构建：它注册在 fast 标签，下面的 ctest 会发现它，
+        # 缺产物会以 Not Run 失败。ASAN + operator new 熔断是零堆证明的双保险。
+        run: cmake --build build-asan --parallel 2 --target unit_tests render_regression renderer_stress baremetal_smoke
       - name: Run stress probe under ASAN
         # 同一套敌意输入在 ASAN 下跑一遍：零法线/越界写这类问题
         # 在 Release 下只表现为“颜色不对”，在这里会直接报错。
