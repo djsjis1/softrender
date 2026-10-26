@@ -18,7 +18,7 @@ SoftRenderer 是 C++23 教学型 CPU 渲染器，同时作为可被外部工程�
 | 单元测试 | 325 用例 / 71 套件，Release 全通过；Debug（ASAN）321 通过 + 4 跳过 |
 | 集成测试 | 3 场景像素回归通过（PNG 基准图，比较含 alpha）；下游消费工程 2 项通过 |
 | 压测探针 | `renderer_stress` 111 个场景（敌意输入/并发/性能/像素格式）全通过；Release 全量约 9.8 s、`--quick` 90 个约 2 s；Debug+ASAN `--quick` 90/90 干净（1080p 重场景未纳入 ASAN） |
-| 架构门禁 | 逐头独立编译 + 命名空间哨兵（全局声明 60 个同名类型）+ include 白名单 + 循环依赖检查 + 当前态文档里的 48 处头文件路径存在性 |
+| 架构门禁 | 逐头独立编译 + 命名空间哨兵（全局声明 60 个同名类型）+ include 白名单 + 循环依赖检查 + 当前态文档的头文件路径存在性（本机含 `.qoder/rules` 共 48 处；该目录属本机助手配置、不入库，CI 只校验仓库内文档） |
 | 外部消费 | 聚合 / core-only / render-only 三类工程 × `add_subdirectory` 与安装后迁移 `find_package` 均通过；断言安装产物只含公共头 |
 | Debug ASAN | 单元测试与压测探针在 Debug+ASAN 下无断言、无 ASAN 报告（Debug 下四个越界/契约用例按约定 GTEST_SKIP） |
 | Linux/macOS | 远端 CI（run 40185625656，commit 833fb32）**6/6 job 全绿**：Windows/Ubuntu/macOS 三平台构建测试 + coverage + sanitizers + thread-sanitizer |
