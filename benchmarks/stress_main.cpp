@@ -163,8 +163,18 @@ int main(int argc, char** argv)
     }
 
     std::printf("--------------------------------------------------------------------------\n");
-    std::printf("failures=%d  regressions=%d  scenarios=%zu/%zu  total=%.1f s\n", stress::g_failures,
-                stress::g_regressions, ran, scenarios.size(), stress::msSince(stress::g_start) / 1000.0);
+    if (stress::g_baseline.empty())
+    {
+        // 没给 --baseline 时这个计数器恒为 0。直接打 “regressions=0” 会让人（和 CI 日志的
+        // 阅读者）以为做过性能对比——那是假信号。这里显式写成 n/a。
+        std::printf("failures=%d  regressions=n/a（未指定 --baseline，未做性能对比）  scenarios=%zu/%zu  total=%.1f s\n",
+                    stress::g_failures, ran, scenarios.size(), stress::msSince(stress::g_start) / 1000.0);
+    }
+    else
+    {
+        std::printf("failures=%d  regressions=%d  scenarios=%zu/%zu  total=%.1f s\n", stress::g_failures,
+                    stress::g_regressions, ran, scenarios.size(), stress::msSince(stress::g_start) / 1000.0);
+    }
 
     if (!jsonPath.empty())
     {

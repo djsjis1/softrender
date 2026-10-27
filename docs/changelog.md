@@ -39,6 +39,16 @@
 - 验证：用 Git 自带的 sed/awk 复刻判定逻辑跑五个分支——持平通过、行掉 0.1 失败、
   函数掉 0.1 失败、高于基线通过、摘要不可解析失败。
 
+### 门禁自查：把“看起来在查”的检查改硬
+
+- 头注释路径扫描此前只 `message(STATUS)` 汇总、从不失败——等于没有门禁。已并入
+  `FAILURES`；转硬的第一次运行就抓到一条真实残留（`forward_pipeline.h` 注释里的
+  `pipeline/shader.h` 应为 `render/pipeline/shader.h`）。
+- 压测摘要在没给 `--baseline` 时恒打印 `regressions=0`，会被读成“做过性能对比”。
+  改为 `regressions=n/a（未指定 --baseline，未做性能对比）`。
+- 由此明确的现状：CI 的 `renderer_stress` 步骤不传基线，**CI 不判定性能退化**；
+  性能对比只在本地手动 `--baseline` 时发生。此前从输出上分不出来。
+
 ## 2026-10-27（结构改进：IO 契约、early-z 门禁、视锥剔除、主循环收敛）
 
 ### 四项结构性改进

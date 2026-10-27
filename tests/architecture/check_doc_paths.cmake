@@ -92,6 +92,9 @@ endforeach()
 # 头注释里也可能合法提到历史路径，所以先只汇总打印；确认零误报后再把
 # SR_HEADER_MISSES 并入 FAILURES 并删掉这段说明。
 #
+# 【已并入】真实树连续多轮为 0 命中（含 .hpp 与大写路径），因此已转为硬门禁。
+# 之前“只报告”的版本等于没门禁——这类“看起来在查但永远不失败”的检查比没有更差。
+#
 # 头文件本身也要把 .hpp 纳入扫描范围：将来新增的 .hpp 公共头若只扫 *.h，
 # 它的注释就完全无人校验。
 file(GLOB_RECURSE SR_PUBLIC_HEADERS
@@ -140,9 +143,8 @@ foreach(hdr IN LISTS SR_PUBLIC_HEADERS)
     endforeach()
 endforeach()
 if(SR_HEADER_MISSES)
-    string(REPLACE ";" "\n  " sr_header_report "${SR_HEADER_MISSES}")
-    message(STATUS
-        "公共头注释引用了不存在的路径（当前只报告，不判定失败）：\n  ${sr_header_report}")
+    # 与文档同口径：真错就失败。
+    list(APPEND FAILURES ${SR_HEADER_MISSES})
 else()
     message(STATUS "Public header path references OK (${SR_HEADER_CHECKED} verified)")
 endif()
@@ -191,8 +193,8 @@ endif()
 if(FAILURES)
     string(REPLACE ";" "\n  " report "${FAILURES}")
     message(FATAL_ERROR
-        "Documentation references non-existent headers:\n  ${report}\n"
-        "修正方式：把路径改成实际存在的头，或从文档中删掉该条；"
+        "文档/头注释引用了不存在的头文件路径：\n  ${report}\n"
+        "修正方式：把路径改成实际存在的头，或从文档/注释中删掉该条；"
         "若确属历史记录，请移到 changelog / tasks/DONE 而不是写在当前态文档里。")
 endif()
 

@@ -185,7 +185,7 @@ class ForwardPipeline
    private:
     // 整块网格是否可能可见。空网格（没有顶点）一律放行，交给 drawMesh 自己处理。
     // 判定矩阵取 viewProj * draw.model，不读 shader 里的 matrix：
-    // 基类 Shader 刻意不带 uniform（见 pipeline/shader.h 的设计说明）。
+    // 基类 Shader 刻意不带 uniform（见 render/pipeline/shader.h 的设计说明）。
     static bool isMeshVisible(const ForwardDraw& draw, const Mat4& viewProj)
     {
         const Mesh::Bounds& b = draw.mesh->bounds();
