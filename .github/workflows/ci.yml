@@ -279,19 +279,23 @@ jobs:
         # --ignore-errors 必需：lcov 2.x 对未使用、空数据、版本不一致等
         # 情形默认报错退出，而这些在 header-only 项目里很常见
         # （大量 inline 函数在某些编译单元里未实例化）。
+        #
+        # negative 单列：GCC 13 的 gcov 对 std::function 等模板实例偶尔产出负计数，
+        # geninfo 会在**系统头** /usr/include/c++/13/... 上报错退出（实测见 run 40498731009）。
+        # 系统头本来就在下一步 extract 里被排除，这里补上负计数容忍不影响统计口径。
         run: |
           lcov --capture --directory build-cov --output-file coverage.info \
-               --ignore-errors mismatch,unused,empty,inconsistent,corrupt
+               --ignore-errors negative,mismatch,unused,empty,inconsistent,corrupt
           # 只统计自有代码：公共头 include/softrenderer 与私有实现 src/
           # （排除系统头、第三方库、测试代码本身、构建目录）
           lcov --extract coverage.info "${GITHUB_WORKSPACE}/include/softrenderer/*" \
                "${GITHUB_WORKSPACE}/src/*" \
                --output-file coverage-src.info \
-               --ignore-errors mismatch,unused,empty,inconsistent
+               --ignore-errors negative,mismatch,unused,empty,inconsistent
           echo "===== 覆盖率基线（include/softrenderer + src）====="
-          lcov --summary coverage-src.info --ignore-errors mismatch,unused,empty
+          lcov --summary coverage-src.info --ignore-errors negative,mismatch,unused,empty
           genhtml coverage-src.info --output-directory coverage-report \
-                  --ignore-errors mismatch,unused,empty,inconsistent,source
+                  --ignore-errors negative,mismatch,unused,empty,inconsistent,source
 
       - name: Upload coverage report
         if: always()

@@ -5,6 +5,18 @@
 > 按 `documentation_rules.md` 要求，每次有意义的变更都必须在此登记。
 > 重大接口变更需同时在变更内容中标注版本号。
 
+## 2026-10-28（CI 覆盖率作业修复）
+
+### coverage 补 negative 容忍，修掉间歇性红灯
+
+- `Collect coverage` 步骤在 GCC 13 下会因 gcov 对 `std::function` 等模板实例产出负计数
+  而报错退出：`geninfo: ERROR: Unexpected negative count '-1' for
+  /usr/include/c++/13/bits/std_function.h:200`（实测 run 40498731009：该次除 coverage
+  外 6 个作业全绿，且改动仅为文档）。
+- 修法：`lcov --capture` / `--extract` / `--summary` 与 `genhtml` 的 `--ignore-errors`
+  统一补上 `negative`。系统头本就在 extract 阶段被排除，不影响统计口径。
+- 定位口径：这是 CI 稳健性问题，不是覆盖率下降——#26（`2accb83`）的 coverage 本就通过。
+
 ## 2026-10-27（结构改进：IO 契约、early-z 门禁、视锥剔除、主循环收敛）
 
 ### 四项结构性改进
