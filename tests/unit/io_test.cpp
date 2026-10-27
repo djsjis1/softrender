@@ -87,6 +87,7 @@ TEST(ObjLoader, RejectsOutOfRangeVertexIndex)
     {
         std::ofstream out(tmp);
         out << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 99\n";
+        ASSERT_TRUE(out) << "无法写入临时夹具：" << tmp.string();
     }
 
     Mesh mesh;
@@ -106,6 +107,7 @@ TEST(ObjLoader, RejectsNonFiniteVertices)
     {
         std::ofstream out(tmp);
         out << "v nan inf 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+        ASSERT_TRUE(out) << "无法写入临时夹具：" << tmp.string();
     }
 
     Mesh mesh;
@@ -125,6 +127,7 @@ TEST(ObjLoader, AcceptsValidTriangle)
     {
         std::ofstream out(tmp);
         out << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+        ASSERT_TRUE(out) << "无法写入临时夹具：" << tmp.string();
     }
 
     Mesh mesh;
@@ -156,6 +159,7 @@ TEST(TgaLoader, oversizedHeader_rejectedWithoutLargeAllocation)
     {
         std::ofstream out(tmp, std::ios::binary);
         out.write(reinterpret_cast<const char*>(data.data()), std::streamsize(data.size()));
+        ASSERT_TRUE(out) << "无法写入临时夹具：" << tmp.string();
     }
 
     sr::Image img;
@@ -185,6 +189,7 @@ TEST(TgaLoader, rle24_decodesBgrToRgbaWithBottomOrigin)
     {
         std::ofstream out(tmp, std::ios::binary);
         out.write(reinterpret_cast<const char*>(data.data()), std::streamsize(data.size()));
+        ASSERT_TRUE(out) << "无法写入临时夹具：" << tmp.string();
     }
 
     sr::Image img;
@@ -233,6 +238,7 @@ TEST(IoErrorContract, failureFillsLocatableReasonAndSuccessClearsIt)
     {
         std::ofstream out(textPath);
         out << "not an image\n";
+        ASSERT_TRUE(out) << "无法写入临时夹具：" << textPath.string();
     }
     ASSERT_FALSE(sr::io::loadImage(textPath.string(), img, &error));
     EXPECT_NE(error.find("sr_error_contract.txt"), std::string::npos) << error;

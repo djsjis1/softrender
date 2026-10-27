@@ -48,6 +48,12 @@
   改为 `regressions=n/a（未指定 --baseline，未做性能对比）`。
 - 由此明确的现状：CI 的 `renderer_stress` 步骤不传基线，**CI 不判定性能退化**；
   性能对比只在本地手动 `--baseline` 时发生。此前从输出上分不出来。
+- `io_test.cpp` 的 6 处临时夹具写入不检查流状态：其中 4 处用例是“期望加载失败”，
+  写失败会退化成“文件不存在 → 加载失败 → 用例通过”的假绿。已统一补 `ASSERT_TRUE(out)`。
+- 完整核对结论：`check_boundaries` / `public_headers_check` / `namespace_sentinel` /
+  freestanding 逐头编译 / throw 扫描 / coverage 棘轮 / `baremetal_smoke` /
+  `render_regression` 均为硬失败（FATAL_ERROR、编译失败或非零退出码）；
+  近 12 个提交里被删掉的断言共 3 处，逐个核对后均非弱化。
 
 ## 2026-10-27（结构改进：IO 契约、early-z 门禁、视锥剔除、主循环收敛）
 
