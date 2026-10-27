@@ -10,7 +10,7 @@ jobs:
   build-and-test:
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        os: [windows-latest, ubuntu-24.04, macos-latest]
         build_type: [Release]
       fail-fast: false
 
@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: false
 
@@ -143,17 +143,17 @@ jobs:
 
       - name: Upload Artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: output-${{ matrix.os }}
           path: output/
           if-no-files-found: ignore
 
   sanitizers:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Configure Debug sanitizers
         run: >
           cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug
@@ -177,10 +177,10 @@ jobs:
         run: ctest --test-dir build-asan -C Debug -L 'fast|regression' --output-on-failure
 
   thread-sanitizer:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Configure independent ThreadSanitizer build
         # TSAN must not be combined with ASAN. Both library and tests are instrumented.
         run: >
@@ -207,10 +207,10 @@ jobs:
   #      安装产物只含 core/render/scene（+可选 entt）。
   # ============================================================
   baremetal:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Configure baremetal (no exceptions / no RTTI)
         run: cmake -S . -B build-baremetal -DSR_NO_EXCEPTIONS=ON
       - name: Build core components and freestanding header gate
@@ -240,11 +240,11 @@ jobs:
   # docs/changelog.md，下一轮再启用棘轮式门禁（不允许下降）。
   # ============================================================
   coverage:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: false
 
@@ -295,7 +295,7 @@ jobs:
 
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: coverage-report
           path: coverage-report/
