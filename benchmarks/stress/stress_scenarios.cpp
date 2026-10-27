@@ -2932,22 +2932,32 @@ static void stress_render_multithreaded()
         return msSince(start);
     };
 
-    const double singleMs = renderBatches(1);
-    const double parallelMs = renderBatches(4);
-    // 4 线程各自完成与单线程相同的一批，总工作量是 4 倍：
-    // speedup = (单线程一批耗时 × 4) / 4 线程并行耗时。
-    const double speedup = parallelMs > 0.0 ? singleMs * 4.0 / parallelMs : 0.0;
-    // 4 核下应接近 4；低于 2 说明存在串行化热点（全局锁 / 共享分配器）。
-    //
-    // 【为什么要按核数分支】2.0× 只有在机器真能同时跑 4 个线程时才有意义。
-    // CI runner 实测会给到 2 核，那里 4 线程的加速比天然上不去（macOS runner
-    // 实测 1.91×），旧写法会把这个环境差异判成库的串行化缺陷。
-    // 有 4 个以上硬件线程时才断言 2.0×，否则只要求"并行确实没比串行更慢"。
+    // 【线程数跟着核数走】CI runner 的核数不固定（实测 ubuntu/windows 给 4+，
+    // macOS 只给 3）。固定开 4 线程在 3 核上会过订阅，测出的“加速比”可能小于 1
+    // （实测 speedup=0.97，run 40546141789），那是环境而不是库的串行化缺陷。
+    // 按核数取线程数（上限 4）后，再要求加速比与线程数相称：
+    //   4 线程 > 2.0（4 核下应接近 4，低于 2 说明有全局锁/共享分配器）；
+    //   2~3 线程 > 1.0（真并行就该比串行快，但余量不如 4 核，不苛求）；
+    //   不足 2 线程时无法测并行性，只报数不判定。
     const unsigned hwThreads = std::thread::hardware_concurrency();
-    const bool ok = std::isfinite(speedup) && (hwThreads >= 4 ? speedup > 2.0 : speedup > 1.0);
+    const int threads = int(hwThreads == 0 ? 1u : std::min(hwThreads, 4u));
+
+    const double singleMs = renderBatches(1);
+    const double parallelMs = renderBatches(threads);
+    // 并行侧完成了与单线程同量的 threads 份工作：
+    // speedup = (单线程一批耗时 × threads) / threads 线程并行耗时。
+    const double speedup = parallelMs > 0.0 ? singleMs * double(threads) / parallelMs : 0.0;
+
+    bool ok = std::isfinite(speedup);
+    if (threads >= 4)
+        ok = ok && speedup > 2.0;
+    else if (threads >= 2)
+        ok = ok && speedup > 1.0;
+
     report("render_multithreaded", ok, msSince(t0),
-           "single=" + std::to_string(int(singleMs)) + "ms x4=" + std::to_string(int(parallelMs)) +
-               "ms speedup=" + std::to_string(speedup) + " hw=" + std::to_string(hwThreads));
+           "single=" + std::to_string(int(singleMs)) + "ms x" + std::to_string(threads) + "=" +
+               std::to_string(int(parallelMs)) + "ms speedup=" + std::to_string(speedup) +
+               " hw=" + std::to_string(hwThreads));
 }
 
 // ---------------------------------------------------------------- 78
