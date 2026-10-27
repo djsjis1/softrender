@@ -5,6 +5,18 @@
 > 按 `documentation_rules.md` 要求，每次有意义的变更都必须在此登记。
 > 重大接口变更需同时在变更内容中标注版本号。
 
+## 2026-10-27（CI 基础设施）
+
+### Action 升级到 Node 24 运行时，并固定 Ubuntu runner 版本
+
+- `actions/checkout` v4 → v5、`actions/upload-artifact` v4 → v6：清掉 Node.js 20
+  弃用告警。`upload-artifact` 必须直接跳到 **v6**——v5 只是“初步支持 Node 24、
+  默认仍跑 node20”，升到 v5 后作业注解依旧报 Node 20（run 40458054551 实测）。
+- `ubuntu-latest` → `ubuntu-24.04`（matrix 1 处 + `runs-on` 4 处）：runner 镜像自
+  2026-10-19 起迁移 Ubuntu 26，固定版本避免 gcov/lcov 与 ASAN/UBSAN 行为随镜像漂移。
+- 验证：CI #23（`e3ab729`）与 #24（`21b249f`）均 7/7 成功；#24 的作业注解降为 0，
+  仅剩 macOS arm64 的 runner 容量提示（无配置项可改）。
+
 ## 2026-10-27（深夜·审查整改）
 
 ### 审查整改：裸机 throw 破口闭环、冗余清理与两处热路径
