@@ -14,7 +14,7 @@
 // 不发布半成品（见 ADR-002）。是否打印日志由调用方决定。
 //
 // 【实现】src/io/gltf_loader.cpp（解析 + 转换）与
-// src/io/gltf_loader_impl.cpp（tinygltf 实现宏），文字加载器编入
+// src/io/tinygltf_impl.cpp（tinygltf 实现宏），实现编入
 // SoftRenderer::io 静态库。核心渲染层不需要链接它。
 //
 // 用法：

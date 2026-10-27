@@ -4,7 +4,11 @@
  *
  * alloc / allocArray 返回未构造的存储；无效参数或长度溢出返回 nullptr。
  * 真正的内存分配失败沿用标准库的 std::bad_alloc；不执行对象析构。
- * 每个线程独立持有一个实例，或使用 frameArena() 后显式调用 reset()。
+ *
+ * 【定位】这是**宿主侧**的帧分配器：内部经 new / std::vector 取块，因此本身
+ * 依赖堆，并不是裸机零堆方案。裸机要「帧内存放指定地址」请用渲染目标的
+ * 外部存储构造（Framebuffer / DepthBuffer / FloatFramebuffer 均已提供）。
+ * 它也不提供每线程全局实例——需要时由调用方自己持有并在帧末 reset()。
  */
 #pragma once
 #include <algorithm>
@@ -125,11 +129,4 @@ class ArenaAllocator
     size_t used_ = 0;
     size_t capacity_ = 0;
 };
-
-/** @brief 获取当前线程的帧分配器；调用方必须在帧末显式 reset。 */
-inline ArenaAllocator& frameArena()
-{
-    thread_local ArenaAllocator arena(2 * 1024 * 1024);
-    return arena;
-}
 } // namespace sr

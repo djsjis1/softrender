@@ -25,7 +25,7 @@
 // 参考：LearnOpenGL Deferred Shading、Filament 的 FrameGraph。
 //
 // 【命名空间】GBuffer 及本文件的延迟光照自由函数已迁入 namespace sr
-// （ADR-001 第 2 批）。实测引用面：仅本文件 + tests/test_core.cpp，故不留全局别名。
+// （ADR-001 第 2 批）。引用面：单测与延迟渲染示例，故不留全局别名。
 // ============================================================
 
 namespace sr

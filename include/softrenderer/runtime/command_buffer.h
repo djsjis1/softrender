@@ -29,7 +29,9 @@
 // 注意：命令必须使用不重叠存储或显式同步；不同物体仍可能竞争同一 framebuffer。
 //
 // 【命名空间】CommandBuffer 与 ThreadPool 已迁入 namespace sr（ADR-001 第 2 批）。
-// 引用方：仅 tests/test_core.cpp（stage12_threaded 用自己的 std::thread 分条）。
+// 引用方：tests/unit/{runtime,command_buffer}_test.cpp、benchmarks/stress/
+// stress_scenarios.cpp、tests/integration/consumer/main.cpp。3D 分条并行由
+// examples/stage14_threaded.cpp 自己的 std::thread 实现，不用本类。
 // ============================================================
 
 namespace sr {

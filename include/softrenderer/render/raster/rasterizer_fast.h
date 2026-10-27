@@ -4,8 +4,8 @@
 // 实验性光栅化器：增量式边函数 + SSE2 四像素并行
 //
 // 【定位：技术验证 / 基准测试用，未接入 Renderer 主渲染链路】
-//   全仓引用方只有 core/benchmark.h 与单元测试，Renderer::rasterTriangle
-//   走的是自己的一套增量边函数实现。不接入的两个原因：
+//   全仓引用方只有 benchmarks/support/benchmark.h、压测探针与单元测试，
+//   Renderer::rasterTriangle 走的是自己的一套增量边函数实现。不接入的两个原因：
 //     1. 像素写入用 zb.testAndSet + fb.setPixel，两者各做一次边界检查；
 //        而 renderer.h 用 fb.row(y) / zbuf_.row(y) 行指针直写，完全免检。
 //        本模块在写入路径上反而更慢。
@@ -27,6 +27,11 @@
 // 一次处理 4 个连续 x 像素：用 __m128i 维护 3 条边的整数 E 值，
 // 用 int64 子像素边和符号位掩码，一次判断 4 像素内外。
 // 对内部像素批量插值深度/属性。
+// <emmintrin.h> 与 __m128i 只出现在 x86 的 SSE2 分支，其他平台只编译标量版。
+//
+// 【能力查询】SR_RASTER_SSE2_ENABLED 是公开的自描述宏：1 = 本次编译启用了
+// SSE2 分支（fillTriangleSSE2 可用），0 = 只编译了标量增量版本。调用方与
+// 测试用它区分两条路径，以免写成“实际只跑了标量版却以为测过 SIMD”。
 //
 // 参考：Mesa llvmpipe 的 tile 光栅化、Fabian Giesen 的系列博客。
 // ============================================================
@@ -41,10 +46,10 @@
 #include "softrenderer/render/raster/coverage.h"
 
 #if defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
-#    define SR_HAS_SSE2 1
+#    define SR_RASTER_SSE2_ENABLED 1
 #    include <emmintrin.h>
 #else
-#    define SR_HAS_SSE2 0
+#    define SR_RASTER_SSE2_ENABLED 0
 #endif
 
 namespace sr::raster {
@@ -161,7 +166,7 @@ inline void fillTriangleIncremental(FB& fb, DepthBuffer& zb, const Vec2f& v0, co
     }
 }
 
-#if SR_HAS_SSE2
+#if SR_RASTER_SSE2_ENABLED
 // SSE2 每组四像素，以两个 int64 二元组计算确定性的覆盖掩码。
 // 与标量版同样接受任意 BasicFramebuffer<PixelT>。
 template <class FB>
@@ -227,14 +232,14 @@ inline void fillTriangleSSE2(FB& fb, DepthBuffer& zb, const Vec2f& v0, const Vec
     }
 }
 
-#endif  // SR_HAS_SSE2
+#endif  // SR_RASTER_SSE2_ENABLED
 
 // 统一入口：有 SSE2 用 SSE2，否则用标量增量
 template <class FB>
 inline void fillTriangleFast(FB& fb, DepthBuffer& zb, const Vec2f& v0, const Vec2f& v1, const Vec2f& v2,
                              float z0, float z1, float z2, Color color)
 {
-#if SR_HAS_SSE2
+#if SR_RASTER_SSE2_ENABLED
     fillTriangleSSE2(fb, zb, v0, v1, v2, z0, z1, z2, color);
 #else
     fillTriangleIncremental(fb, zb, v0, v1, v2, z0, z1, z2, color);

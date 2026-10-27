@@ -362,7 +362,7 @@ TEST(RasterizerFast, SSE2MatchesScalar)
     DepthBuffer zb1(64, 64), zb2(64, 64);
     Vec2f v0{10, 5}, v1{55, 10}, v2{30, 58};
     raster::fillTriangleIncremental(fb1, zb1, v0, v1, v2, 0.5f, 0.5f, 0.5f, Color(200, 100, 50));
-#if SR_HAS_SSE2
+#if SR_RASTER_SSE2_ENABLED
     raster::fillTriangleSSE2(fb2, zb2, v0, v1, v2, 0.5f, 0.5f, 0.5f, Color(200, 100, 50));
 #else
     raster::fillTriangleIncremental(fb2, zb2, v0, v1, v2, 0.5f, 0.5f, 0.5f, Color(200, 100, 50));
@@ -492,7 +492,7 @@ TEST(RasterizerFast, fillTriangleSSE2_slopeDepthMatchesScalar)
     constexpr float z0 = 0.15f, z1 = 0.55f, z2 = 0.85f;
 
     raster::fillTriangleIncremental(fb1, zb1, v0, v1, v2, z0, z1, z2, Color(200, 100, 50));
-#if SR_HAS_SSE2
+#if SR_RASTER_SSE2_ENABLED
     raster::fillTriangleSSE2(fb2, zb2, v0, v1, v2, z0, z1, z2, Color(200, 100, 50));
 #else
     raster::fillTriangleIncremental(fb2, zb2, v0, v1, v2, z0, z1, z2, Color(200, 100, 50));

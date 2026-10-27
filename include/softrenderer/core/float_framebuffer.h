@@ -22,7 +22,8 @@
 // resize 到不同尺寸是空操作（自分配版本才允许重建）。
 //
 // 【命名空间】FloatFramebuffer 已迁入 namespace sr（ADR-001 第 2 批）。
-// 引用方：post_effects.h、gbuffer.h、demo_stars.cpp、stage11_postprocess.cpp。
+// 引用方：render/postprocess/post_processing.h、core/gbuffer.h（深度共用约定）、
+// examples/{demo_stars,stage13_postprocess}.cpp。
 // ============================================================
 
 namespace sr

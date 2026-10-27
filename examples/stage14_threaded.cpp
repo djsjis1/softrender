@@ -2,9 +2,11 @@
 // 阶段 14：多线程并行光栅化
 //
 // 【源码阅读】先读这些文件：
-//   core/command_buffer.h    — 命令缓冲录制与回放
-//   core/profiler.h          — RAII 计时
-//   raster/renderer.h        — Renderer::rasterTriangle（单线程版）
+//   runtime/profiler.h              — RAII 计时
+//   render/pipeline/renderer.h      — Renderer::rasterTriangle（单线程版）
+//
+// 本示例不走 sr::CommandBuffer：分条并行直接用 std::thread，因为每条带
+// 写的是同一帧缓冲的不相交区域。
 //
 // 【运行验证】生成 output/stage14_threaded.tga：
 //   屏幕分 N 条水平带，每条带一个线程独立光栅化

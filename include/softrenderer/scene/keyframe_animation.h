@@ -13,8 +13,9 @@
 // + Linear/Step/CubicSpline），两者功能重叠。
 //
 // 保留原因：已作为公共头对外发布，删除属于接口级变更。
-// 新代码请用 glTF 那套；若确认无外部使用者，本头可整体移除。
-// 新增动画能力也应扩展 glTF 那套，不要在这里加功能。
+// 新代码请用 glTF 那套；新增动画能力也应扩展 glTF 那套，不要在这里加功能。
+// 若决定移除，需同步处理三处：删除本头、删除 tests/architecture/
+// namespace_sentinel.cpp 中对应的 include、删除 docs/modules.md 场景表里的条目。
 // ============================================================
 
 namespace sr::keyframe
