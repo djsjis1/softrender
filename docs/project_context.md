@@ -15,10 +15,10 @@ SoftRenderer 是 C++23 教学型 CPU 渲染器，同时作为可被外部工程�
 | --- | --- |
 | Windows 工具链 | VS Build Tools 2022，MSVC 19.44，CMake 3.31.6 |
 | 独立工程 Release | 20 个离屏示例（含 `demo_forward` 统一管线演示）+ 3 个窗口示例 + 1 个练习 + 3 个测试程序 = 27 个默认可执行目标；另有两个可选基准/压测目标（`SR_BUILD_BENCHMARKS=ON`） |
-| 单元测试 | 354 用例 / 76 套件，Release 全通过；Debug（ASAN）350 通过 + 4 跳过（bloom 分段/FloatFramebuffer 默认构造已回归）；另有 `baremetal_smoke`（operator new 熔断下整帧零堆证明，含 ForwardPipeline 稳态阶段，Release+ASAN 双过） |
+| 单元测试 | 355 用例 / 76 套件，Release 全通过；Debug（ASAN）351 通过 + 4 跳过（bloom 分段/FloatFramebuffer 默认构造已回归）；另有 `baremetal_smoke`（operator new 熔断下整帧零堆证明，含 ForwardPipeline 稳态阶段，Release+ASAN 双过） |
 | 集成测试 | 3 场景像素回归通过（PNG 基准图，比较含 alpha）；下游消费工程 2 项通过 |
 | 压测探针 | `renderer_stress` 114 个场景（敌意输入/并发/性能/像素格式，含分条并行 MT 孪生与半分辨率 Bloom）全通过；Release 全量约 10 s、`--quick` 90 个约 2 s；Debug+ASAN `--quick` 干净（1080p 重场景未纳入 ASAN） |
-| 架构门禁 | 逐头独立编译 + 命名空间哨兵（全局声明 60 个同名类型）+ include 白名单 + 循环依赖检查 + 当前态文档的头文件路径与 README 可执行名存在性（本机含 `.qoder/rules` 共 52 处；该目录属本机助手配置、不入库，CI 只校验仓库内文档）+ 裸机头门禁 `sr_freestanding_headers_check`（`-fno-exceptions -fno-rtti` 逐头编译 core/math/render/resource/scene，GCC/Clang，待 CI Linux 首跑） |
+| 架构门禁 | 逐头独立编译 + 命名空间哨兵（全局声明 60 个同名类型）+ include 白名单 + 循环依赖检查 + 当前态文档的头文件路径与 README 可执行名存在性（本机含 `.qoder/rules` 共 52 处；该目录属本机助手配置、不入库，CI 只校验仓库内文档）+ 公共头注释的路径引用存在性（扫 `include/softrenderer/**/*.h` 注释里的 `.h`/`.cpp`，当前只报告不判定失败）+ 裸机头门禁 `sr_freestanding_headers_check`（`-fno-exceptions -fno-rtti` 逐头编译 core/math/render/resource/scene，并在 configure 期扫一遍 `throw` 关键字——`-fno-exceptions` 不拦未实例化的模板成员，GCC/Clang，待 CI Linux 首跑） |
 | 外部消费 | 聚合 / core-only / render-only 三类工程 × `add_subdirectory` 与安装后迁移 `find_package` 均通过；断言安装产物只含公共头 |
 | Debug ASAN | 单元测试与压测探针在 Debug+ASAN 下无断言、无 ASAN 报告（Debug 下四个越界/契约用例按约定 GTEST_SKIP） |
 | Linux/macOS | 远端 CI（8d3952c）**7/7 作业全绿**：Windows/Ubuntu/macOS 构建测试 + coverage + sanitizers + thread-sanitizer + **baremetal**（`SR_NO_EXCEPTIONS` 构建+安装+树校验；`sr_freestanding_headers_check` 随 Linux 构建编译；`baremetal_smoke` 在 Linux ASAN 下亦通过）。三轮修复过程见 changelog |

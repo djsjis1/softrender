@@ -93,10 +93,7 @@
 | `include/softrenderer/runtime/profiler.h` | `sr::Profiler`（Meyers 单例）、`SR_PROFILE_SCOPE` 宏，输出 Chrome Tracing JSON |
 | `include/softrenderer/runtime/resource_cache.h` | `sr::ResourceCache`：弱引用缓存，同一 key 并发首次加载只构建一次（64 分片锁 single-flight）；工厂失败不入缓存 |
 | `benchmarks/support/benchmark.h` | `sr::` 基准测试工具（阶段 5 迁往 benchmarks 支持目录） |
-| `include/softrenderer/runtime/log.h` | `SR_LOG_*` 宏 + `sr_log_init` / `sr_log_shutdown`。双模式条件编译，见 `architecture.md` §6.2 |
-
-> ⚠️ `sr_log_init` / `sr_log_shutdown` 位于**全局命名空间**，而 `LogLevel` / `Log`
-> 在 `namespace sr` 内。这是历史遗留的不一致。
+| `include/softrenderer/runtime/log.h` | `SR_LOG_*` 宏 + `sr::logInit` / `sr::logShutdown`。双模式条件编译，见 `architecture.md` §6.2 |
 
 **扩展点**：新的缓冲类型放本目录，只能依赖 `math/` 与 `core/` 内部。
 日志、线程与资源缓存等宿主设施归 `runtime/`，**禁止**本层依赖 `scene/` 及以上。
@@ -162,7 +159,7 @@ ECS 容器本身来自 EnTT（`third/entt`），`components.h` 只定义组件�
 > （自身 + 命名空间哨兵），`Light` 除定义处外全仓零使用，22 个示例无一使用 ECS。
 >
 > 调用时必须写 `sr::` 前缀：`registry.emplace<sr::Position>(e, Vec3f{...})`。
-> 注意 `Vec3f` 本身仍在全局命名空间（属后续批次）。
+> 数学别名（`Vec2f` / `Vec3f` / `Vec4f` 等）同样已收进 `namespace sr`。
 >
 > 回归防护：`tests/architecture/namespace_sentinel.cpp` 在全局作用域声明 60 个同名类型。
 > 若将来有人加回 `using sr::Position;`，哨兵会直接报重定义错误。

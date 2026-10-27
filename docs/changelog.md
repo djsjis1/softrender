@@ -5,6 +5,59 @@
 > 按 `documentation_rules.md` 要求，每次有意义的变更都必须在此登记。
 > 重大接口变更需同时在变更内容中标注版本号。
 
+## 2026-10-27（深夜·审查整改）
+
+### 审查整改：裸机 throw 破口闭环、冗余清理与两处热路径
+
+**契约（公共接口行为变更）**
+- `sr::MSAAFramebuffer` 非法尺寸（非正、或越过容器上限）由
+  `throw std::invalid_argument / length_error` 改为**退化到 0×0**，与 `DepthBuffer`
+  同口径，`width()`/`height()` 与实际缓冲长度始终一致。破坏性变更：调用方不能再靠
+  catch 区分失败，改为检查 `width() == 0`。用例
+  `MSAACoverage.buffer_invalidDimensionsAndSampleIndices_areRejected` 同步改写。
+- 新增 `MSAAFramebuffer::resolveRow(y, dst, count)`；`resolve()` 改为逐行调用它，
+  平均值公式只剩一处实现。
+
+**门禁**
+- `cmake/targets.cmake` 的裸机头门禁补 throw 文本级扫描：`-fno-exceptions`
+  不会拒绝未被实例化的类模板成员里的 `throw`，此前逐头编译门禁对
+  `core/msaa_framebuffer.h` 失效（该头自 `3a79a1a` 起就带 throw，而 CI 全绿）。
+  剔除顺序为 **字符串字面量 → 行注释 → 块注释**：先剔注释会被字符串里的 `//`
+  吃掉同行后续的真 throw，不剔字符串则 `static_assert` 文案里的 throw 会误报；
+  另补一个前导换行，关掉「throw 位于字符串首位」的起始边界缺口。
+- `tests/architecture/check_doc_paths.cmake` 扫描范围扩到 `include/softrenderer/**/*.h`
+  的注释路径引用（含 `.cpp`）；第一阶段只报告、不判定失败。
+
+**删除与澄清**
+- 删除 `sr::frameArena()`（全仓零调用；`thread_local` + 内部堆依赖使其不适用于裸机），
+  `arena.h` 与 `docs/engineering/26` 改为明确“宿主侧、非零堆方案”的定位。
+- `SR_HAS_SSE2` 改名 `SR_RASTER_SSE2_ENABLED`，并在头注释里登记为公开能力查询宏
+  （不能 undef：否则测试的 `#if` 守卫会静默跳过两条 SIMD 回归用例）。
+- 修正 8 处指向 2.0.0 迁移前位置的头注释/示例注释（`stage9_msaa.cpp`、
+  `core/benchmark.h`、`gltf_loader_impl.cpp`、`test_core.cpp` 等），以及 `modules.md`
+  两处与代码不符的陈述（日志函数所在命名空间、`Vec3f` 归属）。
+- `msaa_renderer.h` 把已无引用的 `math/barycentric.h` 换成它真正直接使用的
+  `math/vec.h`（该冗余 include 早于本轮存在）；`check_doc_paths.cmake` 的头注释
+  扫描现在同时接纳 `.hpp` 与大写路径段（文件 glob 同步补 `*.hpp`），第三方头目录
+  （entt/nlohmann/tinygltf/stb）整体跳过以避免必然误报。
+
+**性能**
+- `fillTriangleGradient` 改用无偏增量边函数求权重：重心坐标从“每像素 2 次叉积 +
+  1 次除法”降为一次倒数复用，且只在覆盖判定成立后计算（原实现连未覆盖像素也算）。
+- `MSAAFlatRenderer::resolveTo` 改按行直写 `resolveRow`：去掉每帧 `W×H×4` 的临时
+  `vector<Color>`（1080p 约 8 MB）与逐像素 `setPixel` 边界检查。
+
+- 验证：单测 **355 用例 / 76 套件**，Release 全绿、Debug+ASAN **351 通过 + 4 跳过**
+  （与既有基线一致，无 ASAN 报告）；像素回归 3/3；`baremetal_smoke` 通过；架构门禁
+  4/4（含扩展后的 doc_paths 与两个 consumer 工程）；压测 **114/114**，其中 msaa 6/6
+  对旧基线无回归；`stage04_triangle` / `stage11_msaa` 实跑出图正常。
+- 新增 `RasterCoverage.fillTriangleGradient_vertexColorsLandAtTheirCorners`：断言三个
+  顶点邻域的主色通道，锁死 E0→v2 / E1→v0 / E2→v1 的权重映射。已做**变异验证**
+  （故意把权重写反，用例精确红在 v0/v2 两条断言上），确认不是空断言。
+- 未验证：本机为 MSVC，`sr_freestanding_headers_check` 与其 throw 扫描只在 GCC/Clang
+  生成（扫描逻辑已用一次性脚本对 59 个子集头做正/负向对照验证，脚本已删）；真实
+  门禁行为待 CI Linux 作业首跑。
+
 ## 2026-10-27（夜）
 
 ### 审查后修复：阴影图指针失效、零堆声明对齐、哑目标降为 Gray8、分条拷贝去串行
