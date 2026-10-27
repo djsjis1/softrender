@@ -45,6 +45,7 @@
 | `rect.h` | `Rect2<T>`（`Rectf` / `Recti`）：`contains` / `intersects` / `intersection` / `merged` / `center` | 构造签名为 `(x, y, w, h)` |
 | `transform.h` | `namespace transform`：`lookAt` / `perspective` / `ortho` / `viewport` | **仅 3D**，只依赖 `mat4.h` |
 | `transform2d.h` | `namespace transform`：`ortho2D` / `viewport2D`（返回 `Mat3`） | 独立成头，避免 3D 依赖面被 2D 污染 |
+| `frustum.h` | `Frustum`：`fromMVP` / `intersectsAabb` | 视锥剔除；半空间约定与 `render/pipeline/clip.h` 一致（近平面 `z+w>=0`） |
 
 **坐标约定（全局统一，不可更改）**：右手系，y 向上，`Framebuffer` 的 `(0,0)` 在左下角。
 

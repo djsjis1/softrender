@@ -5,6 +5,42 @@
 > 按 `documentation_rules.md` 要求，每次有意义的变更都必须在此登记。
 > 重大接口变更需同时在变更内容中标注版本号。
 
+## 2026-10-27（结构改进：IO 契约、early-z 门禁、视锥剔除、主循环收敛）
+
+### 四项结构性改进
+
+**契约（向后兼容的接口扩展）**
+- `sr::io` 的加载/写出统一为「`bool` 返回 + 可选 `std::string* error`」：
+  `loadImage` / `readTga` / `writeTga` / `writeImage` / `writeHDR` / `loadObjMesh` 全部支持
+  错误文本出口——失败时写入含路径与具体分支的可读原因，成功时清空；默认参数保证源码兼容。
+  此前同一命名空间内并存三套风格（结构化结果 / bool+可选文本 / 纯 bool），部分路径失败后
+  调用方根本不知道原因。
+
+**验证（把已有性质变成门禁）**
+- 深度预 pass **不是新增功能而是已具备**：`Renderer::rasterTriangle` 的深度测试位于
+  `interpolateVaryings` 与 `shader.fragment` 之前，被遮挡像素根本不会进入片元着色。
+  再加一遍「只写深度」的 pass 只会让顶点与覆盖成本翻倍。改为用用例
+  `RasterCoverage.drawMesh_occludedPixels_neverEnterFragmentShader` 锁住：
+  近平面铺满 64 次调用、远平面必须 0 次。
+
+**能力（视锥剔除）**
+- 新增 `math/frustum.h`：`Frustum::fromMVP(mvp)` + `intersectsAabb(min, max)`，
+  半空间约定与 `clip.h` 一致（近平面 `z + w >= 0`）；NaN 输入归到“不在外侧”，
+  剔除器不会成为掩盖坏数据的环节。
+- `Mesh` 新增惰性缓存的局部 AABB（`bounds()` / `invalidateBounds()`）。
+- `ForwardPipeline` 新增 `frustumCull`（默认开）与 `culledDraws()`；`ForwardDraw` 新增
+  `model`（判定矩阵 = viewProj * model）。保守剔除：只剔「整块肯定看不见」的。
+
+**去重（光栅主循环）**
+- `coverage.h` 新增 `barycentricFromValues()` 与 `forEachCoveredPixel()`；
+  `Renderer::rasterTriangle` 与 `MSAAFlatRenderer::rasterizeTriangle` 改为共用同一套
+  循环骨架与同一份权重映射（E0→v2 / E1→v0 / E2→v1），渐变三角形也改用同一映射。
+  行指针仍在 `onRow` 里按行取一次，热路径没有新增间接。
+
+- 验证：单测 **358 用例 / 77 套件**（Release 全绿；Debug+ASAN 354 通过 + 4 跳过）；
+  像素回归 3/3；`baremetal_smoke` 通过；压测 **114/114**，与改动前基线逐场景对比
+  `regressions=0`、总耗时 9.2 s → 9.3 s（噪声内）。
+
 ## 2026-10-27（CI 基础设施）
 
 ### Action 升级到 Node 24 运行时，并固定 Ubuntu runner 版本
