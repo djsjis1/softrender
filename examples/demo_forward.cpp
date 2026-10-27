@@ -84,6 +84,7 @@ int main()
         draw.mesh = &mesh;
         draw.shader = &shader;
         draw.sortCenter = center;
+        draw.model = model;                        // 视锥剔除用（与 shader.model 保持一致）
         draw.lightMVP = pipeline.shadowLightVP * model;
         pipeline.submit(draw);
     };

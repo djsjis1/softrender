@@ -74,6 +74,45 @@ TEST(ForwardPipeline, rendersAllDraws_nearOccludesFar)
     EXPECT_GT(off.b, off.r) << "近球轮廓外应能看到远处的蓝球";
 }
 
+// 视锥剔除：整块在画面外的网格不进入管线，同时绝不允许误剔可见的那块。
+TEST(ForwardPipeline, frustumCulling_skipsOnlyMeshesOutsideView)
+{
+    const int W = 32, H = 32;
+    ForwardPipeline pipeline(W, H);
+    pipeline.view = sr::transform::lookAt({0, 0, 4}, {0, 0, 0}, {0, 1, 0});
+    pipeline.proj = sr::transform::perspective(1.2f, 1.0f, 0.1f, 50.0f);
+    pipeline.cameraPos = {0, 0, 4};
+
+    Mesh ball = sr::meshgen::sphere(0.5f, 12, 8);
+    FlatShader insideShader, outsideShader;
+    makeUnlit(insideShader, {1, 0, 0});
+    makeUnlit(outsideShader, {0, 0, 1});
+    insideShader.mvp = pipeline.proj * pipeline.view;
+    outsideShader.mvp = pipeline.proj * pipeline.view * Mat4::translate(1000, 0, 0);
+
+    ForwardDraw inside;
+    inside.mesh = &ball;
+    inside.shader = &insideShader;
+
+    ForwardDraw outside = inside; // 同一块网格，只是挪到视锥外 1000 米
+    outside.shader = &outsideShader;
+    outside.model = Mat4::translate(1000, 0, 0);
+
+    pipeline.submit(inside);
+    pipeline.submit(outside);
+
+    Framebuffer fb(W, H);
+    pipeline.render(fb);
+
+    EXPECT_EQ(pipeline.culledDraws(), 1) << "只应剔除挪到视锥外的那一块";
+    EXPECT_GT(fb.getPixel(W / 2, H / 2).r, 150) << "可见的那块仍必须画出来";
+
+    // 关掉开关：一块都不剔（剔除是优化，不能成为默认行为里不可关闭的硬约定）
+    pipeline.frustumCull = false;
+    pipeline.render(fb);
+    EXPECT_EQ(pipeline.culledDraws(), 0);
+}
+
 TEST(ForwardPipeline, shadowPassProducesDepthAndCount)
 {
     const int W = 32, H = 32;

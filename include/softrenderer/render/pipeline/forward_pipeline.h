@@ -7,6 +7,7 @@
 
 #include "softrenderer/core/framebuffer.h"
 #include "softrenderer/core/pixel_format.h"
+#include "softrenderer/math/frustum.h"
 #include "softrenderer/render/pipeline/render_queue.h"
 #include "softrenderer/render/pipeline/renderer.h"
 #include "softrenderer/render/pipeline/shadow_pass.h"
@@ -43,6 +44,11 @@ struct ForwardDraw
     RenderLayer layer = RenderLayer::Opaque;
     int materialId = 0;         // 同材质相邻绘制（减少状态切换的排序次级键）
     Vec3f sortCenter{0, 0, 0};  // 包围球中心（世界空间），供排序距离用
+    // 模型的局部→世界变换。仅用于视锥剔除：判定矩阵为 viewProj * model。
+    // ⚠ 若顶点已被预先变换到世界空间，保持单位阵即可（此时 mesh 包围盒就是世界包围盒）。
+    // 若你把变换写进了 shader.model 却没有同步到这里，剔除会拿未变换的范围去判——
+    // 想避开这个隐患就把 frustumCull 关掉。
+    Mat4 model = Mat4::identity();
     // 阴影启用时作为投射物：mvp = lightProj * lightView * model（完整链）。
     // 与主 pass 的 mvp（proj*view*model）是两条独立矩阵链。
     Mat4 lightMVP = Mat4::identity();
@@ -89,6 +95,15 @@ class ForwardPipeline
     Vec3f cameraPos{0, 0, 3};
     Color clearColor{20, 30, 40};
     bool cullBackface = true;
+
+    // ---- 视锥剔除 ----
+    // 整块包围盒都在画面外的网格不再进入管线（顶点着色、裁剪、光栅化全跳过）。
+    // 判定矩阵用本帧的 view*proj 乘 draw.shader->model，不读 shader.mvp：
+    // 门面自己持有 view/proj，不依赖调用方有没有把 mvp 写对。
+    // 保守实现：只剔“整块肯定看不见”的，斜放的长条物体可能漏剔（只是慢一点）。
+    bool frustumCull = true;
+    // 上一帧被剔除的 draw 数，供测试与统计使用。
+    int culledDraws() const { return lastCulled_; }
 
     // ---- 阴影（可选）----
     bool shadowEnabled = false;
@@ -146,12 +161,20 @@ class ForwardPipeline
         buildQueue();
         queue_.sort(cameraPos, positions_);
 
-        // 3. 主 pass：按排序逐项绘制
+        // 3. 主 pass：先视锥剔除，再按排序逐项绘制
+        const Mat4 viewProj = proj * view;
+        lastCulled_ = 0;
         for (const DrawItem& item : queue_.items())
         {
             const ForwardDraw& draw = draws_[size_t(item.objectIndex)];
-            if (draw.mesh && draw.shader)
-                mainRenderer_->drawMesh(fb, *draw.mesh, *draw.shader);
+            if (!draw.mesh || !draw.shader)
+                continue;
+            if (frustumCull && !isMeshVisible(draw, viewProj))
+            {
+                ++lastCulled_;
+                continue;
+            }
+            mainRenderer_->drawMesh(fb, *draw.mesh, *draw.shader);
         }
 
         // 4. 后处理链
@@ -160,6 +183,17 @@ class ForwardPipeline
     }
 
    private:
+    // 整块网格是否可能可见。空网格（没有顶点）一律放行，交给 drawMesh 自己处理。
+    // 判定矩阵取 viewProj * draw.model，不读 shader 里的 matrix：
+    // 基类 Shader 刻意不带 uniform（见 pipeline/shader.h 的设计说明）。
+    static bool isMeshVisible(const ForwardDraw& draw, const Mat4& viewProj)
+    {
+        const Mesh::Bounds& b = draw.mesh->bounds();
+        if (b.empty)
+            return true;
+        return Frustum::fromMVP(viewProj * draw.model).intersectsAabb(b.min, b.max);
+    }
+
     void buildQueue()
     {
         queue_.clear();
@@ -236,6 +270,7 @@ class ForwardPipeline
     std::vector<Vec3f> positions_;
     std::vector<ShadowCaster> casters_;  // 复用：避免阴影开启时每帧分配
     int lastShadowCasters_ = 0;
+    int lastCulled_ = 0;
     // 阴影图身份版本，供持有 shadowDepth() 指针的一方检测失效
     uint32_t shadowMapVersion_ = 0;
 };

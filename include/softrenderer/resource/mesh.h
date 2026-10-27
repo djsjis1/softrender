@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <cstddef>
 #include <cmath>
 #include <vector>
@@ -23,6 +24,48 @@ struct Mesh
     std::vector<int> indices; // 每 3 个构成一个三角形，逆时针为正面
 
     int triangleCount() const { return int(indices.size()) / 3; }
+
+    // ---- 模型空间轴对齐包围盒（视锥剔除用）----
+    // 惰性计算并缓存：逐帧遍历顶点求 min/max 会把剔除本身变成开销。
+    // vertices 被直接改写后必须调用 invalidateBounds()，否则会拿着过期范围
+    // 做可见性判断——那会把本该画的物体剔掉。
+    struct Bounds
+    {
+        Vec3f min{0, 0, 0};
+        Vec3f max{0, 0, 0};
+        bool empty = true; // 空网格：没有顶点，不构成任何范围
+    };
+
+    const Bounds &bounds() const
+    {
+        if (!boundsReady_)
+        {
+            bounds_ = Bounds{};
+            for (const Vertex &v : vertices)
+            {
+                if (bounds_.empty)
+                {
+                    bounds_.min = bounds_.max = v.position;
+                    bounds_.empty = false;
+                    continue;
+                }
+                bounds_.min.x = std::min(bounds_.min.x, v.position.x);
+                bounds_.min.y = std::min(bounds_.min.y, v.position.y);
+                bounds_.min.z = std::min(bounds_.min.z, v.position.z);
+                bounds_.max.x = std::max(bounds_.max.x, v.position.x);
+                bounds_.max.y = std::max(bounds_.max.y, v.position.y);
+                bounds_.max.z = std::max(bounds_.max.z, v.position.z);
+            }
+            boundsReady_ = true;
+        }
+        return bounds_;
+    }
+
+    void invalidateBounds() { boundsReady_ = false; }
+
+  private:
+    mutable Bounds bounds_{};
+    mutable bool boundsReady_ = false;
 };
 
 // ============================================================
