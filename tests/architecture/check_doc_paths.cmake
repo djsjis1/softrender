@@ -85,6 +85,68 @@ foreach(doc IN LISTS DOC_FILES)
     endforeach()
 endforeach()
 
+# ---- 公共头注释里的路径引用（第一阶段：只报告，不判定失败）----
+# 为什么单独一段：头注释里的「引用方 / 实现位于 xxx.cpp」连续多轮指向 2.0.0
+# 迁移前的位置（stage9_msaa.cpp、core/benchmark.h、gltf_loader_impl.cpp……），
+# 而 include/ 不在上面的 DOC_FILES 里，没有任何机械防线。
+# 头注释里也可能合法提到历史路径，所以先只汇总打印；确认零误报后再把
+# SR_HEADER_MISSES 并入 FAILURES 并删掉这段说明。
+#
+# 头文件本身也要把 .hpp 纳入扫描范围：将来新增的 .hpp 公共头若只扫 *.h，
+# 它的注释就完全无人校验。
+file(GLOB_RECURSE SR_PUBLIC_HEADERS
+    "${SR_SOURCE_DIR}/include/softrenderer/*.h"
+    "${SR_SOURCE_DIR}/include/softrenderer/*.hpp")
+set(SR_HEADER_MISSES "")
+set(SR_HEADER_CHECKED 0)
+foreach(hdr IN LISTS SR_PUBLIC_HEADERS)
+    file(READ "${hdr}" content)
+    # 与文档同口径：至少一个斜杠才算路径（裸文件名无上下文无法判定归属）。
+    # 此处比文档段宽：额外接纳 .hpp 与 .cpp（头注释会写「实现在 src/io/xxx.cpp」），
+    # 路径段允许大写（将来若引入 Vec2f.h 这类名字不会被静默跳过）。
+    # 扩展名后面要求跟非标识符字符，否则 entt/entt.hpp 会被截成 entt/entt.h
+    # 变成假阳性；匹配到的尾随字符随后剥掉。
+    string(REGEX MATCHALL "([A-Za-z_0-9]+/)+[A-Za-z_0-9]+[.](hpp|h|cpp)([^A-Za-z_0-9_]|$)" tokens "${content}")
+    set(seen "")
+    foreach(token IN LISTS tokens)
+        string(REGEX REPLACE "[^A-Za-z_0-9_]+$" "" token "${token}")
+        list(FIND seen "${token}" dup)
+        if(NOT dup EQUAL -1)
+            continue()
+        endif()
+        list(APPEND seen "${token}")
+        # 第三方头目录一律跳过：注释里提到 entt/nlohmann/tinygltf/stb 是在
+        # 说明用法，不是项目内文件，纳入校验只会制造必然误报。
+        if(token MATCHES "^(softrenderer|include|third|path/to|entt|nlohmann|tinygltf|stb)/")
+            continue()
+        endif()
+        math(EXPR SR_HEADER_CHECKED "${SR_HEADER_CHECKED} + 1")
+        set(found FALSE)
+        foreach(base "include/softrenderer" "" "src")
+            if(base STREQUAL "")
+                set(candidate "${SR_SOURCE_DIR}/${token}")
+            else()
+                set(candidate "${SR_SOURCE_DIR}/${base}/${token}")
+            endif()
+            if(EXISTS "${candidate}")
+                set(found TRUE)
+                break()
+            endif()
+        endforeach()
+        if(NOT found)
+            file(RELATIVE_PATH rel "${SR_SOURCE_DIR}" "${hdr}")
+            list(APPEND SR_HEADER_MISSES "${rel}: ${token}")
+        endif()
+    endforeach()
+endforeach()
+if(SR_HEADER_MISSES)
+    string(REPLACE ";" "\n  " sr_header_report "${SR_HEADER_MISSES}")
+    message(STATUS
+        "公共头注释引用了不存在的路径（当前只报告，不判定失败）：\n  ${sr_header_report}")
+else()
+    message(STATUS "Public header path references OK (${SR_HEADER_CHECKED} verified)")
+endif()
+
 # ---- README 可执行名校验 ----
 # 与头路径同类的历史问题：README 引用的示例可执行名（stage4_zbuffer.exe 等）
 # 与实际目标名脱节。目标名的唯一来源是 examples/CMakeLists.txt —— 两种定义

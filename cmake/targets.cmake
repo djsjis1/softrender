@@ -78,6 +78,29 @@ if(SR_IS_TOP_LEVEL AND NOT MSVC AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         "${PROJECT_SOURCE_DIR}/include/softrenderer/render/*.h"
         "${PROJECT_SOURCE_DIR}/include/softrenderer/resource/*.h"
         "${PROJECT_SOURCE_DIR}/include/softrenderer/scene/*.h")
+    # throw 文本级扫描：-fno-exceptions 对「未被实例化的类模板成员函数」不会
+    # 报错（core/msaa_framebuffer.h 的尺寸校验函数曾因此穿过逐头编译门禁），
+    # 所以对同一子集再做一次源码扫描。
+    #
+    # 剔除顺序必须是 字符串 → 行注释 → 块注释：
+    #   不剔字符串，static_assert(x, "... throw ...") 这类断言文案会误报；
+    #   反过来先剔注释，字符串里的 //（如 URL）会被当成注释截掉，同一行
+    #   后面的真 throw 就漏了。字符串转义序列不展开，对公共头足够。
+    foreach(header IN LISTS SR_FREESTANDING_HEADERS)
+        file(READ "${PROJECT_SOURCE_DIR}/include/${header}" sr_header_content)
+        string(REGEX REPLACE "\"([^\"\\\\]|\\\\.)*\"" "" sr_header_code "${sr_header_content}")
+        string(REGEX REPLACE "//[^\n]*" "" sr_header_code "${sr_header_code}")
+        string(REGEX REPLACE "/\\*([^*]|\\*[^/])*\\*/" "" sr_header_code "${sr_header_code}")
+        # 补一个前导换行：前缀类 [^A-Za-z_0-9] 需要 throw 前面有字符，
+        # 否则位于字符串首位的 throw 会漏判。
+        set(sr_header_code "\n${sr_header_code}")
+        if(sr_header_code MATCHES "[^A-Za-z_0-9]throw[^A-Za-z_0-9]")
+            message(FATAL_ERROR
+                "裸机子集的公共头不得出现 throw：include/${header}"
+                "（该头以 -fno-exceptions 编译，throw 在无异常环境下无定义行为）")
+        endif()
+    endforeach()
+
     set(SR_FREESTANDING_TUS "")
     foreach(header IN LISTS SR_FREESTANDING_HEADERS)
         string(MAKE_C_IDENTIFIER "${header}" header_id)
