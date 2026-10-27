@@ -3,7 +3,6 @@
 #include <algorithm>
 
 #include "softrenderer/core/framebuffer.h"
-#include "softrenderer/math/barycentric.h"
 #include "softrenderer/math/vec.h"
 #include "softrenderer/render/raster/coverage.h"
 
@@ -17,6 +16,9 @@
 //     attr(p) = α*attr0 + β*attr1 + γ*attr2
 // 平滑插值到三角形内部。重心坐标本身是纯数学（见 math/barycentric.h），
 // 本文件只负责"哪些像素被覆盖"这个光栅化问题。
+//
+// 实现上，插值用的权重直接复用边函数的整数值：三边无偏值之和恒等于
+// 三角形面积，除以它即得重心坐标，不必逐像素再算一遍叉积。
 //
 // 【边界】本文件只做光栅化，不依赖 2D 图元模块。线框三角形属于
 // 2D 绘制能力，放在 render/draw2d/shape2d.h 的 sr::draw2d::wireTriangle。
@@ -72,22 +74,29 @@ void fillTriangleGradient(FB &fb, Vec2f v0, Vec2f v1, Vec2f v2, Color c0, Color 
         return;
     const int minX = bounds.minX, maxX = bounds.maxX, minY = bounds.minY, maxY = bounds.maxY;
     auto coverageRow = coverage->atPixel(minX, minY);
+    // 三边无偏边函数值之和恒等于三角形面积（量化单位），逐像素不变，只求一次倒数。
+    // 分母取无偏面积：coverage 的 top-left 偏置只服务于覆盖归属，不参与归一化。
+    const double invArea = 1.0 / double(coverage->area());
 
     for (int y = minY; y <= maxY; ++y)
     {
         auto coveragePixel = coverageRow;
         for (int x = minX; x <= maxX; ++x)
         {
-            Vec3f bc = sr::barycentric(v0, v1, v2, {x + 0.5f, y + 0.5f});
-            const bool covered = sr::TriangleCoverage::contains(coveragePixel);
+            if (sr::TriangleCoverage::contains(coveragePixel))
+            {
+                // 边函数值与权重的对应：E0 → v2、E1 → v0、E2 → v1（同 coverage.h）。
+                // 用扣除 top-left 偏置的值算权重，否则偏置会被换算进颜色。
+                const auto raw = coverage->unbiased(coveragePixel);
+                const Vec3f bc{float(double(raw[1]) * invArea), float(double(raw[2]) * invArea),
+                               float(double(raw[0]) * invArea)};
+                // attr(p) = α*attr0 + β*attr1 + γ*attr2 —— 对颜色的三路混合
+                Color c(uint8_t(std::clamp(bc.x * c0.r + bc.y * c1.r + bc.z * c2.r, 0.0f, 255.0f)),
+                        uint8_t(std::clamp(bc.x * c0.g + bc.y * c1.g + bc.z * c2.g, 0.0f, 255.0f)),
+                        uint8_t(std::clamp(bc.x * c0.b + bc.y * c1.b + bc.z * c2.b, 0.0f, 255.0f)));
+                fb.setPixel(x, y, c);
+            }
             coverage->advanceX(coveragePixel);
-            if (!covered)
-                continue;
-            // attr(p) = α*attr0 + β*attr1 + γ*attr2 —— 对颜色的三路混合
-            Color c(uint8_t(std::clamp(bc.x * c0.r + bc.y * c1.r + bc.z * c2.r, 0.0f, 255.0f)),
-                    uint8_t(std::clamp(bc.x * c0.g + bc.y * c1.g + bc.z * c2.g, 0.0f, 255.0f)),
-                    uint8_t(std::clamp(bc.x * c0.b + bc.y * c1.b + bc.z * c2.b, 0.0f, 255.0f)));
-            fb.setPixel(x, y, c);
         }
         coverage->advanceY(coverageRow);
     }

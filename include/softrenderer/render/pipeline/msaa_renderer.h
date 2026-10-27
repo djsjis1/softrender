@@ -3,13 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <vector>
 
 #include "softrenderer/core/framebuffer.h"
 #include "softrenderer/core/msaa_framebuffer.h"
 #include "softrenderer/render/raster/coverage.h"
 #include "softrenderer/render/raster/triangle.h"
-#include "softrenderer/math/barycentric.h"
+#include "softrenderer/math/vec.h"
 
 namespace sr {
 // 常量颜色的教学 MSAA 管线；每个样本的颜色必须与其深度在同一分支提交。
@@ -45,13 +44,14 @@ class MSAAFlatRenderer
         }
         rasterizeTriangle(p0, p1, p2, z0, z1, z2, color);
     }
+    // 按行直写目标帧缓冲：不再分配整帧临时的 vector<Color>（1080p 下约 8 MB/帧），
+    // 也顺手省掉 setPixel 的逐像素边界检查——行列范围已由 min 夹取保证。
     void resolveTo(Framebuffer& destination) const
     {
-        std::vector<Color> pixels;
-        buffer_.resolve(pixels);
-        for (int y = 0; y < std::min(buffer_.height(), destination.height()); ++y)
-            for (int x = 0; x < std::min(buffer_.width(), destination.width()); ++x)
-                destination.setPixel(x, y, pixels[size_t(y) * buffer_.width() + x]);
+        const int rows = std::min(buffer_.height(), destination.height());
+        const int columns = std::min(buffer_.width(), destination.width());
+        for (int y = 0; y < rows; ++y)
+            buffer_.resolveRow(y, destination.row(y), columns);
     }
 
    private:

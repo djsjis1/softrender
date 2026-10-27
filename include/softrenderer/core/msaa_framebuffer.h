@@ -3,9 +3,9 @@
 #include <cstddef>
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <limits>
-#include <stdexcept>
 #include <utility>  // std::pair（kMSAA4Offsets 的元素类型）
 #include <vector>
 
@@ -32,7 +32,12 @@
 // 这是 GPU 硬件常用的模式，对角线边缘覆盖更均匀。
 //
 // 【命名空间】MSAAFramebuffer 与 kMSAA4Offsets 已迁入 namespace sr
-// （ADR-001 第 2 批）。引用方：仅 stage9_msaa.cpp。
+// （ADR-001 第 2 批）。引用方：examples/stage11_msaa.cpp 与
+// tests/unit/coverage_math_test.cpp。
+//
+// 【非法尺寸】统一落到 0×0（与 DepthBuffer 同口径，见 depthbuffer.h），构造
+// **不抛异常**：本头属于 sr_freestanding_headers_check 的裸机子集，以
+// -fno-exceptions -fno-rtti 编译，公共头里任何 throw 都会破坏裸机可用性。
 // ============================================================
 
 namespace sr {
@@ -43,13 +48,7 @@ class MSAAFramebuffer
     static_assert(N > 0 && N <= (std::numeric_limits<int>::max() - N / 2) / 255);
 
    public:
-    MSAAFramebuffer(int width, int height)
-        : width_(width),
-          height_(height),
-          samples_(checkedSize(width, height)),
-          depth_(samples_.size(), DepthBuffer::kFar)
-    {
-    }
+    MSAAFramebuffer(int width, int height) : MSAAFramebuffer(normalizeDimensions(width, height)) {}
 
     int width() const { return width_; }
     int height() const { return height_; }
@@ -115,6 +114,35 @@ class MSAAFramebuffer
         return count;
     }
 
+    // Resolve 单行：把 y 行每个像素的 N 个样本平均后写入 dst[0..count)。
+    //
+    // 拆出行版本是为了让呈现路径（MSAAFlatRenderer::resolveTo）按行直写目标
+    // 帧缓冲，不必先分配一整张 W×H 的临时 vector（1080p 下约 8 MB/帧）。
+    // 平均公式与 resolve() 共用本函数，不会出现两份实现走偏。
+    void resolveRow(int y, Color* dst, int count) const
+    {
+        assert(y >= 0 && y < height_);
+        assert(dst != nullptr || count <= 0);
+        if (y < 0 || y >= height_ || dst == nullptr || count <= 0)
+            return;
+        if (count > width_)
+            count = width_;
+        const Color* src = samples_.data() + size_t(y) * size_t(width_) * N;
+        for (int x = 0; x < count; ++x)
+        {
+            int r = 0, g = 0, b = 0;
+            for (int i = 0; i < N; ++i)
+            {
+                const Color& c = src[size_t(x) * N + i];
+                r += c.r;
+                g += c.g;
+                b += c.b;
+            }
+            // 落盘时的 /N 是四舍五入：与全帧版本逐像素一致的唯一公式。
+            dst[x] = Color(uint8_t((r + N / 2) / N), uint8_t((g + N / 2) / N), uint8_t((b + N / 2) / N));
+        }
+    }
+
     // Resolve：把 N 个样本平均成一个像素颜色，写入 dst。
     // 注意：必须对全部 N 个样本取平均（而不是只对"被覆盖"的样本），
     // 否则背景色会被丢弃，剪影边缘也不会与背景混合——那就退化成
@@ -124,33 +152,38 @@ class MSAAFramebuffer
     {
         dst.resize(size_t(width_) * height_);
         for (int y = 0; y < height_; ++y)
-        {
-            for (int x = 0; x < width_; ++x)
-            {
-                int r = 0, g = 0, b = 0;
-                for (int i = 0; i < N; ++i)
-                {
-                    const Color& c = samples_[(size_t(y) * width_ + x) * N + i];
-                    r += c.r;
-                    g += c.g;
-                    b += c.b;
-                }
-                dst[size_t(y) * width_ + x] =
-                    Color(uint8_t((r + N / 2) / N), uint8_t((g + N / 2) / N), uint8_t((b + N / 2) / N));
-            }
-        }
+            resolveRow(y, dst.data() + size_t(y) * size_t(width_), width_);
     }
 
    private:
-    static size_t checkedSize(int width, int height)
+    struct Dimensions
+    {
+        int width;
+        int height;
+    };
+
+    // 非法尺寸统一归一化为 0×0：任一边非正，或 width*height*N 会越过容器的
+    // max_size()。两条路径都返回 {0,0}，不留「width() 返回 INT_MAX 但缓冲为空」
+    // 的半有效状态 —— DepthBuffer 的构造器注释记录了同样的取舍。
+    static Dimensions normalizeDimensions(int width, int height)
     {
         if (width <= 0 || height <= 0)
-            throw std::invalid_argument("MSAA dimensions must be positive");
+            return {0, 0};
         const size_t limit = std::min(std::vector<Color>().max_size(), std::vector<float>().max_size());
         if (size_t(width) > limit / size_t(height) / N)
-            throw std::length_error("MSAA buffer is too large");
-        return size_t(width) * size_t(height) * N;
+            return {0, 0};
+        return {width, height};
     }
+
+    // 接收已归一化的尺寸：width()/height() 与实际缓冲长度始终一致。
+    explicit MSAAFramebuffer(Dimensions dims)
+        : width_(dims.width),
+          height_(dims.height),
+          samples_(size_t(dims.width) * size_t(dims.height) * N),
+          depth_(samples_.size(), DepthBuffer::kFar)
+    {
+    }
+
     int width_, height_;
     std::vector<Color> samples_;
     std::vector<float> depth_;

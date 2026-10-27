@@ -139,11 +139,41 @@ TEST(RasterCoverage, fillTriangle_invalidAndSmallerDepth_doesNotWriteOutside)
     }
     EXPECT_EQ(fb.getPixel(0, 0).r, 255);
 }
+// 三个互异的顶点色。断言的是「顶点邻域的主色通道」而不是精确插值值：
+// 它对边函数值与权重的对应关系（E0→v2、E1→v0、E2→v1）写反最敏感，
+// 又不依赖浮点细节。原来的用例只比较 8888 与 565 两种格式彼此一致，
+// 映射写反时两边一起错，仍然全绿。
+TEST(RasterCoverage, fillTriangleGradient_vertexColorsLandAtTheirCorners)
+{
+    Framebuffer fb(64, 64);
+    const Vec2f a{8.0f, 8.0f}, b{56.0f, 8.0f}, c{32.0f, 56.0f};
+    const Color ca(250, 10, 10), cb(10, 250, 10), cc(10, 10, 250);
+    fillTriangleGradient(fb, a, b, c, ca, cb, cc);
+
+    // 0 = 红主色，1 = 绿主色，2 = 蓝主色。
+    const auto dominantChannel = [](Color color) {
+        if (color.r > color.g && color.r > color.b)
+            return 0;
+        return color.g > color.b ? 1 : 2;
+    };
+
+    EXPECT_EQ(dominantChannel(fb.getPixel(9, 10)), 0) << "靠 v0 的像素应以 c0 为主";
+    EXPECT_EQ(dominantChannel(fb.getPixel(54, 10)), 1) << "靠 v1 的像素应以 c1 为主";
+    EXPECT_EQ(dominantChannel(fb.getPixel(32, 51)), 2) << "靠 v2 的像素应以 c2 为主";
+}
 TEST(MSAACoverage, buffer_invalidDimensionsAndSampleIndices_areRejected)
 {
-    EXPECT_THROW((MSAAFramebuffer<4>(-1, 1)), std::invalid_argument);
-    EXPECT_THROW((MSAAFramebuffer<4>(0, 1)), std::invalid_argument);
-    EXPECT_THROW((MSAAFramebuffer<4>(INT_MAX, INT_MAX)), std::length_error);
+    // 非法尺寸统一退化为 0×0（与 DepthBuffer 同口径），构造不抛异常：
+    // 本头属裸机子集，公共头里不允许出现 throw。
+    const MSAAFramebuffer<4> negative(-1, 1);
+    EXPECT_EQ(negative.width(), 0);
+    EXPECT_EQ(negative.height(), 0);
+    const MSAAFramebuffer<4> zeroHeight(0, 1);
+    EXPECT_EQ(zeroHeight.width(), 0);
+    EXPECT_EQ(zeroHeight.height(), 0);
+    const MSAAFramebuffer<4> overlarge(INT_MAX, INT_MAX);
+    EXPECT_EQ(overlarge.width(), 0);
+    EXPECT_EQ(overlarge.height(), 0);
     MSAAFramebuffer<4> buffer(1, 1);
     buffer.clear(sr::colors::black);
     EXPECT_FALSE(buffer.testDepth(0, 0, -1, 0.1f));
