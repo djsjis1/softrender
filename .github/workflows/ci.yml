@@ -297,6 +297,30 @@ jobs:
           genhtml coverage-src.info --output-directory coverage-report \
                   --ignore-errors negative,mismatch,unused,empty,inconsistent,source
 
+      - name: Enforce coverage floor
+        # 目前只有“能采集”没有“不得下降”。这里补一道下限门禁：
+        # 取**下限**而不是严格棘轮 —— 覆盖上升不自动收紧阈值，避免为了凑数字
+        # 写无意义的测试。实测基线 87.8% 行 / 96.6% 函数（本轮 CI 的 coverage 日志），
+        # 下限各留的 2~3 个点余量用来吸收编译器/lcov 版本差异。
+        #
+        # 解析失败必须报错：静默通过就是又一道“假绿”门禁。
+        run: |
+          lcov --summary coverage-src.info --ignore-errors negative,mismatch,unused,empty 2>&1 | tee cov-summary.txt
+          LINE=$(sed -n 's/^[[:space:]]*lines[.]*:[[:space:]]*\([0-9.]*\)%.*/\1/p' cov-summary.txt | head -1)
+          FUNC=$(sed -n 's/^[[:space:]]*functions[.]*:[[:space:]]*\([0-9.]*\)%.*/\1/p' cov-summary.txt | head -1)
+          if [ -z "$LINE" ] || [ -z "$FUNC" ]; then
+            echo "::error::无法从 lcov 摘要解析覆盖率，门禁不能静默通过"
+            cat cov-summary.txt
+            exit 1
+          fi
+          echo "行覆盖 ${LINE}% / 函数覆盖 ${FUNC}%"
+          awk -v l="$LINE" -v f="$FUNC" 'BEGIN {
+            bad = 0
+            if (l + 0 < 85.0) { printf "::error::行覆盖率 %s%% 低于下限 85%%\n", l; bad = 1 }
+            if (f + 0 < 95.0) { printf "::error::函数覆盖率 %s%% 低于下限 95%%\n", f; bad = 1 }
+            exit bad
+          }'
+
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v6
