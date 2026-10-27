@@ -147,4 +147,45 @@ class TriangleCoverage
     int64_t area_ = 0;
     int64_t minX_ = 0, maxX_ = 0, minY_ = 0, maxY_ = 0;
 };
+
+// ============================================================
+// 两个公共件：所有“基于覆盖三角形的逐像素循环”都该走这里
+//
+// 【为何要抽出来】Renderer（着色管线）与 MSAAFlatRenderer（多样本）原本各写
+// 一套主循环，两套里的权重映射（E0→v2 / E1→v0 / E2→v1）也各算一遍。
+// 这种重复的危险不在代码量，而在“改一处忘另一处”：覆盖规则或权重映射只要
+// 两边不一致，就会出现“普通渲染对、开 MSAA 不对”这种很难查的现象。
+//
+// 【性能】两个回调都是模板参数，会在调用点内联展开；onRow 专供调用方
+// 在行首缓存行指针（不必逐像素重算 row(y)），所以热路径上没有额外间接。
+// ============================================================
+
+// 边函数值 → 重心坐标。三处调用点共用同一份映射，避免各写一遍、各错一次。
+inline Vec3f barycentricFromValues(const TriangleCoverage &coverage, const TriangleCoverage::Values &values,
+                                   double invArea)
+{
+    const TriangleCoverage::Values raw = coverage.unbiased(values);
+    return {float(double(raw[1]) * invArea), float(double(raw[2]) * invArea), float(double(raw[0]) * invArea)};
+}
+
+// 遍历包围盒内每个像素：onRow(y) 在每行开头调用一次，onPixel(x, y, values) 逐像素调用。
+// 调用方负责先自行判定 bounds 是否为空。
+template <class OnRow, class OnPixel>
+inline void forEachCoveredPixel(const TriangleCoverage &coverage, const RasterBounds &bounds, OnRow &&onRow,
+                                OnPixel &&onPixel)
+{
+    auto coverageRow = coverage.atPixel(bounds.minX, bounds.minY);
+    for (int y = bounds.minY; y <= bounds.maxY; ++y)
+    {
+        onRow(y);
+        auto values = coverageRow;
+        for (int x = bounds.minX; x <= bounds.maxX; ++x)
+        {
+            onPixel(x, y, values);
+            coverage.advanceX(values);
+        }
+        coverage.advanceY(coverageRow);
+    }
+}
+
 }  // namespace sr

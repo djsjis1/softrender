@@ -192,45 +192,36 @@ class Renderer
         // E2 = edge(v2->v0) 对应 v1 的权重
         // 三边无偏边函数值之和恒等于三角形面积（量化单位），逐像素不变，故只求一次倒数。
         // 分母取无偏面积：coverage 的偏置只服务于覆盖归属，不参与归一化。
-        auto coverageRow = coverage->atPixel(bounds.minX, bounds.minY);
         const double invArea = 1.0 / double(coverage->area());
 
-        for (int y = bounds.minY; y <= bounds.maxY; ++y)
-        {
-            // 行指针快速路径：包围盒已在屏幕内，免去逐像素边界检查
-            float* zRow = zbuf_.row(y);
-            Pixel* pixRow = fb.row(y);
-
-            auto coveragePixel = coverageRow;
-            for (int x = bounds.minX; x <= bounds.maxX; ++x)
-            {
-                if (sr::TriangleCoverage::contains(coveragePixel))
+        // 主循环骨架与 MSAA 路径共用 sr::forEachCoveredPixel；行指针在行首取一次，
+        // 包围盒已在屏幕内，逐像素免去边界检查。
+        float* zRow = nullptr;
+        Pixel* pixRow = nullptr;
+        sr::forEachCoveredPixel(
+            *coverage, bounds,
+            [&](int y) {
+                zRow = zbuf_.row(y);
+                pixRow = fb.row(y);
+            },
+            [&](int x, int, const sr::TriangleCoverage::Values& coveragePixel) {
+                if (!sr::TriangleCoverage::contains(coveragePixel))
+                    return;
+                // 7. 深度测试（行内直访）
+                const Vec3f bc = sr::barycentricFromValues(*coverage, coveragePixel, invArea);
+                const float z = bc.x * s0.z + bc.y * s1.z + bc.z * s2.z;
+                if (!(z < zRow[x]))
+                    return;
+                // 8. 透视校正插值 + 片元着色
+                Varyings frag = interpolateVaryings(a.var, b.var, c.var, bc, iw0, iw1, iw2);
+                Vec3f color;
+                // 仅在片元被接受时提交颜色与深度：被 discard 的片元不得占据深度
+                if (shader.fragment(frag, color))
                 {
-                    // 从整数边函数值算重心坐标；用 double 相乘避免大三角形丢精度。
-                    // 先扣除 top-left 偏置：覆盖判定需要它，深度/UV 插值不能要它。
-                    const auto raw = coverage->unbiased(coveragePixel);
-                    Vec3f bc{float(double(raw[1]) * invArea), float(double(raw[2]) * invArea),
-                             float(double(raw[0]) * invArea)};
-
-                    // 7. 深度测试（行内直访）
-                    const float z = bc.x * s0.z + bc.y * s1.z + bc.z * s2.z;
-                    if (z < zRow[x])
-                    {
-                        // 8. 透视校正插值 + 片元着色
-                        Varyings frag = interpolateVaryings(a.var, b.var, c.var, bc, iw0, iw1, iw2);
-                        Vec3f color;
-                        // 仅在片元被接受时提交颜色与深度：被 discard 的片元不得占据深度
-                        if (shader.fragment(frag, color))
-                        {
-                            zRow[x] = z;
-                            pixRow[x] = Pixel::fromFloat(color.x, color.y, color.z);
-                        }
-                    }
+                    zRow[x] = z;
+                    pixRow[x] = Pixel::fromFloat(color.x, color.y, color.z);
                 }
-                coverage->advanceX(coveragePixel);
-            }
-            coverage->advanceY(coverageRow);
-        }
+            });
     }
 
     // 顶点缓存：一次 drawMesh 内，同一索引的顶点只着色一次。

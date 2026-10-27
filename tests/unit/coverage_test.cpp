@@ -43,6 +43,44 @@ TEST(RasterCoverage, drawMesh_sharedDiagonal_invokesExactlyOncePerPixel)
         EXPECT_EQ(shader.calls, 64);
     }
 }
+
+// “有没有 early-z”这件事不能靠读注释相信，得能宕住。
+// 这里的判据是：先画一个近的铺满屏，再画一个远的铺满屏——
+// 后者的每个像素都被深度挡掉，片元着色器应该一次都不被调用。
+// 若未来有人把深度写提到着色之后（或把深度测试挪到循环外），这条会直接变红。
+namespace {
+struct DepthQuadShader : Shader
+{
+    float z = 0.0f;
+    int calls = 0;
+    explicit DepthQuadShader(float depth) : z(depth) {}
+    Vec4f vertex(const Vertex& v, Varyings& out) override
+    {
+        out.uv = {0, 0};
+        return {v.position.x, v.position.y, z, 1};
+    }
+    bool fragment(const Varyings&, Vec3f& color) override
+    {
+        ++calls;
+        color = {1, 1, 1};
+        return true; // 必须接受，否则深度不会提交，第二条三角形就挡不住了
+    }
+};
+}  // namespace
+TEST(RasterCoverage, drawMesh_occludedPixels_neverEnterFragmentShader)
+{
+    Renderer renderer(8, 8);
+    renderer.cullBackface = false;
+    Framebuffer fb(8, 8);
+
+    DepthQuadShader nearQuad(0.2f);
+    renderer.drawMesh(fb, quad(), nearQuad);
+    EXPECT_EQ(nearQuad.calls, 64) << "近平面应先铺满 8x8";
+
+    DepthQuadShader farQuad(0.8f);
+    renderer.drawMesh(fb, quad(), farQuad);
+    EXPECT_EQ(farQuad.calls, 0) << "被遮挡像素不应进入片元着色器（等价于单遍 early-z）";
+}
 TEST(RasterCoverage, drawMesh_clippedQuad_hasNoInternalCrackOrDoubleHit)
 {
     for (bool reverse : {false, true})

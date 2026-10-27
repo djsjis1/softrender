@@ -86,10 +86,8 @@ void fillTriangleGradient(FB &fb, Vec2f v0, Vec2f v1, Vec2f v2, Color c0, Color 
             if (sr::TriangleCoverage::contains(coveragePixel))
             {
                 // 边函数值与权重的对应：E0 → v2、E1 → v0、E2 → v1（同 coverage.h）。
-                // 用扣除 top-left 偏置的值算权重，否则偏置会被换算进颜色。
-                const auto raw = coverage->unbiased(coveragePixel);
-                const Vec3f bc{float(double(raw[1]) * invArea), float(double(raw[2]) * invArea),
-                               float(double(raw[0]) * invArea)};
+                // 映射本身走共用实现，与渲染管线、MSAA 两条路径永远一致。
+                const Vec3f bc = sr::barycentricFromValues(*coverage, coveragePixel, invArea);
                 // attr(p) = α*attr0 + β*attr1 + γ*attr2 —— 对颜色的三路混合
                 Color c(uint8_t(std::clamp(bc.x * c0.r + bc.y * c1.r + bc.z * c2.r, 0.0f, 255.0f)),
                         uint8_t(std::clamp(bc.x * c0.g + bc.y * c1.g + bc.z * c2.g, 0.0f, 255.0f)),

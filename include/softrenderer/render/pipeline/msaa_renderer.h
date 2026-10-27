@@ -95,12 +95,10 @@ class MSAAFlatRenderer
             }
         }
 
-        auto coverageRow = coverage->atPixel(bounds.minX, bounds.minY);
-        for (int y = bounds.minY; y <= bounds.maxY; ++y)
-        {
-            auto pixelValues = coverageRow;
-            for (int x = bounds.minX; x <= bounds.maxX; ++x)
-            {
+        // 主循环骨架与 Renderer::rasterTriangle 共用 sr::forEachCoveredPixel。
+        forEachCoveredPixel(
+            *coverage, bounds, [](int) {},
+            [&](int x, int y, const Values& pixelValues) {
                 for (int sample = 0; sample < Samples; ++sample)
                 {
                     const Values& delta = sampleDelta[size_t(sample)];
@@ -108,19 +106,13 @@ class MSAAFlatRenderer
                                         pixelValues[2] + delta[2]};
                     if (!TriangleCoverage::contains(values))
                         continue;
-                    const Values raw = coverage->unbiased(values);
-                    // 重心直接从整数边函数得出（double 相乘防大三角形丢精度）
-                    const float w0 = float(double(raw[1]) * invArea);
-                    const float w1 = float(double(raw[2]) * invArea);
-                    const float w2 = float(double(raw[0]) * invArea);
-                    const float z = w0 * z0 + w1 * z1 + w2 * z2;
+                    // 权重映射与着色管线同一份实现（sr::barycentricFromValues）
+                    const Vec3f bc = barycentricFromValues(*coverage, values, invArea);
+                    const float z = bc.x * z0 + bc.y * z1 + bc.z * z2;
                     // 深度测试与颜色写入合并：两者共用样本索引，分开调用会重复边界检查
                     buffer_.testAndWriteSample(x, y, sample, z, color);
                 }
-                coverage->advanceX(pixelValues);
-            }
-            coverage->advanceY(coverageRow);
-        }
+            });
     }
 
     // Sutherland-Hodgman 对像素矩形 [0,width]×[0,height] 裁剪，再三角扇拆分。
