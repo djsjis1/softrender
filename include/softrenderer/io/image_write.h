@@ -18,9 +18,13 @@ namespace sr::io
 
 // 根据扩展名写出图像（未知扩展名默认 PNG）。
 // 内部会把 Framebuffer 自底向上的像素翻转成 stb 需要的自顶向下。
-bool writeImage(const std::string &path, const Framebuffer &fb, int jpgQuality = 90);
+//
+// 【错误文本】error 非空时失败写入一句可读原因（含路径与分派到的格式），
+// 成功则清空；传 nullptr 即可忽略。返回 true = 成功。
+bool writeImage(const std::string &path, const Framebuffer &fb, int jpgQuality = 90,
+                std::string *error = nullptr);
 
 // 写出 HDR 浮点图像（rgbData 为 w*h*3 的 float 数组）。
-bool writeHDR(const std::string &path, const float *rgbData, int w, int h);
+bool writeHDR(const std::string &path, const float *rgbData, int w, int h, std::string *error = nullptr);
 
 } // namespace sr::io

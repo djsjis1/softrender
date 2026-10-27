@@ -12,8 +12,11 @@ namespace sr::io
 
     // 加载任意 stb_image 支持的格式，输出到 sr::Image。
     // 失败返回 false 并记一条 warn 日志（区分「无法解码」与「尺寸非法」）。
-    bool loadImage(const std::string &path, sr::Image &out)
+    bool loadImage(const std::string &path, sr::Image &out, std::string *error)
     {
+        if (error)
+            error->clear();
+
         // 声明即初始化：stbi_load 失败时不保证写入这三个出参，
         // 未初始化的值一旦被后续逻辑读到就是 UB。
         int w = 0, h = 0, channels = 0;
@@ -29,6 +32,8 @@ namespace sr::io
             // 可直接传 std::string —— 内置模式已改为变参模板（sr::formatLog），
             // 不再走 C 可变参，因此没有「非 POD 经 ... 传递」的 UB（旧版会报 C4840）。
             SR_LOG_WARN("imageloader: 无法解码图像 '{}'（文件不存在或格式不支持）", path);
+            if (error)
+                *error = "无法解码图像 '" + path + "'（文件不存在或格式不支持）";
             return false;
         }
 
@@ -41,6 +46,9 @@ namespace sr::io
         {
             SR_LOG_WARN("imageloader: 图像 '{}' 尺寸非法（{}x{}，允许范围 1..{}）",
                         path, w, h, kMaxImageDimension);
+            if (error)
+                *error = "图像 '" + path + "' 尺寸非法（" + std::to_string(w) + "x" + std::to_string(h) +
+                         "，允许范围 1.." + std::to_string(kMaxImageDimension) + "）";
             return false;
         }
 

@@ -19,6 +19,9 @@ namespace sr::io
 
 // 加载 OBJ 文件到 Mesh（自动三角化、按 (v,vt,vn) 去重、缺法线时
 // 计算平滑法线并补切线）。失败返回 false，out 保持不变。
-bool loadObjMesh(const std::string &path, Mesh &out);
+//
+// 【错误文本】error 非空时失败写入一句可读原因（含路径与具体分支，
+// 解析器自身报错时一并带上），成功则清空；传 nullptr 即可忽略。
+bool loadObjMesh(const std::string &path, Mesh &out, std::string *error = nullptr);
 
 } // namespace sr::io

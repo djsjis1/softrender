@@ -199,3 +199,55 @@ TEST(TgaLoader, rle24_decodesBgrToRgbaWithBottomOrigin)
     fs::remove(tmp, ec);
 }
 
+// ============================================================
+// 错误契约：sr::io 的加载/写出函数统一为「bool 返回 + 可选 error 文本」
+//
+// 这条用例是为了让 error 参数不是摆设：它必须真的带上可定位的信息（含路径），
+// 且成功时必须把上一次的旧文本清掉。
+// ============================================================
+TEST(IoErrorContract, failureFillsLocatableReasonAndSuccessClearsIt)
+{
+    namespace fs = std::filesystem;
+    const fs::path tmpDir = fs::temp_directory_path();
+    Framebuffer fb(2, 2, Color(1, 2, 3, 255));
+
+    // 1) 成功路径必须清空上一次遗留的错误文本
+    std::string error = "前一次失败留下的旧文本";
+    const fs::path okPath = tmpDir / "sr_error_contract.tga";
+    if (!sr::io::writeTga(okPath.string(), fb, &error))
+        GTEST_SKIP() << "系统临时目录不可写（权限问题），非被测代码缺陷";
+    EXPECT_TRUE(error.empty()) << error;
+
+    // 2) 写到不存在的子目录：失败，且原因里能定位到具体路径
+    const fs::path badPath = tmpDir / "sr_no_such_dir_98765" / "x.tga";
+    ASSERT_FALSE(sr::io::writeTga(badPath.string(), fb, &error));
+    EXPECT_NE(error.find("sr_no_such_dir_98765"), std::string::npos) << error;
+
+    // 3) 读不存在的文件
+    sr::Image img;
+    ASSERT_FALSE(sr::io::readTga((tmpDir / "sr_missing_54321.tga").string(), img, &error));
+    EXPECT_NE(error.find("sr_missing_54321"), std::string::npos) << error;
+
+    // 4) 解码失败分支：拿纯文本当图像喂进去，理由不能只是“失败”两个字
+    const fs::path textPath = tmpDir / "sr_error_contract.txt";
+    {
+        std::ofstream out(textPath);
+        out << "not an image\n";
+    }
+    ASSERT_FALSE(sr::io::loadImage(textPath.string(), img, &error));
+    EXPECT_NE(error.find("sr_error_contract.txt"), std::string::npos) << error;
+
+    // 5) OBJ 路径不存在
+    Mesh mesh;
+    ASSERT_FALSE(sr::io::loadObjMesh((tmpDir / "sr_missing_54321.obj").string(), mesh, &error));
+    EXPECT_FALSE(error.empty());
+    EXPECT_NE(error.find("sr_missing_54321"), std::string::npos) << error;
+
+    // 6) 传 nullptr 时一切照旧（不能因为多了个参数就要求调用方接住）
+    EXPECT_FALSE(sr::io::loadObjMesh((tmpDir / "sr_missing_54321.obj").string(), mesh));
+
+    std::error_code ec;
+    fs::remove(okPath, ec);
+    fs::remove(textPath, ec);
+}
+

@@ -39,6 +39,9 @@ inline constexpr int32_t kMaxImageDimension = 16384;
 
 // 加载任意 stb_image 支持的格式，输出到 sr::Image。
 // 失败返回 false 并记一条 warn 日志（区分「无法解码」与「尺寸非法」）。
-bool loadImage(const std::string &path, sr::Image &out);
+//
+// 【错误文本】error 非空时，失败写入一句可读原因（含路径与具体分支），
+// 成功则清空；传 nullptr 即可忽略。返回值语义不变（true = 成功）。
+bool loadImage(const std::string &path, sr::Image &out, std::string *error = nullptr);
 
 } // namespace sr::io

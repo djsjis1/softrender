@@ -20,16 +20,19 @@
 //
 // 【分层】本头只声明接口；实现在 src/io/tga.cpp，由 SoftRenderer::io
 // 静态库提供。核心渲染层不需要链接它。
+//
+// 【错误文本】两个函数的 error 参数约定相同：非空时失败写入一句可读原因
+// （含路径与具体分支），成功则清空；传 nullptr 即可忽略。返回 true = 成功。
 // ============================================================
 
 namespace sr::io
 {
 
 // 写出未压缩 24 位 BGR。失败（如路径不可写）返回 false。
-bool writeTga(const std::string &path, const Framebuffer &fb);
+bool writeTga(const std::string &path, const Framebuffer &fb, std::string *error = nullptr);
 
 // 读取未压缩(2)与 RLE(10)、24/32 位的 TGA，统一转为 RGBA、
 // 第 0 行在底部的 sr::Image。格式不符或读取失败返回 false。
-bool readTga(const std::string &path, sr::Image &out);
+bool readTga(const std::string &path, sr::Image &out, std::string *error = nullptr);
 
 } // namespace sr::io

@@ -18,14 +18,21 @@ namespace sr::io {
 //
 // 【失败不改 out】先在局部 Mesh 上构造，全部成功后才移动赋值：失败时调用方
 // 传进来的旧数据保持原样，不会拿到半成品。
-bool loadObjMesh(const std::string& path, Mesh& out)
+bool loadObjMesh(const std::string& path, Mesh& out, std::string* error)
 {
+    if (error)
+        error->clear();
+
     tinyobj::ObjReaderConfig config;
     config.triangulate = true;  // 自动三角化多边形
 
     tinyobj::ObjReader reader;
     if (!reader.ParseFromFile(path, config))
     {
+        // 解析器自带文本时优先转述：它知道是哪一行、哪个 token 出错。
+        if (error)
+            *error = "无法解析 OBJ '" + path + "'：" +
+                     (reader.Error().empty() ? std::string("文件不存在或语法错误") : reader.Error());
         return false;
     }
 
@@ -34,7 +41,11 @@ bool loadObjMesh(const std::string& path, Mesh& out)
 
     // 三个独立数组必须能整除各自的元组大小，否则下面的除法计数不可信。
     if (attrib.vertices.size() % 3 != 0 || attrib.normals.size() % 3 != 0 || attrib.texcoords.size() % 2 != 0)
+    {
+        if (error)
+            *error = "OBJ '" + path + "' 的顶点/法线/UV 数组长度不是元组大小的整数倍（文件已损坏）";
         return false;
+    }
     const int vertexCount = static_cast<int>(attrib.vertices.size() / 3);
     const int normalCount = static_cast<int>(attrib.normals.size() / 3);
     const int texcoordCount = static_cast<int>(attrib.texcoords.size() / 2);
@@ -78,7 +89,11 @@ bool loadObjMesh(const std::string& path, Mesh& out)
 
         // 索引数量不是 3 的倍数时，后续按三角形访问会越界。
         if (mesh.indices.size() % 3 != 0)
+        {
+            if (error)
+                *error = "OBJ '" + path + "' 的 shape '" + shape.name + "' 索引数不是 3 的倍数";
             return false;
+        }
 
         // 逐索引去重后生成顶点
         for (size_t i = 0; i < mesh.indices.size(); ++i)
@@ -88,7 +103,12 @@ bool loadObjMesh(const std::string& path, Mesh& out)
             // 位置索引必需且必须在范围内；法线/UV 索引可为负（未提供）。
             if (idx.vertex_index < 0 || idx.vertex_index >= vertexCount || idx.normal_index >= normalCount ||
                 idx.texcoord_index >= texcoordCount)
+            {
+                if (error)
+                    *error = "OBJ '" + path + "' 索引越界（第 " + std::to_string(i / 3) +
+                             " 个三角形引用了不存在的顶点/UV/法线）";
                 return false;
+            }
 
             IndexKey key{idx.vertex_index, idx.texcoord_index, idx.normal_index};
 
@@ -101,7 +121,11 @@ bool loadObjMesh(const std::string& path, Mesh& out)
 
             // 目标索引是 int：顶点数必须能落在 int 范围内。
             if (loaded.vertices.size() >= size_t(std::numeric_limits<int>::max()))
+            {
+                if (error)
+                    *error = "OBJ '" + path + "' 顶点数超出 int 表示范围";
                 return false;
+            }
 
             Vertex v;
 
@@ -133,7 +157,11 @@ bool loadObjMesh(const std::string& path, Mesh& out)
             if (!std::isfinite(v.position.x) || !std::isfinite(v.position.y) || !std::isfinite(v.position.z) ||
                 !std::isfinite(v.normal.x) || !std::isfinite(v.normal.y) || !std::isfinite(v.normal.z) ||
                 !std::isfinite(v.uv.x) || !std::isfinite(v.uv.y))
+            {
+                if (error)
+                    *error = "OBJ '" + path + "' 含非有限坐标（nan/inf）";
                 return false;
+            }
 
             loaded.vertices.push_back(v);
         }
@@ -162,7 +190,11 @@ bool loadObjMesh(const std::string& path, Mesh& out)
     computeTangents(loaded);  // 法线就绪后统一算切线
 
     if (loaded.vertices.empty())
+    {
+        if (error)
+            *error = "OBJ '" + path + "' 未解析出任何顶点（文件里没有 f 语句？）";
         return false;
+    }
 
     out = std::move(loaded);
     return true;
