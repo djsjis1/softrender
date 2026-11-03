@@ -67,7 +67,7 @@ SoftRenderer 是**教学型软件渲染器**，两条设计约束优先级最高
 
 这两条约束解释了项目中若干看似「不够优化」的选择，详见「六、已知架构权衡」。
 
-覆盖与属性插值分离：`render/raster/coverage.h` 提供确定性的 top-left 子像素覆盖，供基础填充、Renderer、标量/SSE2 与 MSAA 共用；MSAA 示例算法提取到 `render/pipeline/msaa_renderer.h`。设计见 [ADR-003](adr/ADR-003-raster-coverage.md)，实测见[性能基线](engineering/58-覆盖规则与性能基线.md)。
+覆盖与属性插值分离：`render/raster/coverage.h` 提供确定性的 top-left 子像素覆盖，供基础填充、Renderer、标量/SSE2 与 MSAA 共用；MSAA 示例算法提取到 `render/pipeline/msaa_renderer.h`。设计见 [ADR-003](adr/ADR-003-raster-coverage.md)，实测见[性能基线](engineering/15-性能基准框架.md)。
 
 ## 二、分层结构
 
@@ -123,7 +123,7 @@ graph TD
 - 箭头只能自上而下。公共头（`include/softrenderer/`）与 `src/` 中**任何文件都不得**
   `#include <windows.h>` 或引用 Win32 API
 - 正式 include 入口为 `include/softrenderer/`，用法 `<softrenderer/core/framebuffer.h>`；
-  阶段 2~5 迁移期间 `src/` 仍提供尚未迁移的渲染与场景头（详见 [TASK-015](tasks/TASK-015-基础层与公共入口.md)）
+  阶段 2~5 迁移已完成：`src/` 只剩 `io/` 私有实现（如 `gltf_accessor.h`、`gltf_mesh.h`），不再对外暴露（见 [ADR-004](adr/ADR-004-module-boundaries.md)）
 - `platform/` 不属于渲染器本体，只对需要开窗的示例可见
 - 虚线为**条件/局部**依赖：第三方头文件仅在少数几个头文件中出现，且多数受宏保护
 

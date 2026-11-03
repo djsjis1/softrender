@@ -1,7 +1,7 @@
 # 项目上下文
 
 > 当前事实入口，更新于 2026-10-26（裸机支持 + ForwardPipeline 门面落地）。历史任务中的数字与状态只描述当时情况。
-> 架构见 [architecture.md](architecture.md)，当前任务见 [ACTIVE](tasks/ACTIVE.md)。
+> 架构见 [architecture.md](architecture.md)，当前任务见 [tasks.md](tasks.md)。
 
 SoftRenderer 是 C++23 教学型 CPU 渲染器，同时作为可被外部工程复用的渲染库发布（2.0.0）。
 公共头唯一入口是 `include/softrenderer/`，全部符号位于 `sr`；文件加载实现集中在 `src/io/` 的
@@ -18,7 +18,7 @@ SoftRenderer 是 C++23 教学型 CPU 渲染器，同时作为可被外部工程�
 | 单元测试 | 358 用例 / 77 套件，Release 全通过；Debug（ASAN）354 通过 + 4 跳过（bloom 分段/FloatFramebuffer 默认构造已回归）；另有 `baremetal_smoke`（operator new 熔断下整帧零堆证明，含 ForwardPipeline 稳态阶段，Release+ASAN 双过） |
 | 集成测试 | 3 场景像素回归通过（PNG 基准图，比较含 alpha）；下游消费工程 2 项通过 |
 | 压测探针 | `renderer_stress` 114 个场景（敌意输入/并发/性能/像素格式，含分条并行 MT 孪生与半分辨率 Bloom）全通过；Release 全量约 10 s、`--quick` 90 个约 2 s；Debug+ASAN `--quick` 干净（1080p 重场景未纳入 ASAN） |
-| 架构门禁 | 逐头独立编译 + 命名空间哨兵（全局声明 60 个同名类型）+ include 白名单 + 循环依赖检查 + 当前态文档的头文件路径与 README 可执行名存在性（本机含 `.qoder/rules` 共 52 处；该目录属本机助手配置、不入库，CI 只校验仓库内文档）+ 公共头注释的路径引用存在性（扫 `include/softrenderer/**/*.h` 注释里的 `.h`/`.cpp`，当前只报告不判定失败）+ 裸机头门禁 `sr_freestanding_headers_check`（`-fno-exceptions -fno-rtti` 逐头编译 core/math/render/resource/scene，并在 configure 期扫一遍 `throw` 关键字——`-fno-exceptions` 不拦未实例化的模板成员，GCC/Clang，待 CI Linux 首跑） |
+| 架构门禁 | 逐头独立编译 + 命名空间哨兵（全局声明 60 个同名类型）+ include 白名单 + 循环依赖检查 + 当前态文档的头文件路径与 README 可执行名存在性（本机含 `.qoder/rules` 共 52 处；该目录属本机助手配置、不入库，CI 只校验仓库内文档）+ 公共头注释的路径引用存在性（扫 `include/softrenderer/**/*.h` 注释里的 `.h`/`.cpp`，缺失即失败；当前公共头 24 处、文档路径 48 处全部通过）+ 裸机头门禁 `sr_freestanding_headers_check`（`-fno-exceptions -fno-rtti` 逐头编译 core/math/render/resource/scene，并在 configure 期扫一遍 `throw` 关键字——`-fno-exceptions` 不拦未实例化的模板成员，GCC/Clang，待 CI Linux 首跑） |
 | 外部消费 | 聚合 / core-only / render-only 三类工程 × `add_subdirectory` 与安装后迁移 `find_package` 均通过；断言安装产物只含公共头 |
 | Debug ASAN | 单元测试与压测探针在 Debug+ASAN 下无断言、无 ASAN 报告（Debug 下四个越界/契约用例按约定 GTEST_SKIP） |
 | Linux/macOS | 远端 CI（8d3952c）**7/7 作业全绿**：Windows/Ubuntu/macOS 构建测试 + coverage + sanitizers + thread-sanitizer + **baremetal**（`SR_NO_EXCEPTIONS` 构建+安装+树校验；`sr_freestanding_headers_check` 随 Linux 构建编译；`baremetal_smoke` 在 Linux ASAN 下亦通过）。三轮修复过程见 changelog |
@@ -74,4 +74,4 @@ ctest --test-dir build -C Release -L "fast|regression" --output-on-failure
 ctest --test-dir build -C Release --parallel 4 -LE fast --output-on-failure
 ```
 
-工程移动目录后使用新构建目录。构建和安装的完整操作见[使用指南](engineering/46-构建与使用指南.md)。
+工程移动目录后使用新构建目录。构建和安装的完整操作见[使用指南](engineering/04-构建与使用指南.md)。
